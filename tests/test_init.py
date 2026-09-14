@@ -66,6 +66,21 @@ class InitTests(unittest.TestCase):
                 self.assertEqual(path.read_text(), f"user content for {path.name}\n")
             self.assertTrue((root / "sources" / "paperless").is_dir())
 
+    def test_existing_repository_with_different_owner_is_accepted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "knowledge"
+            wiki = root / "wiki"
+            wiki.mkdir(parents=True)
+            subprocess.run(["git", "init", "-q", str(wiki)], check=True)
+
+            self.run_init(root, GIT_TEST_ASSUME_DIFFERENT_OWNER="1")
+
+            head = subprocess.check_output(
+                ["git", "-C", str(wiki), "rev-parse", "--verify", "HEAD"],
+                text=True,
+            ).strip()
+            self.assertTrue(head)
+
     def test_paperless_template_is_conditional(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "knowledge"

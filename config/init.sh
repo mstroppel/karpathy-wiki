@@ -47,6 +47,10 @@ esac
 sources="$KNOWLEDGE_ROOT/sources"
 wiki="$KNOWLEDGE_ROOT/wiki"
 
+wiki_git() {
+  git -c safe.directory="$wiki" -C "$wiki" "$@"
+}
+
 mkdir -p "$sources/nextcloud" \
   "$wiki/assets" \
   "$wiki/sources/nextcloud" \
@@ -177,14 +181,14 @@ install_if_absent "$wiki/log.md" <<'EOF'
 Nur ergänzbares Protokoll von Importen, gespeicherten Abfragen und Prüfungen.
 EOF
 
-if ! git -C "$wiki" rev-parse --git-dir >/dev/null 2>&1; then
-  git -C "$wiki" init --initial-branch=main
+if ! wiki_git rev-parse --git-dir >/dev/null 2>&1; then
+  wiki_git init --initial-branch=main
 fi
 
-git -C "$wiki" config user.name "$GIT_AUTHOR_NAME"
-git -C "$wiki" config user.email "$GIT_AUTHOR_EMAIL"
+wiki_git config user.name "$GIT_AUTHOR_NAME"
+wiki_git config user.email "$GIT_AUTHOR_EMAIL"
 
-if ! git -C "$wiki" rev-parse --verify HEAD >/dev/null 2>&1; then
-  git -C "$wiki" add -A
-  git -c commit.gpgsign=false -C "$wiki" commit -m "chore(wiki): wiki initialisieren"
+if ! wiki_git rev-parse --verify HEAD >/dev/null 2>&1; then
+  wiki_git add -A
+  wiki_git -c commit.gpgsign=false commit -m "chore(wiki): wiki initialisieren"
 fi
