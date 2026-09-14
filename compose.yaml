@@ -2,7 +2,7 @@ name: ${COMPOSE_PROJECT_NAME:-karpathy-wiki}
 
 services:
   init:
-    image: alpine/git:2.52.0
+    image: alpine/git:v2.54.0
     restart: "no"
     entrypoint: ["/bin/sh", "/setup/init.sh"]
     environment:
@@ -208,7 +208,7 @@ services:
       - no-new-privileges:true
 
   raw-files:
-    image: caddy:2.10.2-alpine
+    image: caddy:2.11.4-alpine
     profiles: ["raw-files"]
     restart: unless-stopped
     command: ["caddy", "file-server", "--root", "/srv", "--listen", ":8080"]
