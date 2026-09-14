@@ -1,0 +1,59 @@
+{
+  "people": [
+    {
+      "replacement": "[ICH]",
+      "first_name": "Max",
+      "middle_names": [
+        "Moritz"
+      ],
+      "last_name": "Mustermann",
+      "aliases": [
+        "Max Musterman"
+      ]
+    },
+    {
+      "replacement": "[ANGEHOERIGE_1]",
+      "first_name": "Erika",
+      "middle_names": [],
+      "last_name": "Mustermann",
+      "previous_last_name": "Musterfrau",
+      "aliases": []
+    }
+  ],
+  "addresses": [
+    {
+      "replacement": "[ADRESSE]",
+      "street": "Musterstraße",
+      "house_number": "12",
+      "postal_code": "12345",
+      "city": [
+        "Musterstadt",
+        "Musterort"
+      ],
+      "aliases": []
+    }
+  ],
+  "phones": [
+    {
+      "replacement": "[TELEFON]",
+      "values": [
+        "+49 170 1234567"
+      ]
+    }
+  ],
+  "emails": [
+    {
+      "replacement": "[EMAIL_ICH]",
+      "values": [
+        "max.mustermann@example.de"
+      ]
+    }
+  ],
+  "birth_dates": [
+    {
+      "replacement": "[GEBURTSDATUM_ICH]",
+      "date": "1990-02-01",
+      "aliases": []
+    }
+  ]
+}

@@ -1,0 +1,125 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "autoupdate": false,
+  "share": "disabled",
+  "snapshot": false,
+  "instructions": [
+    "/etc/opencode/routing.md"
+  ],
+  "skills": {
+    "paths": [
+      "/etc/opencode/skills"
+    ]
+  },
+  "tool_output": {
+    "max_lines": 200,
+    "max_bytes": 16384
+  },
+  "agent": {
+    "wiki-ingest": {
+      "description": "Liest ausdrücklich angeforderte Quellen in das Wiki ein.",
+      "mode": "subagent",
+      "prompt": "Bearbeite ausschließlich Einleseaufträge für das Wiki. Delegiere nicht erneut. Lade einmal den Skill wiki-ingest, befolge ihn vollständig und führe den Auftrag selbst aus.",
+      "permission": {
+        "task": "deny"
+      }
+    },
+    "wiki-lint": {
+      "description": "Prüft und wartet das Wiki.",
+      "mode": "subagent",
+      "prompt": "Bearbeite ausschließlich Prüf- und Wartungsaufträge für das Wiki. Delegiere nicht erneut. Lade einmal den Skill wiki-lint, befolge ihn vollständig und führe den Auftrag selbst aus.",
+      "permission": {
+        "task": "deny"
+      }
+    },
+    "wiki-analysis": {
+      "description": "Analysiert Fragen anhand des Wikis und aktueller wissenschaftlicher Internetquellen.",
+      "mode": "subagent",
+      "steps": 10,
+      "prompt": "Bearbeite ausschließlich ausdrücklich angeforderte wissenschaftliche Analysen. Delegiere nicht erneut. Lade einmal den Skill wiki-analysis, befolge ihn vollständig und führe den Auftrag selbst aus.",
+      "permission": {
+        "edit": "deny",
+        "bash": "deny",
+        "task": "deny"
+      }
+    }
+  },
+  "command": {
+    "ingest": {
+      "description": "Quelle einlesen",
+      "agent": "wiki-ingest",
+      "subtask": true,
+      "template": "Führe diesen Einleseauftrag vollständig aus: $ARGUMENTS"
+    },
+    "ingest-new": {
+      "description": "Alle neuen und geänderten Paperless-Quellen einlesen, sofern Paperless aktiviert ist",
+      "agent": "wiki-ingest",
+      "subtask": true,
+      "template": "Lies alle neuen und geänderten Paperless-Quellen strikt nacheinander ein. Melde ohne Änderungen, wenn Paperless nicht aktiviert ist."
+    },
+    "lint": {
+      "description": "Wiki prüfen",
+      "agent": "wiki-lint",
+      "subtask": true,
+      "template": "Führe diesen Prüfauftrag vollständig aus: $ARGUMENTS"
+    },
+    "analyse": {
+      "description": "Wissenschaftliche Analyse mit Internetquellen",
+      "agent": "wiki-analysis",
+      "subtask": false,
+      "template": "$ARGUMENTS"
+    }
+  },
+  "permission": {
+    "*": "deny",
+    "read": "allow",
+    "edit": {
+      "*": "allow",
+      ".git/**": "deny",
+      "/knowledge/wiki/.git/**": "deny",
+      "/knowledge/sources/**": "deny"
+    },
+    "glob": "allow",
+    "grep": "allow",
+    "list": "allow",
+    "question": "allow",
+    "task": "allow",
+    "todowrite": "allow",
+    "doom_loop": "allow",
+    "webfetch": "allow",
+    "websearch": "allow",
+    "skill": {
+      "*": "deny",
+      "wiki-analysis": "allow",
+      "wiki-ingest": "allow",
+      "wiki-lint": "allow"
+    },
+    "wiki_ingest_status": "allow",
+    "external_directory": {
+      "*": "deny",
+      "/knowledge/sources/**": "allow"
+    },
+    "bash": {
+      "*": "deny",
+      "stat *": "allow",
+      "git status*": "allow",
+      "git diff*": "allow",
+      "git log*": "allow",
+      "git show*": "allow",
+      "git rev-parse*": "allow",
+      "git add *": "allow",
+      "git mv *": "allow",
+      "git rm *": "allow",
+      "git commit *": "allow",
+      "git -C /knowledge/wiki status*": "allow",
+      "git -C /knowledge/wiki diff*": "allow",
+      "git -C /knowledge/wiki log*": "allow",
+      "git -C /knowledge/wiki show*": "allow",
+      "git -C /knowledge/wiki rev-parse*": "allow",
+      "git -C /knowledge/wiki add *": "allow",
+      "git -C /knowledge/wiki mv *": "allow",
+      "git -C /knowledge/wiki rm *": "allow",
+      "git -C /knowledge/wiki commit *": "allow"
+    }
+  }
+}

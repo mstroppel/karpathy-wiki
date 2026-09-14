@@ -1,0 +1,231 @@
+name: ${COMPOSE_PROJECT_NAME:-karpathy-wiki}
+
+services:
+  init:
+    image: alpine/git:2.52.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "/setup/init.sh"]
+    environment:
+      WIKI_NAME: ${WIKI_NAME:-Karpathy Wiki}
+      WIKI_PUBLIC_URL: ${WIKI_PUBLIC_URL:-https://wiki.example.com}
+      GIT_AUTHOR_NAME: ${GIT_AUTHOR_NAME:-Karpathy Wiki Agent}
+      GIT_AUTHOR_EMAIL: ${GIT_AUTHOR_EMAIL:-karpathy-wiki@localhost}
+      PAPERLESS_ENABLED: ${PAPERLESS_ENABLED:-false}
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+    volumes:
+      - ${DATA_ROOT:-./data}:/knowledge:rw
+      - ./config/init.sh:/setup/init.sh:ro
+    security_opt:
+      - no-new-privileges:true
+
+  nextcloud-sync:
+    image: rclone/rclone:1.75.1
+    profiles: ["nextcloud"]
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        stop() {
+          trap - TERM INT
+          if [ -n "$${child_pid:-}" ]; then
+            kill -TERM "$${child_pid}" 2>/dev/null || true
+            wait "$${child_pid}" || true
+          fi
+          exit 0
+        }
+        trap stop TERM INT
+        while true; do
+          rclone sync "nextcloud:$${NEXTCLOUD_PATH}" /knowledge/sources/nextcloud \
+            --create-empty-src-dirs --links --log-level INFO &
+          child_pid=$$!
+          wait "$${child_pid}"
+          child_pid=
+          sleep "$${SYNC_INTERVAL}" &
+          child_pid=$$!
+          wait "$${child_pid}"
+          child_pid=
+        done
+    environment:
+      TZ: ${TZ:-UTC}
+      NEXTCLOUD_PATH: ${NEXTCLOUD_PATH:-Wiki Sources}
+      SYNC_INTERVAL: ${NEXTCLOUD_SYNC_INTERVAL:-15m}
+      RCLONE_CONFIG_NEXTCLOUD_TYPE: webdav
+      RCLONE_CONFIG_NEXTCLOUD_URL: ${NEXTCLOUD_WEBDAV_URL:-https://cloud.example.com/remote.php/dav/files/username/}
+      RCLONE_CONFIG_NEXTCLOUD_VENDOR: nextcloud
+      RCLONE_CONFIG_NEXTCLOUD_USER: ${NEXTCLOUD_USERNAME:-username}
+      RCLONE_CONFIG_NEXTCLOUD_PASS: ${NEXTCLOUD_PASSWORD_OBSCURED:-}
+    volumes:
+      - ${DATA_ROOT:-./data}/sources/nextcloud:/knowledge/sources/nextcloud:rw
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    security_opt:
+      - no-new-privileges:true
+
+  paperless-ingest:
+    image: ghcr.io/mstroppel/karpathy-wiki-paperless-ingest:${KARPATHY_WIKI_VERSION:-latest}
+    profiles: ["paperless"]
+    user: "${PUID:-1000}:${PGID:-1000}"
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-UTC}
+      PAPERLESS_API_URL: ${PAPERLESS_API_URL:-http://paperless:8000}
+      PAPERLESS_PUBLIC_URL: ${PAPERLESS_PUBLIC_URL:-https://paperless.example.com}
+      PAPERLESS_SOURCE_TAG_ID: ${PAPERLESS_SOURCE_TAG_ID:-0}
+      PAPERLESS_TOKEN_FILE: /run/secrets/paperless_token
+      REDACTIONS_FILE: /run/secrets/redactions
+      SYNC_INTERVAL_SECONDS: ${PAPERLESS_SYNC_INTERVAL_SECONDS:-900}
+      SANITIZED_ROOT: /data/sanitized/paperless
+      QUARANTINE_ROOT: /data/quarantine
+      HEALTH_PATH: /tmp/health.json
+    volumes:
+      - ${DATA_ROOT:-./data}/sources/paperless:/data/sanitized/paperless:rw
+      - ${DATA_ROOT:-./data}/quarantine:/data/quarantine:rw
+    secrets:
+      - paperless_token
+      - redactions
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    networks:
+      - default
+      - webproxy
+    read_only: true
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test: ["CMD", "python", "-m", "karpathy_wiki_ingest.health"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
+      start_period: 5m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  opencode:
+    image: ghcr.io/mstroppel/karpathy-wiki-opencode:${KARPATHY_WIKI_VERSION:-latest}
+    user: "${PUID:-1000}:${PGID:-1000}"
+    init: true
+    restart: unless-stopped
+    command: ["serve", "--hostname", "0.0.0.0", "--port", "4096"]
+    working_dir: /knowledge/wiki
+    environment:
+      HOME: /home/opencode
+      TZ: ${TZ:-UTC}
+      OPENCODE_CONFIG: /etc/opencode/opencode.json
+      OPENCODE_DISABLE_PROJECT_CONFIG: "1"
+      OPENCODE_DISABLE_EXTERNAL_SKILLS: "1"
+      OPENCODE_DISABLE_CLAUDE_CODE_SKILLS: "1"
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: core.hooksPath
+      GIT_CONFIG_VALUE_0: /dev/null
+    volumes:
+      - ${DATA_ROOT:-./data}/sources:/knowledge/sources:ro
+      - ${DATA_ROOT:-./data}/wiki:/knowledge/wiki:rw
+      - ${DATA_ROOT:-./data}/opencode-config:/home/opencode/.config/opencode:rw
+      - ${DATA_ROOT:-./data}/opencode-share:/home/opencode/.local/share/opencode:rw
+      - ${DATA_ROOT:-./data}/opencode-state:/home/opencode/.local/state:rw
+      - ./config/opencode.json:/etc/opencode/opencode.json:ro
+      - ./config/routing.md:/etc/opencode/routing.md:ro
+      - ./config/skills:/etc/opencode/skills:ro
+      - ./config/tools:/home/opencode/.config/opencode/tools:ro
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    networks:
+      default:
+      webproxy:
+        aliases:
+          - ${STACK_ID:-karpathy-wiki}-opencode
+    extra_hosts:
+      - "${PAPERLESS_BLOCKED_HOSTNAME:-paperless.example.invalid}:127.0.0.1"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  silverbullet:
+    image: ghcr.io/silverbulletmd/silverbullet:2.10.0
+    user: "${PUID:-1000}:${PGID:-1000}"
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-UTC}
+      SB_READ_ONLY: "1"
+      SB_INDEX_PAGE: index
+      SB_SPACE_IGNORE: |-
+        AGENTS.md
+        .git/**
+    volumes:
+      - ${DATA_ROOT:-./data}/wiki:/space:rw
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    networks:
+      default:
+      webproxy:
+        aliases:
+          - ${STACK_ID:-karpathy-wiki}-silverbullet
+    security_opt:
+      - no-new-privileges:true
+
+  session-export:
+    image: ghcr.io/mstroppel/karpathy-wiki-session-export:${KARPATHY_WIKI_VERSION:-latest}
+    profiles: ["session-export"]
+    user: "${PUID:-1000}:${PGID:-1000}"
+    restart: unless-stopped
+    environment:
+      HOME: /tmp
+      TZ: ${TZ:-UTC}
+      OPENCODE_URL: http://opencode:4096
+      OPENCODE_DIRECTORY: /knowledge/wiki
+      OPENCODE_PUBLIC_URL: ${OPENCODE_PUBLIC_URL:-https://chat.example.com}
+      SESSION_EXPORT_REMOTE_PATH: ${NEXTCLOUD_SESSION_PATH:-OpenCode Sessions}
+      SESSION_EXPORT_INTERVAL: ${SESSION_EXPORT_INTERVAL:-15m}
+      RCLONE_CONFIG_NEXTCLOUD_TYPE: webdav
+      RCLONE_CONFIG_NEXTCLOUD_URL: ${NEXTCLOUD_WEBDAV_URL:-https://cloud.example.com/remote.php/dav/files/username/}
+      RCLONE_CONFIG_NEXTCLOUD_VENDOR: nextcloud
+      RCLONE_CONFIG_NEXTCLOUD_USER: ${NEXTCLOUD_USERNAME:-username}
+      RCLONE_CONFIG_NEXTCLOUD_PASS: ${NEXTCLOUD_PASSWORD_OBSCURED:-}
+    volumes:
+      - ${DATA_ROOT:-./data}/session-exports:/exports:rw
+    depends_on:
+      opencode:
+        condition: service_started
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  raw-files:
+    image: caddy:2.10.2-alpine
+    profiles: ["raw-files"]
+    restart: unless-stopped
+    command: ["caddy", "file-server", "--root", "/srv", "--listen", ":8080"]
+    volumes:
+      - ${DATA_ROOT:-./data}/sources:/srv:ro
+    networks:
+      default:
+      webproxy:
+        aliases:
+          - ${STACK_ID:-karpathy-wiki}-raw-files
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+secrets:
+  paperless_token:
+    file: ${PAPERLESS_TOKEN_FILE:-./secrets/paperless-token}
+  redactions:
+    file: ${REDACTIONS_FILE:-./secrets/redactions.json}
+
+networks:
+  webproxy:
+    external: true
+    name: ${WEBPROXY_NETWORK:-webproxy}
