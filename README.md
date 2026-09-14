@@ -174,7 +174,13 @@ Report vulnerabilities according to [SECURITY.md](SECURITY.md).
 
 ## Open Points
 
-- Perform the first real migration and soak test of both existing installations.
+- Activate the prepared deployment overlays for both existing installations in
+  separate maintenance windows and complete a soak test after each cutover.
+- Rotate the legacy Paperless, Nextcloud, and other deployment credentials that
+  previously entered a Git history; removing them from the index does not remove
+  them from existing commits.
+- Move Paperless and its importer from a shared proxy network to a dedicated
+  backend network in deployments that still use the shared network temporarily.
 - Publish the first tagged release and verify the generated `linux/amd64` and
   `linux/arm64` images on both hosts.
 - Add an identity-aware authentication gateway in front of OpenCode in addition
