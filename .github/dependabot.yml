@@ -1,0 +1,51 @@
+version: 2
+
+updates:
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      root-images:
+        update-types: [minor, patch]
+
+  - package-ecosystem: docker
+    directory: /opencode
+    schedule:
+      interval: weekly
+    groups:
+      opencode-image:
+        update-types: [minor, patch]
+
+  - package-ecosystem: docker
+    directory: /paperless-ingest
+    schedule:
+      interval: weekly
+    groups:
+      paperless-image:
+        update-types: [minor, patch]
+
+  - package-ecosystem: docker
+    directory: /session-export
+    schedule:
+      interval: weekly
+    groups:
+      session-export-image:
+        update-types: [minor, patch]
+
+  - package-ecosystem: pip
+    directory: /session-export
+    schedule:
+      interval: weekly
+    groups:
+      python-runtime:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+        update-types: [minor, patch]

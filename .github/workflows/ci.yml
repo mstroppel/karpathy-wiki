@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+      - name: Run unit tests
+        run: |
+          python -m unittest discover -s tests -v
+          (cd paperless-ingest && python -m unittest discover -s tests -v)
+          (cd session-export && python -m unittest discover -s tests -v)
+      - name: Validate scripts and configuration
+        run: |
+          sh -n config/init.sh
+          sh -n session-export/export-session.sh
+          node --check config/tools/wiki_ingest_status.js
+          docker compose --env-file .env.example config --quiet
+
+  images:
+    name: Images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build images
+        uses: docker/bake-action@v6
+        with:
+          files: docker-bake.hcl
+          targets: default
+          load: false
