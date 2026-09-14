@@ -204,7 +204,7 @@ services:
       - no-new-privileges:true
 
   raw-files:
-    image: caddy:2.10.2-alpine
+    image: caddy:2.11.4-alpine
     profiles: ["raw-files"]
     restart: unless-stopped
     command: ["caddy", "file-server", "--root", "/srv", "--listen", ":8080"]
