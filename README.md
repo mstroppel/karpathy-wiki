@@ -181,8 +181,8 @@ Report vulnerabilities according to [SECURITY.md](SECURITY.md).
   them from existing commits.
 - Move Paperless and its importer from a shared proxy network to a dedicated
   backend network in deployments that still use the shared network temporarily.
-- Publish the first tagged release and verify the generated `linux/amd64` and
-  `linux/arm64` images on both hosts.
+- Verify the released `linux/amd64` and `linux/arm64` images during the first
+  activation on both hosts.
 - Add an identity-aware authentication gateway in front of OpenCode in addition
   to its built-in HTTP Basic authentication.
 - Decide whether managed `AGENTS.md` updates should be propagated automatically.
