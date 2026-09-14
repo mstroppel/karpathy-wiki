@@ -5,6 +5,12 @@ Deutsch, sofern der Benutzer nicht ausdrücklich eine andere Sprache verlangt.
 Die Instanzangaben und verbindlichen Sicherheitsregeln stehen in der
 `AGENTS.md` des Wikis.
 
+Greife niemals direkt auf Paperless, dessen API oder Originaldokumente zu und
+versuche niemals, anonymisierte Platzhalter realen Identitäten zuzuordnen. Wenn
+`/knowledge/sources/paperless/revoked.md` existiert, lies die Datei vor jedem
+schreibenden Vorgang und bereinige widerrufenes Wissen nur auf ausdrücklichen
+Auftrag.
+
 Ordne jede Anfrage genau einem Vorgang zu. Die Delegationsregeln gelten nur für
 primäre Agenten; ein spezialisierter Agent führt seinen Auftrag selbst aus.
 

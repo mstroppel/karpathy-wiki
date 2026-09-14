@@ -42,8 +42,9 @@ compose() {
 }
 
 api_get() {
-	compose curl --fail --silent --show-error --get "$OPENCODE_URL$1" \
-		--data-urlencode "directory=$DIRECTORY"
+	compose sh -c \
+		'exec curl --fail --silent --show-error --user "$OPENCODE_SERVER_USERNAME:$OPENCODE_SERVER_PASSWORD" --get "$1" --data-urlencode "directory=$2"' \
+		sh "$OPENCODE_URL$1" "$DIRECTORY"
 }
 
 mkdir -p "$OUTPUT_DIR"

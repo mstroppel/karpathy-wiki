@@ -63,6 +63,10 @@ if [ "$PAPERLESS_ENABLED" = true ]; then
   mkdir -p "$sources/paperless"
 fi
 
+# Git rejects migrated repositories owned by another identity. Correct the
+# configured data tree before inspecting it; later services run as this ID.
+chown -R "$PUID:$PGID" "$KNOWLEDGE_ROOT"
+
 # Install generated files through a hard link so an existing path, including a
 # concurrently created path, can never be replaced.
 install_if_absent() {
@@ -184,5 +188,3 @@ if ! git -C "$wiki" rev-parse --verify HEAD >/dev/null 2>&1; then
   git -C "$wiki" add -A
   git -c commit.gpgsign=false -C "$wiki" commit -m "chore(wiki): wiki initialisieren"
 fi
-
-chown -R "$PUID:$PGID" "$KNOWLEDGE_ROOT"

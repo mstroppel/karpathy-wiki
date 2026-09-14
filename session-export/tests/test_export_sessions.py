@@ -1,8 +1,10 @@
 import base64
 import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -95,6 +97,46 @@ class SelectSessionsTests(unittest.TestCase):
     def test_unknown_root_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "Session not found: missing"):
             export_sessions.select_sessions(self.sessions, "missing")
+
+
+class ExportTests(unittest.TestCase):
+    def test_active_session_path_is_reserved_for_colliding_idle_session(self):
+        created = 1767225600000
+        sessions = [
+            {"id": "active", "title": "Same", "time": {"created": created, "updated": 1}},
+            {"id": "idle", "title": "Same", "time": {"created": created, "updated": 1}},
+        ]
+        old_path = "2026/01/01/2026-01-01 Same.pdf"
+        state = {"active": {"format": 3, "updated": 1, "path": old_path}}
+        statuses = {"active": {"type": "busy"}, "idle": {"type": "idle"}}
+
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+            export_sessions, "EXPORT_ROOT", Path(directory)
+        ), mock.patch.object(
+            export_sessions, "api_get", side_effect=[sessions, statuses, []]
+        ), mock.patch.object(
+            export_sessions, "load_state", return_value=state
+        ), mock.patch.object(
+            export_sessions, "create_pdf"
+        ) as create_pdf, mock.patch.object(
+            export_sessions, "run_command"
+        ), mock.patch.object(
+            export_sessions, "save_state"
+        ) as save_state:
+            export_sessions.export_once()
+
+        destination = create_pdf.call_args.args[2]
+        self.assertEqual(destination.name, "2026-01-01 Same (2).pdf")
+        saved = save_state.call_args.args[0]
+        self.assertEqual(saved["active"]["path"], old_path)
+        self.assertNotEqual(saved["idle"]["path"], old_path)
+
+    def test_rendered_html_blocks_remote_resources(self):
+        with mock.patch.object(export_sessions, "PUBLIC_URL", "https://chat.example.com"):
+            rendered = export_sessions.render_html(
+                {"id": "session", "title": "Title", "time": {}}, []
+            )
+        self.assertIn("default-src 'none'; img-src data:", rendered)
 
 
 if __name__ == "__main__":
