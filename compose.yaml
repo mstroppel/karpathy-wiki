@@ -2,9 +2,10 @@ name: ${COMPOSE_PROJECT_NAME:-karpathy-wiki}
 
 services:
   init:
-    image: alpine/git:2.52.0
+    image: ghcr.io/mstroppel/karpathy-wiki-opencode:${KARPATHY_WIKI_VERSION:-latest}
+    user: "0:0"
     restart: "no"
-    entrypoint: ["/bin/sh", "/setup/init.sh"]
+    entrypoint: ["/bin/sh", "/etc/opencode/init.sh"]
     environment:
       WIKI_NAME: ${WIKI_NAME:-Karpathy Wiki}
       WIKI_PUBLIC_URL: ${WIKI_PUBLIC_URL:-https://wiki.example.com}
@@ -15,7 +16,6 @@ services:
       PGID: ${PGID:-1000}
     volumes:
       - ${DATA_ROOT:-./data}:/knowledge:rw
-      - ./config/init.sh:/setup/init.sh:ro
     security_opt:
       - no-new-privileges:true
 
@@ -131,10 +131,6 @@ services:
       - ${DATA_ROOT:-./data}/opencode-config:/home/opencode/.config/opencode:rw
       - ${DATA_ROOT:-./data}/opencode-share:/home/opencode/.local/share/opencode:rw
       - ${DATA_ROOT:-./data}/opencode-state:/home/opencode/.local/state:rw
-      - ./config/opencode.json:/etc/opencode/opencode.json:ro
-      - ./config/routing.md:/etc/opencode/routing.md:ro
-      - ./config/skills:/etc/opencode/skills:ro
-      - ./config/tools:/home/opencode/.config/opencode/tools:ro
     depends_on:
       init:
         condition: service_completed_successfully

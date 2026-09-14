@@ -29,6 +29,14 @@ RUN getent group "$APP_GID" >/dev/null || groupadd --gid "$APP_GID" app \
         /home/opencode/.local/share/opencode \
         /home/opencode/.local/state
 
+COPY config/init.sh /etc/opencode/init.sh
+COPY config/opencode.json /etc/opencode/opencode.json
+COPY config/routing.md /etc/opencode/routing.md
+COPY config/skills /etc/opencode/skills
+COPY config/tools /etc/opencode/tools
+COPY opencode/entrypoint.sh /usr/local/bin/karpathy-wiki-entrypoint
+RUN chmod 0755 /etc/opencode/init.sh /usr/local/bin/karpathy-wiki-entrypoint
+
 ENV HOME=/home/opencode
 USER app
-ENTRYPOINT ["opencode"]
+ENTRYPOINT ["karpathy-wiki-entrypoint"]

@@ -27,7 +27,8 @@ target "common" {
 
 target "opencode" {
   inherits = ["common"]
-  context = "opencode"
+  context = "."
+  dockerfile = "opencode/Dockerfile"
   tags = ["karpathy-wiki-opencode:test"]
 }
 
