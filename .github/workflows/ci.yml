@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.13"
+          python-version: "3.14"
       - uses: actions/setup-node@v5
         with:
           node-version: "24"
@@ -43,6 +43,7 @@ jobs:
       - name: Build images
         uses: docker/bake-action@v6
         with:
+          source: .
           files: docker-bake.hcl
           targets: default
           load: false

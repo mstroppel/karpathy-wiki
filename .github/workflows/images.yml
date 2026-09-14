@@ -50,6 +50,7 @@ jobs:
         env:
           IMAGE_VERSION: ${{ steps.version.outputs.version }}
         with:
+          source: .
           files: docker-bake.hcl
           targets: ${{ steps.version.outputs.target }}
           push: true
