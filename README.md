@@ -151,8 +151,10 @@ docker compose --env-file .env.example config --quiet
 ```
 
 GitHub Actions additionally builds every project image. Releases publish
-multi-architecture images to GHCR. See [CONTRIBUTING.md](CONTRIBUTING.md) for the
-contribution workflow.
+multi-architecture images to GHCR. Dependabot patch/minor updates and GitHub
+Actions updates are approved and squash-merged only after all protected CI checks
+pass. Major runtime updates remain manual. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow.
 
 ## Security Notes
 
