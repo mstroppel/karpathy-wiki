@@ -77,7 +77,8 @@
       "*": "allow",
       ".git/**": "deny",
       "/knowledge/wiki/.git/**": "deny",
-      "/knowledge/sources/**": "deny"
+      "/knowledge/sources/**": "deny",
+      "/knowledge/raw/**": "deny"
     },
     "glob": "allow",
     "grep": "allow",
@@ -97,7 +98,8 @@
     "wiki_ingest_status": "allow",
     "external_directory": {
       "*": "deny",
-      "/knowledge/sources/**": "allow"
+      "/knowledge/sources/**": "allow",
+      "/knowledge/raw/**": "allow"
     },
     "bash": {
       "*": "deny",

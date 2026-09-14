@@ -88,6 +88,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config["$schema"], "https://opencode.ai/config.json")
         self.assertEqual(config["permission"]["external_directory"]["*"], "deny")
         self.assertEqual(config["permission"]["edit"]["/knowledge/sources/**"], "deny")
+        self.assertEqual(config["permission"]["edit"]["/knowledge/raw/**"], "deny")
         self.assertEqual(
             set(config["skills"]["paths"]), {"/etc/opencode/skills"}
         )

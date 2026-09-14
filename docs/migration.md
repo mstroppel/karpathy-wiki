@@ -40,7 +40,10 @@ Map the old paths as follows:
 
 The canonical source path changes from `/knowledge/raw` to
 `/knowledge/sources`. Existing wiki pages that record raw paths or download URLs
-should be migrated in one reviewed Wiki commit after startup.
+should be migrated in one reviewed Wiki commit after startup. During the
+transition, an installation may mount the same source directory read-only at
+`/knowledge/raw`; the bundled OpenCode policy permits reads but denies writes on
+that compatibility path.
 
 ## Mein-Wiki Mapping
 
