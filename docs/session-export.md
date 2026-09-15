@@ -7,12 +7,15 @@ but exclude tool calls, reasoning, and internal metadata.
 Exports use this layout:
 
 ```text
-YYYY/MM/DD/YYYY-MM-DD Session title.pdf
+${DATA_ROOT}/exports/sessions/YYYY/MM/DD/YYYY-MM-DD Session title.pdf
 ```
 
 Changed sessions are regenerated. Deleted sessions are removed from the mirror.
 The destination must therefore be dedicated to this exporter because `rclone
 sync` removes files that do not exist locally.
+
+`${DATA_ROOT}/exports/sessions/.export-state.json` tracks exported revisions
+locally and is excluded from the Nextcloud mirror.
 
 ## Configuration
 

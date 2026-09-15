@@ -92,7 +92,9 @@ class Settings:
             sanitized_root=Path(
                 os.getenv("SANITIZED_ROOT", "/data/sanitized/paperless")
             ),
-            quarantine_root=Path(os.getenv("QUARANTINE_ROOT", "/data/quarantine")),
+            quarantine_root=Path(
+                os.getenv("QUARANTINE_ROOT", "/data/quarantine/paperless")
+            ),
             health_path=Path(os.getenv("HEALTH_PATH", "/tmp/health.json")),
         )
 

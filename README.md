@@ -195,11 +195,14 @@ ${DATA_ROOT}/
 │   ├── nextcloud/
 │   └── paperless/
 ├── wiki/                 # Independent Git repository and SilverBullet space
-├── quarantine/           # Content-free Paperless error reports
-├── session-exports/
-├── opencode-config/
-├── opencode-share/
-└── opencode-state/
+├── quarantine/
+│   └── paperless/        # Content-free Paperless error reports
+├── exports/
+│   └── sessions/         # Local OpenCode session PDF mirror
+└── opencode/
+    ├── config/
+    ├── data/             # Credentials, sessions, messages, and logs
+    └── state/
 ```
 
 Source directories are read-only inside OpenCode. Generated knowledge is written
