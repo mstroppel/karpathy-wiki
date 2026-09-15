@@ -33,6 +33,7 @@ jobs:
         run: |
           sh -n config/init.sh
           sh -n install.sh
+          sh -n karpathy-wiki.sh
           sh -n session-export/export-session.sh
           node --check config/tools/wiki_ingest_status.js
           node --check config/tools/wiki_ingest_status_core.mjs

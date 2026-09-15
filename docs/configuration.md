@@ -115,13 +115,22 @@ directly from Compose.
 
 ## Upgrades
 
+Launcher installations update through the launcher, which rewrites the version
+pin in `.env` (keeping `.env.bak`), pulls the new images, and restarts:
+
+```bash
+./karpathy-wiki.sh update          # latest release
+./karpathy-wiki.sh update 0.2.0    # specific release
+```
+
 Pin a release independently per instance:
 
 ```env
 KARPATHY_WIKI_VERSION=0.1.0
 ```
 
-Then pull and recreate only that instance:
+Checkouts and multi-instance setups that drive Compose directly pull and
+recreate only the selected instance:
 
 ```bash
 docker compose --env-file /private/personal-wiki.env \

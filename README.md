@@ -47,9 +47,12 @@ Docker network, and an account with an
 WebDAV, Paperless, and the other Compose profiles are optional and are not
 needed for the first start.
 
-1. Download the small installer. It resolves the latest release, downloads its
-   `compose.yaml` and `.env.example`, and pins the matching container image
-   version in the generated `.env`. A Git checkout is not required:
+1. Download the small installer. It resolves the latest release, downloads the
+   `karpathy-wiki.sh` launcher and `.env.example`, and pins the matching
+   container image version in the generated `.env`. The Compose file is not
+   copied into your directory; the launcher downloads and caches it per pinned
+   version on demand, so the installation directory only holds configuration
+   and adoptions. A Git checkout is not required:
 
    ```bash
    curl -fsSL https://raw.githubusercontent.com/mstroppel/karpathy-wiki/main/install.sh \
@@ -61,9 +64,11 @@ needed for the first start.
    name with `WIKI_NAME` and its unique container/DNS prefix with
    `COMPOSE_PROJECT_NAME` and `STACK_ID` in `.env`.
 
-   Review [`install.sh`](install.sh) before piping it to a shell if required by
-   your security policy. Set `INSTALL_DIR` or `KARPATHY_WIKI_VERSION` on `sh` to
-   choose another directory or a specific release:
+   Review [`install.sh`](install.sh) and
+   [`karpathy-wiki.sh`](karpathy-wiki.sh) before piping them to a shell if
+   required by your security policy. Set `INSTALL_DIR` or
+   `KARPATHY_WIKI_VERSION` on `sh` to choose another directory or a specific
+   release:
 
    ```bash
    curl -fsSL https://raw.githubusercontent.com/mstroppel/karpathy-wiki/main/install.sh \
@@ -87,13 +92,16 @@ needed for the first start.
    `openssl rand -base64 32`.
 
 3. Create the shared proxy network if it does not exist, validate the
-   configuration, and start the wiki:
+   configuration, and start the wiki through the launcher:
 
    ```bash
    docker network inspect webproxy >/dev/null 2>&1 || docker network create webproxy
-   docker compose config --quiet
-   docker compose up -d
+   ./karpathy-wiki.sh config --quiet
+   ./karpathy-wiki.sh up -d
    ```
+
+   The launcher forwards every argument to `docker compose` with the Compose
+   file matching `KARPATHY_WIKI_VERSION` from `.env`, cached below `.cache/`.
 
    The first start creates `${DATA_ROOT}`, initializes the Markdown wiki as an
    independent Git repository, and starts OpenCode and SilverBullet. Configure
@@ -136,11 +144,44 @@ All persistent service directories use subdirectories of `DATA_ROOT`, so a new
 installation does not need a Compose override file. Secret files can remain
 elsewhere through `PAPERLESS_TOKEN_FILE` and `REDACTIONS_FILE`.
 
+## Update
+
+The project directory contains only configuration and adoptions (`.env`,
+`secrets/`, an optional `compose.override.yaml`). The launcher runs Docker
+Compose with the Compose file matching the `KARPATHY_WIKI_VERSION` pin in
+`.env` and caches it below `.cache/`. Move to the latest release with:
+
+```bash
+./karpathy-wiki.sh update
+```
+
+`update` resolves the newest release, downloads its Compose file first, then
+rewrites the version pin in `.env` (keeping the previous file as `.env.bak`),
+pulls the new images, and restarts the stack with `up -d`. Pin a specific
+release instead:
+
+```bash
+./karpathy-wiki.sh update 0.2.0
+```
+
+Review release notes before updating and back up `DATA_ROOT` before upgrades
+that announce data-layout or generated-policy changes. Local Compose adoptions
+belong in `compose.override.yaml` next to the launcher; it is applied
+automatically and survives updates.
+
+Installations created by earlier installers still contain a vendored
+`compose.yaml`. To adopt the launcher, download `karpathy-wiki.sh` into the
+same directory and remove `compose.yaml`; the existing `.env` pin continues to
+apply.
+
 ## Multiple Instances
 
 The stack does not use fixed container names. `COMPOSE_PROJECT_NAME` separates
 containers and private networks, while `STACK_ID` creates unique aliases on the
-shared reverse-proxy network.
+shared reverse-proxy network. The simplest separation is one installation
+directory per instance, each with its own launcher, `.env`, and update cycle.
+From a Git checkout, instances can also share the repository through separate
+environment files:
 
 ```bash
 docker compose --env-file /private/sp-wiki.env --project-name sp-wiki up -d
@@ -226,6 +267,7 @@ node --test tests/test_wiki_ingest_status.mjs
 (cd session-export && python3 -m unittest discover -s tests -v)
 sh -n config/init.sh
 sh -n install.sh
+sh -n karpathy-wiki.sh
 sh -n session-export/export-session.sh
 node --check config/tools/wiki_ingest_status.js
 node --check config/tools/wiki_ingest_status_core.mjs
