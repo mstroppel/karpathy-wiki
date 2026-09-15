@@ -25,7 +25,6 @@ Use profiles:
 COMPOSE_PROJECT_NAME=sp-wiki
 STACK_ID=sp-wiki
 COMPOSE_PROFILES=webdav,session-export,raw-files
-PAPERLESS_ENABLED=false
 ```
 
 Map the old paths as follows:
@@ -54,7 +53,6 @@ Use profiles:
 COMPOSE_PROJECT_NAME=mein-wiki
 STACK_ID=mein-wiki
 COMPOSE_PROFILES=webdav,paperless
-PAPERLESS_ENABLED=true
 PAPERLESS_NETWORK=paperless-backend
 ```
 

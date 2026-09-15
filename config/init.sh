@@ -5,10 +5,15 @@ set -eu
 : "${WIKI_PUBLIC_URL:?WIKI_PUBLIC_URL must be set}"
 : "${GIT_AUTHOR_NAME:?GIT_AUTHOR_NAME must be set}"
 : "${GIT_AUTHOR_EMAIL:?GIT_AUTHOR_EMAIL must be set}"
-: "${PAPERLESS_ENABLED:=false}"
+: "${COMPOSE_PROFILES:=}"
 : "${KNOWLEDGE_ROOT:=/knowledge}"
 : "${PUID:=1000}"
 : "${PGID:=1000}"
+
+case ",$COMPOSE_PROFILES," in
+  *,paperless,*) PAPERLESS_ENABLED=true ;;
+  *) PAPERLESS_ENABLED=false ;;
+esac
 
 case "$PUID:$PGID" in
   *[!0-9:]*|:*|*:|*:*:*)
@@ -38,11 +43,6 @@ case "$WIKI_PUBLIC_URL" in
   *) printf 'WIKI_PUBLIC_URL must be an HTTP(S) URL\n' >&2; exit 1 ;;
 esac
 WIKI_PUBLIC_URL=${WIKI_PUBLIC_URL%/}
-
-case "$PAPERLESS_ENABLED" in
-  true|false) ;;
-  *) printf 'PAPERLESS_ENABLED must be true or false\n' >&2; exit 1 ;;
-esac
 
 sources="$KNOWLEDGE_ROOT/sources"
 wiki="$KNOWLEDGE_ROOT/wiki"

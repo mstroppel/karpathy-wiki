@@ -19,7 +19,7 @@ class InitTests(unittest.TestCase):
             "WIKI_PUBLIC_URL": "https://wiki.example.test/",
             "GIT_AUTHOR_NAME": "Wiki Agent",
             "GIT_AUTHOR_EMAIL": "wiki@example.test",
-            "PAPERLESS_ENABLED": "false",
+            "COMPOSE_PROFILES": "",
             "PUID": str(os.getuid()),
             "PGID": str(os.getgid()),
             "GIT_CONFIG_GLOBAL": "/dev/null",
@@ -64,7 +64,7 @@ class InitTests(unittest.TestCase):
                 root,
                 WIKI_NAME="Changed Name",
                 WIKI_PUBLIC_URL="https://changed.example.test",
-                PAPERLESS_ENABLED="true",
+                COMPOSE_PROFILES="paperless",
             )
 
             for path in protected:
@@ -89,7 +89,7 @@ class InitTests(unittest.TestCase):
     def test_paperless_template_is_conditional(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "knowledge"
-            self.run_init(root, PAPERLESS_ENABLED="true")
+            self.run_init(root, COMPOSE_PROFILES="paperless")
             agents = (root / "wiki" / "AGENTS.md").read_text()
             self.assertIn("/knowledge/sources/paperless/revoked.md", agents)
             self.assertTrue((root / "sources" / "paperless").is_dir())
@@ -123,7 +123,7 @@ class InitTests(unittest.TestCase):
             ):
                 (root / relative).mkdir(parents=True, exist_ok=True)
 
-            self.run_init(root, PAPERLESS_ENABLED="true")
+            self.run_init(root, COMPOSE_PROFILES="paperless")
 
             expected = {
                 "opencode/config/tool.js": "tool",
@@ -177,12 +177,12 @@ class InitTests(unittest.TestCase):
             self.assertEqual(legacy.read_text(), "legacy")
             self.assertEqual(current.read_text(), "current")
 
-    def test_invalid_boolean_is_rejected_before_writing(self):
+    def test_paperless_profile_controls_initialization(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "knowledge"
-            with self.assertRaises(subprocess.CalledProcessError):
-                self.run_init(root, PAPERLESS_ENABLED="yes")
-            self.assertFalse(root.exists())
+            self.run_init(root, COMPOSE_PROFILES="webdav,paperless,session-export")
+            self.assertTrue((root / "sources" / "paperless").is_dir())
+            self.assertTrue((root / "quarantine" / "paperless").is_dir())
 
 
 class ConfigTests(unittest.TestCase):
@@ -206,9 +206,10 @@ class ConfigTests(unittest.TestCase):
         self.assertNotIn("webdav", generic_status)
         self.assertNotIn("paperless", generic_status)
 
-    def test_compose_passes_paperless_state_to_opencode(self):
+    def test_compose_passes_profiles_to_init(self):
         compose = (ROOT / "compose.yaml").read_text()
-        self.assertIn("PAPERLESS_ENABLED: ${PAPERLESS_ENABLED:-false}", compose)
+        self.assertIn("COMPOSE_PROFILES: ${COMPOSE_PROFILES:-}", compose)
+        self.assertNotIn("PAPERLESS_ENABLED", compose)
 
 if __name__ == "__main__":
     unittest.main()

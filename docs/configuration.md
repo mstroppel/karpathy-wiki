@@ -34,9 +34,8 @@ COMPOSE_PROFILES=webdav,paperless,session-export,raw-files
 ```
 
 An installation can run without source adapters and receive files through a
-separate trusted process. Set `PAPERLESS_ENABLED=true` exactly when the
-`paperless` profile is active so initialization installs the corresponding wiki
-rules and directories.
+separate trusted process. When the `paperless` profile is active, initialization
+automatically installs the corresponding wiki rules and directories.
 
 Ingest tracking discovers adapters from directories below
 `/knowledge/sources`. A directory is handled only when the trusted OpenCode image
@@ -85,16 +84,17 @@ WebDAV files are synchronized into a private staging directory first. The
 UTF-8 text files to `sources/webdav`; files that cannot be read as text are
 kept out of the source tree and written to `quarantine/webdav`.
 
-Paperless credentials and redaction values use files rather than environment
-values. Set absolute paths when possible:
+Paperless credentials use files rather than environment values. Set an absolute
+path when possible:
 
 ```env
 PAPERLESS_TOKEN_FILE=/private/personal-wiki/paperless-token
-REDACTIONS_FILE=/private/personal-wiki/redactions.json
 ```
 
-Apply mode `0600` to both files. Never place real values below the repository's
-`secrets/` directory in a commit.
+`REDACTIONS_FILE` is shared by all ingestion adapters and should also use an
+absolute path, for example `/private/personal-wiki/redactions.json`. Apply mode
+`0600` to both files. Never place real values below the repository's `secrets/`
+directory in a commit.
 
 `OPENCODE_SERVER_PASSWORD` currently uses an environment value because OpenCode
 expects that variable directly. Protect the environment file with mode `0600`.

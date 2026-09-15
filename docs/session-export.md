@@ -22,7 +22,7 @@ locally and is excluded from the Nextcloud mirror.
 ```env
 COMPOSE_PROFILES=webdav,session-export
 OPENCODE_PUBLIC_URL=https://chat.example.com
-NEXTCLOUD_SESSION_PATH=OpenCode Sessions
+WEBDAV_SESSION_PATH=OpenCode Sessions
 SESSION_EXPORT_INTERVAL=15m
 ```
 

@@ -178,12 +178,11 @@ WIKI_PUBLIC_URL=https://wiki.example.com
 OPENCODE_PUBLIC_URL=https://chat.example.com
 OPENCODE_SERVER_PASSWORD=replace-with-a-long-random-password
 COMPOSE_PROFILES=webdav,paperless
-PAPERLESS_ENABLED=true
 KARPATHY_WIKI_VERSION=latest
 ```
 
-`PAPERLESS_ENABLED` controls the generated wiki rules and must match whether the
-`paperless` profile is enabled. See [configuration](docs/configuration.md),
+The `paperless` profile automatically enables the corresponding wiki rules and
+directories. See [configuration](docs/configuration.md),
 [Paperless ingestion](docs/paperless.md), [session export](docs/session-export.md),
 and [migration](docs/migration.md) for complete setup details.
 
