@@ -34,9 +34,10 @@ Map the old paths as follows:
 | --- | --- |
 | `raw/nextcloud` | `sources/nextcloud` |
 | `wiki` | `wiki` |
-| `opencode-config` | `opencode-config` |
-| `opencode-share` | `opencode-share` |
-| `session-exports` | `session-exports` |
+| `opencode-config` | `opencode/config` |
+| `opencode-share` | `opencode/data` |
+| `opencode-state` | `opencode/state` |
+| `session-exports` | `exports/sessions` |
 
 The canonical source path changes from `/knowledge/raw` to
 `/knowledge/sources`. Existing wiki pages that record raw paths or download URLs
@@ -63,12 +64,32 @@ The existing layout already closely matches the canonical structure:
 | --- | --- |
 | `knowledge/sources` | `sources` |
 | `knowledge/wiki` | `wiki` |
-| `quarantine` | `quarantine` |
-| `opencode-config` | `opencode-config` |
-| `opencode-share` | `opencode-share` |
+| `quarantine` | `quarantine/paperless` |
+| `opencode-config` | `opencode/config` |
+| `opencode-share` | `opencode/data` |
+| `opencode-state` | `opencode/state` |
 
 Move the Paperless token and redaction list to private, untracked files and set
 their absolute paths in the instance environment.
+
+## Upgrade From the Previous Data Layout
+
+The init service automatically migrates these legacy directories when upgrading
+an existing Karpathy Wiki installation:
+
+| Legacy below `DATA_ROOT` | Current below `DATA_ROOT` |
+| --- | --- |
+| `opencode-config` | `opencode/config` |
+| `opencode-share` | `opencode/data` |
+| `opencode-state` | `opencode/state` |
+| `session-exports` | `exports/sessions` |
+| Files in `quarantine` | `quarantine/paperless` |
+
+Stop the old stack and back up the complete data root before upgrading. Compose
+may create empty current directories before init runs; these are safe migration
+destinations. If both a legacy and current path contain data, init stops without
+merging or overwriting either directory. Resolve that conflict manually from the
+backup before restarting the stack.
 
 ## Validation
 

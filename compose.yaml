@@ -78,11 +78,11 @@ services:
       REDACTIONS_FILE: /run/secrets/redactions
       SYNC_INTERVAL_SECONDS: ${PAPERLESS_SYNC_INTERVAL_SECONDS:-900}
       SANITIZED_ROOT: /data/sanitized/paperless
-      QUARANTINE_ROOT: /data/quarantine
+      QUARANTINE_ROOT: /data/quarantine/paperless
       HEALTH_PATH: /tmp/health.json
     volumes:
       - ${DATA_ROOT:-./data}/sources/paperless:/data/sanitized/paperless:rw
-      - ${DATA_ROOT:-./data}/quarantine:/data/quarantine:rw
+      - ${DATA_ROOT:-./data}/quarantine/paperless:/data/quarantine/paperless:rw
     secrets:
       - paperless_token
       - redactions
@@ -128,9 +128,9 @@ services:
     volumes:
       - ${DATA_ROOT:-./data}/sources:/knowledge/sources:ro
       - ${DATA_ROOT:-./data}/wiki:/knowledge/wiki:rw
-      - ${DATA_ROOT:-./data}/opencode-config:/home/opencode/.config/opencode:rw
-      - ${DATA_ROOT:-./data}/opencode-share:/home/opencode/.local/share/opencode:rw
-      - ${DATA_ROOT:-./data}/opencode-state:/home/opencode/.local/state:rw
+      - ${DATA_ROOT:-./data}/opencode/config:/home/opencode/.config/opencode:rw
+      - ${DATA_ROOT:-./data}/opencode/data:/home/opencode/.local/share/opencode:rw
+      - ${DATA_ROOT:-./data}/opencode/state:/home/opencode/.local/state:rw
     depends_on:
       init:
         condition: service_completed_successfully
@@ -191,7 +191,7 @@ services:
       RCLONE_CONFIG_NEXTCLOUD_USER: ${NEXTCLOUD_USERNAME:-username}
       RCLONE_CONFIG_NEXTCLOUD_PASS: ${NEXTCLOUD_PASSWORD_OBSCURED:-}
     volumes:
-      - ${DATA_ROOT:-./data}/session-exports:/exports:rw
+      - ${DATA_ROOT:-./data}/exports/sessions:/exports:rw
     depends_on:
       opencode:
         condition: service_started

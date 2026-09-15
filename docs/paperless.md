@@ -38,8 +38,9 @@ Run a one-off synchronization before enabling continuous polling:
 docker compose --profile paperless run --rm paperless-ingest --once
 ```
 
-Inspect sanitized output and quarantine metadata locally. Do not send test
-documents to a model provider until the review is complete.
+Inspect sanitized output and the content-free error reports under
+`${DATA_ROOT}/quarantine/paperless` locally. Do not send test documents to a
+model provider until the review is complete.
 
 ## Revision Model
 

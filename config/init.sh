@@ -51,20 +51,103 @@ wiki_git() {
   git -c safe.directory="$wiki" -C "$wiki" "$@"
 }
 
+# Compose may create bind mount targets before init runs. Treat empty targets as
+# safe migration destinations, but never merge two populated data directories.
+directory_has_entries() {
+  for entry in "$1"/* "$1"/.[!.]* "$1"/..?*; do
+    if [ -e "$entry" ] || [ -L "$entry" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+migrate_directory() {
+  old=$1
+  new=$2
+  if [ ! -e "$old" ] && [ ! -L "$old" ]; then
+    return 0
+  fi
+  if [ -L "$old" ] || [ ! -d "$old" ]; then
+    printf 'legacy data path is not a directory: %s\n' "$old" >&2
+    exit 1
+  fi
+  if ! directory_has_entries "$old"; then
+    rmdir "$old"
+    return 0
+  fi
+  if [ -e "$new" ] || [ -L "$new" ]; then
+    if [ -L "$new" ] || [ ! -d "$new" ] || directory_has_entries "$new"; then
+      printf 'both legacy and current data paths contain data: %s, %s\n' "$old" "$new" >&2
+      exit 1
+    fi
+    rmdir "$new"
+  fi
+  mkdir -p "$(dirname "$new")"
+  mv "$old" "$new"
+}
+
+migrate_quarantine() {
+  old="$KNOWLEDGE_ROOT/quarantine"
+  new="$old/paperless"
+  if [ ! -e "$old" ] && [ ! -L "$old" ]; then
+    return 0
+  fi
+  if [ -L "$old" ] || [ ! -d "$old" ]; then
+    printf 'legacy quarantine path is not a directory: %s\n' "$old" >&2
+    exit 1
+  fi
+
+  has_legacy=false
+  for entry in "$old"/* "$old"/.[!.]* "$old"/..?*; do
+    if { [ -e "$entry" ] || [ -L "$entry" ]; } && [ "$entry" != "$new" ]; then
+      has_legacy=true
+      break
+    fi
+  done
+  if [ "$has_legacy" = false ]; then
+    return 0
+  fi
+  if [ -e "$new" ] || [ -L "$new" ]; then
+    if [ -L "$new" ] || [ ! -d "$new" ] || directory_has_entries "$new"; then
+      printf 'both legacy and current quarantine paths contain data: %s, %s\n' "$old" "$new" >&2
+      exit 1
+    fi
+  else
+    mkdir -p "$new"
+  fi
+
+  for entry in "$old"/* "$old"/.[!.]* "$old"/..?*; do
+    if { [ -e "$entry" ] || [ -L "$entry" ]; } && [ "$entry" != "$new" ]; then
+      destination="$new/${entry##*/}"
+      if [ -e "$destination" ] || [ -L "$destination" ]; then
+        printf 'quarantine migration would overwrite: %s\n' "$destination" >&2
+        exit 1
+      fi
+      mv "$entry" "$new/"
+    fi
+  done
+}
+
+migrate_directory "$KNOWLEDGE_ROOT/opencode-config" "$KNOWLEDGE_ROOT/opencode/config"
+migrate_directory "$KNOWLEDGE_ROOT/opencode-share" "$KNOWLEDGE_ROOT/opencode/data"
+migrate_directory "$KNOWLEDGE_ROOT/opencode-state" "$KNOWLEDGE_ROOT/opencode/state"
+migrate_directory "$KNOWLEDGE_ROOT/session-exports" "$KNOWLEDGE_ROOT/exports/sessions"
+migrate_quarantine
+
 mkdir -p "$sources/nextcloud" \
   "$wiki/assets" \
   "$wiki/sources/nextcloud" \
   "$wiki/entities" \
   "$wiki/concepts" \
   "$wiki/analyses" \
-  "$KNOWLEDGE_ROOT/opencode-config" \
-  "$KNOWLEDGE_ROOT/opencode-share" \
-  "$KNOWLEDGE_ROOT/opencode-state" \
-  "$KNOWLEDGE_ROOT/session-exports" \
-  "$KNOWLEDGE_ROOT/quarantine"
+  "$KNOWLEDGE_ROOT/opencode/config" \
+  "$KNOWLEDGE_ROOT/opencode/data" \
+  "$KNOWLEDGE_ROOT/opencode/state" \
+  "$KNOWLEDGE_ROOT/exports/sessions"
 
 if [ "$PAPERLESS_ENABLED" = true ]; then
-  mkdir -p "$sources/paperless"
+  mkdir -p "$sources/paperless" "$KNOWLEDGE_ROOT/quarantine/paperless"
 fi
 
 # Git rejects migrated repositories owned by another identity. Correct the

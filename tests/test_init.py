@@ -40,6 +40,11 @@ class InitTests(unittest.TestCase):
             self.assertFalse((root / "sources" / "paperless").exists())
             self.assertTrue((root / "sources" / "nextcloud").is_dir())
             self.assertTrue((root / "wiki" / ".git").is_dir())
+            self.assertTrue((root / "exports" / "sessions").is_dir())
+            self.assertTrue((root / "opencode" / "config").is_dir())
+            self.assertTrue((root / "opencode" / "data").is_dir())
+            self.assertTrue((root / "opencode" / "state").is_dir())
+            self.assertFalse((root / "quarantine").exists())
             author = subprocess.check_output(
                 ["git", "-C", str(root / "wiki"), "log", "-1", "--format=%an <%ae>"],
                 text=True,
@@ -88,6 +93,69 @@ class InitTests(unittest.TestCase):
             agents = (root / "wiki" / "AGENTS.md").read_text()
             self.assertIn("/knowledge/sources/paperless/revoked.md", agents)
             self.assertTrue((root / "sources" / "paperless").is_dir())
+            self.assertTrue((root / "quarantine" / "paperless").is_dir())
+
+    def test_legacy_service_directories_are_migrated(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "knowledge"
+            legacy_files = {
+                "opencode-config/tool.js": "tool",
+                "opencode-share/auth.json": "credentials",
+                "opencode-state/.lock": "state",
+                "session-exports/2026/session.pdf": "pdf",
+                "quarantine/document-42.txt": "error",
+                "quarantine/.marker": "marker",
+            }
+            for relative, content in legacy_files.items():
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content)
+
+            # Compose can create the new bind mount targets before init starts.
+            for relative in (
+                "opencode/config",
+                "opencode/data",
+                "opencode/state",
+                "exports/sessions",
+                "quarantine/paperless",
+            ):
+                (root / relative).mkdir(parents=True, exist_ok=True)
+
+            self.run_init(root, PAPERLESS_ENABLED="true")
+
+            expected = {
+                "opencode/config/tool.js": "tool",
+                "opencode/data/auth.json": "credentials",
+                "opencode/state/.lock": "state",
+                "exports/sessions/2026/session.pdf": "pdf",
+                "quarantine/paperless/document-42.txt": "error",
+                "quarantine/paperless/.marker": "marker",
+            }
+            for relative, content in expected.items():
+                self.assertEqual((root / relative).read_text(), content)
+            for legacy in (
+                "opencode-config",
+                "opencode-share",
+                "opencode-state",
+                "session-exports",
+            ):
+                self.assertFalse((root / legacy).exists())
+
+    def test_migration_refuses_populated_legacy_and_current_paths(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "knowledge"
+            legacy = root / "opencode-share" / "auth.json"
+            current = root / "opencode" / "data" / "auth.json"
+            legacy.parent.mkdir(parents=True)
+            current.parent.mkdir(parents=True)
+            legacy.write_text("legacy")
+            current.write_text("current")
+
+            with self.assertRaises(subprocess.CalledProcessError):
+                self.run_init(root)
+
+            self.assertEqual(legacy.read_text(), "legacy")
+            self.assertEqual(current.read_text(), "current")
 
     def test_invalid_boolean_is_rejected_before_writing(self):
         with tempfile.TemporaryDirectory() as directory:
