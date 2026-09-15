@@ -7,15 +7,15 @@ variable "IMAGE_VERSION" {
 }
 
 group "default" {
-  targets = ["opencode", "paperless-ingest", "session-export"]
+  targets = ["opencode", "paperless-ingest", "webdav-ingest", "session-export"]
 }
 
 group "release" {
-  targets = ["opencode-release", "paperless-ingest-release", "session-export-release"]
+  targets = ["opencode-release", "paperless-ingest-release", "webdav-ingest-release", "session-export-release"]
 }
 
 group "stable" {
-  targets = ["opencode-stable", "paperless-ingest-stable", "session-export-stable"]
+  targets = ["opencode-stable", "paperless-ingest-stable", "webdav-ingest-stable", "session-export-stable"]
 }
 
 target "common" {
@@ -38,6 +38,13 @@ target "paperless-ingest" {
   tags = ["karpathy-wiki-paperless-ingest:test"]
 }
 
+target "webdav-ingest" {
+  inherits = ["common"]
+  context = "."
+  dockerfile = "webdav-ingest/Dockerfile"
+  tags = ["karpathy-wiki-webdav-ingest:test"]
+}
+
 target "session-export" {
   inherits = ["common"]
   context = "session-export"
@@ -54,6 +61,11 @@ target "paperless-ingest-release" {
   tags = ["${REGISTRY}/karpathy-wiki-paperless-ingest:${IMAGE_VERSION}"]
 }
 
+target "webdav-ingest-release" {
+  inherits = ["webdav-ingest"]
+  tags = ["${REGISTRY}/karpathy-wiki-webdav-ingest:${IMAGE_VERSION}"]
+}
+
 target "session-export-release" {
   inherits = ["session-export"]
   tags = ["${REGISTRY}/karpathy-wiki-session-export:${IMAGE_VERSION}"]
@@ -67,6 +79,11 @@ target "opencode-stable" {
 target "paperless-ingest-stable" {
   inherits = ["paperless-ingest"]
   tags = ["${REGISTRY}/karpathy-wiki-paperless-ingest:${IMAGE_VERSION}", "${REGISTRY}/karpathy-wiki-paperless-ingest:latest"]
+}
+
+target "webdav-ingest-stable" {
+  inherits = ["webdav-ingest"]
+  tags = ["${REGISTRY}/karpathy-wiki-webdav-ingest:${IMAGE_VERSION}", "${REGISTRY}/karpathy-wiki-webdav-ingest:latest"]
 }
 
 target "session-export-stable" {
