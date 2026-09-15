@@ -19,9 +19,9 @@ services:
     security_opt:
       - no-new-privileges:true
 
-  nextcloud-sync:
+  webdav-ingest:
     image: rclone/rclone:1.75.1
-    profiles: ["nextcloud"]
+    profiles: ["webdav", "nextcloud"]
     restart: unless-stopped
     entrypoint: ["/bin/sh", "-c"]
     command:
@@ -36,8 +36,8 @@ services:
         }
         trap stop TERM INT
         while true; do
-          rclone sync "nextcloud:$${NEXTCLOUD_PATH}" /knowledge/sources/nextcloud \
-            --create-empty-src-dirs --links --log-level INFO &
+          rclone sync "webdav:$${WEBDAV_PATH}" /knowledge/sources/webdav \
+            --create-empty-src-dirs --log-level INFO &
           child_pid=$$!
           wait "$${child_pid}"
           child_pid=
@@ -48,16 +48,16 @@ services:
         done
     environment:
       TZ: ${TZ:-UTC}
-      NEXTCLOUD_PATH: ${NEXTCLOUD_PATH:-Wiki Sources}
-      SYNC_INTERVAL: ${NEXTCLOUD_SYNC_INTERVAL:-15m}
-      RCLONE_CONFIG_NEXTCLOUD_TYPE: webdav
-      RCLONE_CONFIG_NEXTCLOUD_URL: ${NEXTCLOUD_WEBDAV_URL:-https://cloud.example.com/remote.php/dav/files/username/}
-      RCLONE_CONFIG_NEXTCLOUD_VENDOR: nextcloud
-      RCLONE_CONFIG_NEXTCLOUD_USER: ${NEXTCLOUD_USERNAME:-username}
-      RCLONE_CONFIG_NEXTCLOUD_PASS: ${NEXTCLOUD_PASSWORD_OBSCURED:-}
+      WEBDAV_PATH: ${WEBDAV_PATH:-${NEXTCLOUD_PATH:-Wiki Sources}}
+      SYNC_INTERVAL: ${WEBDAV_SYNC_INTERVAL:-${NEXTCLOUD_SYNC_INTERVAL:-15m}}
+      RCLONE_CONFIG_WEBDAV_TYPE: webdav
+      RCLONE_CONFIG_WEBDAV_URL: ${WEBDAV_URL:-${NEXTCLOUD_WEBDAV_URL:-https://cloud.example.com/remote.php/dav/files/username/}}
+      RCLONE_CONFIG_WEBDAV_VENDOR: ${WEBDAV_VENDOR:-nextcloud}
+      RCLONE_CONFIG_WEBDAV_USER: ${WEBDAV_USERNAME:-${NEXTCLOUD_USERNAME:-username}}
+      RCLONE_CONFIG_WEBDAV_PASS: ${WEBDAV_PASSWORD_OBSCURED:-${NEXTCLOUD_PASSWORD_OBSCURED:-}}
     user: "${PUID:-1000}:${PGID:-1000}"
     volumes:
-      - ${DATA_ROOT:-./data}/sources/nextcloud:/knowledge/sources/nextcloud:rw
+      - ${DATA_ROOT:-./data}/sources/webdav:/knowledge/sources/webdav:rw
     depends_on:
       init:
         condition: service_completed_successfully
@@ -186,10 +186,10 @@ services:
       SESSION_EXPORT_REMOTE_PATH: ${NEXTCLOUD_SESSION_PATH:-OpenCode Sessions}
       SESSION_EXPORT_INTERVAL: ${SESSION_EXPORT_INTERVAL:-15m}
       RCLONE_CONFIG_NEXTCLOUD_TYPE: webdav
-      RCLONE_CONFIG_NEXTCLOUD_URL: ${NEXTCLOUD_WEBDAV_URL:-https://cloud.example.com/remote.php/dav/files/username/}
-      RCLONE_CONFIG_NEXTCLOUD_VENDOR: nextcloud
-      RCLONE_CONFIG_NEXTCLOUD_USER: ${NEXTCLOUD_USERNAME:-username}
-      RCLONE_CONFIG_NEXTCLOUD_PASS: ${NEXTCLOUD_PASSWORD_OBSCURED:-}
+      RCLONE_CONFIG_NEXTCLOUD_URL: ${NEXTCLOUD_WEBDAV_URL:-${WEBDAV_URL:-https://cloud.example.com/remote.php/dav/files/username/}}
+      RCLONE_CONFIG_NEXTCLOUD_VENDOR: ${NEXTCLOUD_VENDOR:-${WEBDAV_VENDOR:-nextcloud}}
+      RCLONE_CONFIG_NEXTCLOUD_USER: ${NEXTCLOUD_USERNAME:-${WEBDAV_USERNAME:-username}}
+      RCLONE_CONFIG_NEXTCLOUD_PASS: ${NEXTCLOUD_PASSWORD_OBSCURED:-${WEBDAV_PASSWORD_OBSCURED:-}}
     volumes:
       - ${DATA_ROOT:-./data}/exports/sessions:/exports:rw
     depends_on:

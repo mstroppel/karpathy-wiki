@@ -25,6 +25,7 @@ jobs:
       - name: Run unit tests
         run: |
           python -m unittest discover -s tests -v
+          node --test tests/test_wiki_ingest_status.mjs
           (cd paperless-ingest && python -m unittest discover -s tests -v)
           (cd session-export && python -m unittest discover -s tests -v)
       - name: Validate scripts and configuration
@@ -33,6 +34,11 @@ jobs:
           sh -n install.sh
           sh -n session-export/export-session.sh
           node --check config/tools/wiki_ingest_status.js
+          node --check config/tools/wiki_ingest_status_core.mjs
+          node --check config/ingest-adapters/shared.mjs
+          for adapter in config/ingest-adapters/*/status.mjs; do
+            node --check "$adapter"
+          done
           docker compose --env-file .env.example config --quiet
 
   images:

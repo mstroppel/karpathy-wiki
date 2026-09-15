@@ -1,6 +1,6 @@
 ---
 name: wiki-ingest
-description: Liest einzelne Nextcloud- oder optional anonymisierte Paperless-Quellen sowie neue Paperless-Revisionen in das Wiki ein. NUR bei ausdrücklichem Einlesen, Importieren, Verarbeiten, Aufnehmen oder Übernehmen ins Wiki verwenden.
+description: Liest einzelne Quellen sowie neue oder geänderte Quellrevisionen in das Wiki ein. NUR bei ausdrücklichem Einlesen, Importieren, Verarbeiten, Aufnehmen oder Übernehmen ins Wiki verwenden.
 ---
 
 # Wiki-Quelle Einlesen
@@ -31,35 +31,33 @@ anzulegen. Arbeite und berichte auf Deutsch.
    nach dem Commit und nenne Quellpfad, Commit-Hash, geänderte Seiten,
    Widersprüche und Extraktionsgrenzen.
 
-## Nextcloud
+## Revisionsstatus
 
-Nextcloud-Quellen liegen unter `/knowledge/sources/nextcloud`; ihre
-Zusammenfassungen liegen unter `sources/nextcloud/`. Prüfe anhand des exakten
-Quellpfads, ob eine Quelle bereits eingelesen wurde. Brich ohne Änderungen ab,
-wenn ihr Format nicht zuverlässig gelesen werden kann.
+Rufe vor jedem Einlesen `wiki_ingest_status` auf. Das Tool entdeckt Quellenarten
+anhand ihrer Unterverzeichnisse und validiert deren jeweiligen Vertrag. Verwende
+für eine neue oder geänderte Quelle ausschließlich die vom Tool gelieferten
+Felder:
 
-## Optionales Paperless
+- `source_key`: stabile Identität innerhalb des Adapters
+- `source_path`: zu lesende Quelldatei
+- `source_revision`: geprüfte Revision
+- `wiki_path`: Ziel der Quellenzusammenfassung
+- `frontmatter`: exakt zu übernehmende Metadaten
 
-Paperless ist nur aktiviert, wenn `/knowledge/sources/paperless` existiert und
-`wiki_ingest_status` `enabled: true` meldet. Greife andernfalls nicht darauf zu
-und melde Paperless-Stapelaufträge ohne Wiki-Änderung als nicht aktiviert.
+Schreibe das gelieferte `frontmatter` als gültiges YAML an den Anfang der
+Quellenseite und erhalte alle Felder bei Aktualisierungen. Bei `current` ändere
+und committe nichts. Bei `outdated` aktualisiere dieselbe Seite und korrigiere
+nur von der alten Revision abhängige Aussagen. Brich ohne Änderungen ab, wenn
+das Dateiformat nicht zuverlässig gelesen werden kann. Erhalte anonymisierte
+Platzhalter und versuche nie, sie auf reale Identitäten zurückzuführen.
 
-Für eine einzelne Paperless-Quelle:
+## Stapelverarbeitung
 
-1. Lies zuerst `revoked.md` und brich bei einer widerrufenen ID ab.
-2. Verlange `anonymized: true`, eine numerische `paperless_id`, eine
-   64-stellige hexadezimale `source_revision` und eine HTTPS-`paperless_url`.
-   Dateiname und ID müssen übereinstimmen.
-3. Lege die Quellenseite im 1000er-Bereich als
-   `sources/<von>-<bis>/paperless-<id>.md` an. Bewahre ID, Revision und den in
-   der Quelle angegebenen Link unverändert. Erhalte anonymisierte Platzhalter
-   und versuche keine Deanonymisierung.
-4. Bei gleicher Revision ändere und committe nichts. Bei einer neuen Revision
-   aktualisiere dieselbe Seite und korrigiere nur von der alten Revision
-   abhängige Aussagen.
-
-Für alle neuen oder geänderten Paperless-Quellen rufe zuerst
-`wiki_ingest_status` auf. Brich den Stapel vor Änderungen bei `invalid` oder
-`conflict` ab, melde `revoked` und `orphaned` ohne automatische Bereinigung und
-verarbeite `new` und `outdated` einzeln nach aufsteigender ID mit je einem
-Commit. Prüfe Status und Revision vor jeder Quelle und abschließend erneut.
+Für alle neuen oder geänderten Quellen rufe zuerst `wiki_ingest_status` auf.
+Brich den gesamten Stapel vor Änderungen ab, wenn irgendein entdeckter Adapter
+`invalid` oder `conflict` meldet. Melde `revoked` und `orphaned` ohne automatische
+Bereinigung. Durchlaufe alle vom Tool gelieferten Adapter in der
+ausgegebenen Reihenfolge und verarbeite jedes ihrer Elemente aus `new` und
+`outdated` einzeln mit je einem Commit. Die Reihenfolge des Tool-Ergebnisses ist
+verbindlich; sortiere sie nicht selbst um. Prüfe Status und Revision unmittelbar
+vor jeder Quelle und abschließend erneut.

@@ -24,7 +24,7 @@ Use profiles:
 ```env
 COMPOSE_PROJECT_NAME=sp-wiki
 STACK_ID=sp-wiki
-COMPOSE_PROFILES=nextcloud,session-export,raw-files
+COMPOSE_PROFILES=webdav,session-export,raw-files
 PAPERLESS_ENABLED=false
 ```
 
@@ -32,7 +32,7 @@ Map the old paths as follows:
 
 | Old | New below `DATA_ROOT` |
 | --- | --- |
-| `raw/nextcloud` | `sources/nextcloud` |
+| `raw/nextcloud` | `sources/webdav` |
 | `wiki` | `wiki` |
 | `opencode-config` | `opencode/config` |
 | `opencode-share` | `opencode/data` |
@@ -53,7 +53,7 @@ Use profiles:
 ```env
 COMPOSE_PROJECT_NAME=mein-wiki
 STACK_ID=mein-wiki
-COMPOSE_PROFILES=nextcloud,paperless
+COMPOSE_PROFILES=webdav,paperless
 PAPERLESS_ENABLED=true
 PAPERLESS_NETWORK=paperless-backend
 ```
@@ -83,6 +83,7 @@ an existing Karpathy Wiki installation:
 | `opencode-share` | `opencode/data` |
 | `opencode-state` | `opencode/state` |
 | `session-exports` | `exports/sessions` |
+| `sources/nextcloud` | `sources/webdav` |
 | Files in `quarantine` | `quarantine/paperless` |
 
 Stop the old stack and back up the complete data root before upgrading. Compose
@@ -90,6 +91,16 @@ may create empty current directories before init runs; these are safe migration
 destinations. If both a legacy and current path contain data, init stops without
 merging or overwriting either directory. Resolve that conflict manually from the
 backup before restarting the stack.
+
+The init service does not rewrite the independently versioned wiki. Before using
+`/ingest-new`, migrate existing `wiki/sources/nextcloud` pages in one reviewed
+wiki commit: move each page below `wiki/sources/webdav` to the source-relative
+path with an additional `index.md` and add `source_adapter: webdav`, the
+normalized relative `source_path`, and the current SHA-256 `source_revision` to
+its frontmatter. Also update the generated `wiki/AGENTS.md` references from
+`/knowledge/sources/nextcloud` and `sources/nextcloud` to their WebDAV
+counterparts. The status tool reports remaining legacy pages and source paths as
+invalid so a batch import cannot accidentally duplicate their knowledge.
 
 ## Validation
 

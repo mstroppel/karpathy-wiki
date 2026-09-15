@@ -22,7 +22,7 @@ remain, so this process must not be treated as guaranteed anonymization.
 6. Enable the profile and generated policy:
 
 ```env
-COMPOSE_PROFILES=nextcloud,paperless
+COMPOSE_PROFILES=webdav,paperless
 PAPERLESS_ENABLED=true
 PAPERLESS_API_URL=http://paperless:8000
 PAPERLESS_PUBLIC_URL=https://paperless.example.com

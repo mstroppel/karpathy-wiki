@@ -11,8 +11,8 @@ sichere, belegtreue Korrekturen an. Arbeite und berichte auf Deutsch.
 Prüfe defekte Wikilinks, Indexabweichungen, verwaiste Seiten, Duplikate,
 ungültige Dateinamen, fehlende Herkunftsnachweise, unaufgelöste Widersprüche,
 veraltete Synthesen und Abweichungen zwischen Überblick, Themen- und
-Quellenseiten. Wenn Paperless aktiviert ist, rufe `wiki_ingest_status` auf und
-melde ungültige, widersprüchliche, veraltete, verwaiste oder widerrufene
+Quellenseiten. Rufe `wiki_ingest_status` auf und prüfe alle entdeckten Adapter
+auf ungültige, widersprüchliche, veraltete, verwaiste oder widerrufene
 Revisionen; bereinige Widerrufe nie ohne ausdrücklichen Auftrag.
 
 1. Lies `AGENTS.md`, `index.md`, `overview.md`, `log.md` und danach alle

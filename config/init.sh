@@ -133,11 +133,12 @@ migrate_directory "$KNOWLEDGE_ROOT/opencode-config" "$KNOWLEDGE_ROOT/opencode/co
 migrate_directory "$KNOWLEDGE_ROOT/opencode-share" "$KNOWLEDGE_ROOT/opencode/data"
 migrate_directory "$KNOWLEDGE_ROOT/opencode-state" "$KNOWLEDGE_ROOT/opencode/state"
 migrate_directory "$KNOWLEDGE_ROOT/session-exports" "$KNOWLEDGE_ROOT/exports/sessions"
+migrate_directory "$sources/nextcloud" "$sources/webdav"
 migrate_quarantine
 
-mkdir -p "$sources/nextcloud" \
+mkdir -p "$sources/webdav" \
   "$wiki/assets" \
-  "$wiki/sources/nextcloud" \
+  "$wiki/sources/webdav" \
   "$wiki/entities" \
   "$wiki/concepts" \
   "$wiki/analyses" \
@@ -192,8 +193,8 @@ install_if_absent "$wiki/AGENTS.md" <<EOF
 
 Pflege dieses Verzeichnis als dauerhaftes, mit jeder Quelle wertvoller werdendes
 Markdown-Wiki. Neue Quellen liegen ausschließlich unter
-\`/knowledge/sources\`. Nextcloud-Quellen liegen unter
-\`/knowledge/sources/nextcloud\`.$paperless_summary
+\`/knowledge/sources\`. WebDAV-Quellen liegen unter
+\`/knowledge/sources/webdav\`.$paperless_summary
 
 Der primäre Agent delegiert ausdrückliche Einleseaufträge an \`wiki-ingest\`,
 Prüf- und Wartungsaufträge an \`wiki-lint\` und ausdrücklich wissenschaftliche
@@ -214,7 +215,7 @@ Analysen an \`wiki-analysis\`. Jede andere Anfrage bleibt eine Wiki-Abfrage.
 - \`index.md\`: Katalog aller dauerhaften Wiki-Seiten.
 - \`overview.md\`: Übergreifende Synthese des gesammelten Wissens.
 - \`log.md\`: Chronologisches, nur ergänzbares Vorgangsprotokoll.
-- \`sources/nextcloud/\`: Eine Zusammenfassung pro eingelesener Nextcloud-Datei.$paperless_structure
+- \`sources/webdav/\`: Eine revisionsbezogene Zusammenfassung pro eingelesener WebDAV-Datei.$paperless_structure
 - \`entities/\`: Dauerhafte Seiten zu Personen, Organisationen, Orten und Dingen.
 - \`concepts/\`: Konzepte, Methoden, Themen und wiederkehrende Ideen.
 - \`analyses/\`: Vergleiche, Synthesen und wiederverwendbare Ergebnisse.
