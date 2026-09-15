@@ -38,6 +38,33 @@ separate trusted process. Set `PAPERLESS_ENABLED=true` exactly when the
 `paperless` profile is active so initialization installs the corresponding wiki
 rules and directories.
 
+Ingest tracking discovers adapters from directories below
+`/knowledge/sources`. A directory is handled only when the trusted OpenCode image
+contains a matching `/etc/opencode/ingest-adapters/<directory>/status.mjs`;
+otherwise it is reported as invalid. Adding another source type therefore
+requires only its source directory, status module, and source-specific ingest
+validation, not a change to `/ingest-new`, its skill, or the generic status tool.
+
+Each status module exports one asynchronous default function. It receives
+`sourceRoot` and `wikiSourceRoot` and returns the arrays `new`, `outdated`,
+`current`, `conflict`, `revoked`, `orphaned`, and `invalid`. Pending and current
+items share these required fields:
+
+| Field | Purpose |
+| --- | --- |
+| `source_key` | Stable identity and deterministic adapter-local order |
+| `source_path` | Absolute file path below the adapter's source directory |
+| `source_revision` | Lowercase SHA-256 revision |
+| `wiki_path` | Absolute target below the wiki source directory |
+| `frontmatter` | Trusted adapter metadata including the same `source_revision` |
+
+The generic tool validates this contract and converts load, execution, and
+contract errors into `invalid` results. `frontmatter` must contain only
+JSON-compatible values, and `wiki_path` must be unique across every discovered
+adapter; collisions are reported as `conflict`. Adapter modules are loaded only
+from the read-only OpenCode image; code found in source directories is never
+executed.
+
 ## Secrets
 
 WebDAV uses rclone's obscured password format. Obscuring is not encryption;

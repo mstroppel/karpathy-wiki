@@ -2,7 +2,7 @@ import { tool } from "@opencode-ai/plugin"
 import { scanIngestStatus } from "./wiki_ingest_status_core.mjs"
 
 export default tool({
-  description: "Vergleicht WebDAV- und optional aktivierte anonymisierte Paperless-Quellen mit Wiki-Quellenseiten und meldet ihren Revisionsstatus.",
+  description: "Vergleicht die vorhandenen Quellen mit ihren Wiki-Quellenseiten und meldet den Status aller erkannten Adapter.",
   args: {
     include_current: tool.schema.boolean().optional().describe("Auch bereits aktuelle Quellen ausgeben"),
   },
@@ -10,7 +10,7 @@ export default tool({
     const result = await scanIngestStatus({
       sourceRoot: "/knowledge/sources",
       wikiSourceRoot: "/knowledge/wiki/sources",
-      paperlessEnabled: (process.env.PAPERLESS_ENABLED ?? "false") === "true",
+      adapterRoot: "/etc/opencode/ingest-adapters",
       includeCurrent: args.include_current,
     })
     return JSON.stringify(result, null, 2)

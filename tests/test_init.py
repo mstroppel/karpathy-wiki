@@ -199,11 +199,12 @@ class ConfigTests(unittest.TestCase):
         self.assertNotIn("WebDAV", ingest_new["description"] + ingest_new["template"])
         self.assertNotIn("Paperless", ingest_new["description"] + ingest_new["template"])
         self.assertIn("/knowledge/sources", ingest_new["template"])
-
-    def test_compose_passes_paperless_state_to_opencode(self):
-        compose = (ROOT / "compose.yaml").read_text()
-        self.assertIn("PAPERLESS_ENABLED: ${PAPERLESS_ENABLED:-false}", compose)
-
+        generic_status = "".join(
+            (ROOT / "config" / "tools" / name).read_text().lower()
+            for name in ("wiki_ingest_status.js", "wiki_ingest_status_core.mjs")
+        )
+        self.assertNotIn("webdav", generic_status)
+        self.assertNotIn("paperless", generic_status)
 
 if __name__ == "__main__":
     unittest.main()

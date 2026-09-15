@@ -1,6 +1,6 @@
 ---
 name: wiki-ingest
-description: Liest einzelne WebDAV- oder optional anonymisierte Paperless-Quellen sowie neue Revisionen in das Wiki ein. NUR bei ausdrücklichem Einlesen, Importieren, Verarbeiten, Aufnehmen oder Übernehmen ins Wiki verwenden.
+description: Liest einzelne Quellen sowie neue oder geänderte Quellrevisionen in das Wiki ein. NUR bei ausdrücklichem Einlesen, Importieren, Verarbeiten, Aufnehmen oder Übernehmen ins Wiki verwenden.
 ---
 
 # Wiki-Quelle Einlesen
@@ -31,59 +31,32 @@ anzulegen. Arbeite und berichte auf Deutsch.
    nach dem Commit und nenne Quellpfad, Commit-Hash, geänderte Seiten,
    Widersprüche und Extraktionsgrenzen.
 
-## WebDAV
+## Revisionsstatus
 
-WebDAV-Quellen liegen unter `/knowledge/sources/webdav`. Rufe vor dem Einlesen
-`wiki_ingest_status` auf und verwende ausschließlich die dort gemeldete Revision.
-Der relative Pfad unterhalb des WebDAV-Verzeichnisses ist die stabile Identität
-der Quelle. Ihre Quellenseite liegt unter demselben Pfad in `sources/webdav/`,
-ergänzt um `index.md`: Aus `ordner/datei.pdf` wird
-`sources/webdav/ordner/datei.pdf/index.md`.
+Rufe vor jedem Einlesen `wiki_ingest_status` auf. Das Tool entdeckt Quellenarten
+anhand ihrer Unterverzeichnisse und validiert deren jeweiligen Vertrag. Verwende
+für eine neue oder geänderte Quelle ausschließlich die vom Tool gelieferten
+Felder:
 
-Beginne jede WebDAV-Quellenseite mit diesem Frontmatter und übernimm Pfad und
-Revision exakt aus dem Tool-Ergebnis:
+- `source_key`: stabile Identität innerhalb des Adapters
+- `source_path`: zu lesende Quelldatei
+- `source_revision`: geprüfte Revision
+- `wiki_path`: Ziel der Quellenzusammenfassung
+- `frontmatter`: exakt zu übernehmende Metadaten
 
-```yaml
----
-source_adapter: webdav
-source_path: "ordner/datei.pdf"
-source_revision: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
----
-```
-
-Brich ohne Änderungen ab, wenn das Dateiformat nicht zuverlässig gelesen werden
-kann. Bei gleicher Revision ändere und committe nichts. Bei einer neuen Revision
-aktualisiere dieselbe Quellenseite und korrigiere nur von der alten Revision
-abhängige Aussagen. Ein geänderter Pfad gilt als entfernte und neue Quelle;
-bereinige `orphaned` nie automatisch.
-
-## Optionales Paperless
-
-Paperless ist nur aktiviert, wenn `/knowledge/sources/paperless` existiert und
-`wiki_ingest_status` für den Adapter `paperless` `enabled: true` meldet. Greife
-andernfalls nicht darauf zu und melde Paperless-Stapelaufträge ohne Wiki-Änderung
-als nicht aktiviert.
-
-Für eine einzelne Paperless-Quelle:
-
-1. Lies zuerst `revoked.md` und brich bei einer widerrufenen ID ab.
-2. Verlange `anonymized: true`, eine numerische `paperless_id`, eine
-   64-stellige hexadezimale `source_revision` und eine HTTPS-`paperless_url`.
-   Dateiname und ID müssen übereinstimmen.
-3. Lege die Quellenseite im 1000er-Bereich als
-   `sources/<von>-<bis>/paperless-<id>.md` an. Bewahre ID, Revision und den in
-   der Quelle angegebenen Link unverändert. Erhalte anonymisierte Platzhalter
-   und versuche keine Deanonymisierung.
-4. Bei gleicher Revision ändere und committe nichts. Bei einer neuen Revision
-   aktualisiere dieselbe Seite und korrigiere nur von der alten Revision
-   abhängige Aussagen.
+Schreibe das gelieferte `frontmatter` als gültiges YAML an den Anfang der
+Quellenseite und erhalte alle Felder bei Aktualisierungen. Bei `current` ändere
+und committe nichts. Bei `outdated` aktualisiere dieselbe Seite und korrigiere
+nur von der alten Revision abhängige Aussagen. Brich ohne Änderungen ab, wenn
+das Dateiformat nicht zuverlässig gelesen werden kann. Erhalte anonymisierte
+Platzhalter und versuche nie, sie auf reale Identitäten zurückzuführen.
 
 ## Stapelverarbeitung
 
 Für alle neuen oder geänderten Quellen rufe zuerst `wiki_ingest_status` auf.
-Brich den gesamten Stapel vor Änderungen ab, wenn irgendein aktivierter Adapter
+Brich den gesamten Stapel vor Änderungen ab, wenn irgendein entdeckter Adapter
 `invalid` oder `conflict` meldet. Melde `revoked` und `orphaned` ohne automatische
-Bereinigung. Durchlaufe alle vom Tool gelieferten aktivierten Adapter in der
+Bereinigung. Durchlaufe alle vom Tool gelieferten Adapter in der
 ausgegebenen Reihenfolge und verarbeite jedes ihrer Elemente aus `new` und
 `outdated` einzeln mit je einem Commit. Die Reihenfolge des Tool-Ergebnisses ist
 verbindlich; sortiere sie nicht selbst um. Prüfe Status und Revision unmittelbar

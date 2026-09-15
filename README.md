@@ -211,8 +211,10 @@ Conventional Commit.
 
 WebDAV source pages store the normalized path relative to `sources/webdav` and a
 SHA-256 hash of the source bytes. `/ingest-new` processes new and changed sources
-reported by all enabled adapters sequentially without silently deleting knowledge
-for removed sources.
+reported by all discovered adapters sequentially without silently deleting
+knowledge for removed sources. Status adapters are activated by their matching
+directory below `/knowledge/sources`; the generic tracking tool contains no
+source-specific logic.
 
 ## Development
 
@@ -227,6 +229,8 @@ sh -n config/init.sh
 sh -n install.sh
 sh -n session-export/export-session.sh
 node --check config/tools/wiki_ingest_status.js
+node --check config/tools/wiki_ingest_status_core.mjs
+for adapter in config/ingest-adapters/*/status.mjs; do node --check "$adapter"; done
 docker compose --env-file .env.example config --quiet
 ```
 
