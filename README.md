@@ -151,9 +151,11 @@ docker compose --env-file .env.example config --quiet
 ```
 
 GitHub Actions additionally builds every project image. Releases publish
-multi-architecture images to GHCR. Dependabot patch/minor updates and GitHub
-Actions updates are approved and squash-merged only after all protected CI checks
-pass. Major runtime updates remain manual. See
+multi-architecture images to GHCR. Pull requests from repository branches publish
+`linux/amd64` preview images tagged `pr-<number>`; set
+`KARPATHY_WIKI_VERSION=pr-<number>` to test one. Dependabot patch/minor updates
+and GitHub Actions updates are automatically approved and squash-merged after all
+protected CI checks pass. Major runtime updates remain manual. See
 [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow.
 
 ## Security Notes
