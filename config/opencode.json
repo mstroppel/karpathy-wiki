@@ -52,10 +52,10 @@
       "template": "Führe diesen Einleseauftrag vollständig aus: $ARGUMENTS"
     },
     "ingest-new": {
-      "description": "Alle neuen und geänderten WebDAV- und aktivierten Paperless-Quellen einlesen",
+      "description": "Alle neuen und geänderten Quellen einlesen",
       "agent": "wiki-ingest",
       "subtask": true,
-      "template": "Lies alle neuen und geänderten WebDAV- und aktivierten Paperless-Quellen strikt nacheinander ein."
+      "template": "Lies alle neuen und geänderten Quellen unter /knowledge/sources strikt nacheinander ein."
     },
     "lint": {
       "description": "Wiki prüfen",

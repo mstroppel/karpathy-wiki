@@ -210,9 +210,9 @@ only to `wiki/`, and every successful write operation ends in a focused
 Conventional Commit.
 
 WebDAV source pages store the normalized path relative to `sources/webdav` and a
-SHA-256 hash of the source bytes. `/ingest-new` uses these values to process new
-and changed WebDAV and Paperless sources sequentially without silently deleting
-knowledge for removed sources.
+SHA-256 hash of the source bytes. `/ingest-new` processes new and changed sources
+reported by all enabled adapters sequentially without silently deleting knowledge
+for removed sources.
 
 ## Development
 

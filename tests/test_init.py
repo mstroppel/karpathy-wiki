@@ -195,6 +195,10 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(
             set(config["skills"]["paths"]), {"/etc/opencode/skills"}
         )
+        ingest_new = config["command"]["ingest-new"]
+        self.assertNotIn("WebDAV", ingest_new["description"] + ingest_new["template"])
+        self.assertNotIn("Paperless", ingest_new["description"] + ingest_new["template"])
+        self.assertIn("/knowledge/sources", ingest_new["template"])
 
     def test_compose_passes_paperless_state_to_opencode(self):
         compose = (ROOT / "compose.yaml").read_text()

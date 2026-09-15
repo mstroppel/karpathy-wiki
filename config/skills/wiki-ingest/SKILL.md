@@ -83,7 +83,8 @@ Für eine einzelne Paperless-Quelle:
 Für alle neuen oder geänderten Quellen rufe zuerst `wiki_ingest_status` auf.
 Brich den gesamten Stapel vor Änderungen ab, wenn irgendein aktivierter Adapter
 `invalid` oder `conflict` meldet. Melde `revoked` und `orphaned` ohne automatische
-Bereinigung. Verarbeite danach zunächst WebDAV-Elemente nach
-`source_relative_path` und anschließend Paperless-Elemente nach aufsteigender ID.
-Verarbeite jedes Element aus `new` und `outdated` einzeln mit je einem Commit.
-Prüfe Status und Revision unmittelbar vor jeder Quelle und abschließend erneut.
+Bereinigung. Durchlaufe alle vom Tool gelieferten aktivierten Adapter in der
+ausgegebenen Reihenfolge und verarbeite jedes ihrer Elemente aus `new` und
+`outdated` einzeln mit je einem Commit. Die Reihenfolge des Tool-Ergebnisses ist
+verbindlich; sortiere sie nicht selbst um. Prüfe Status und Revision unmittelbar
+vor jeder Quelle und abschließend erneut.
