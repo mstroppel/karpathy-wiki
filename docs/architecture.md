@@ -1,0 +1,36 @@
+# Architecture
+
+The core services are `init`, `opencode`, and `silverbullet`. Optional source
+and export services are enabled with Compose profiles.
+
+```text
+WebDAV ------- rclone -> local redaction -> sources/webdav/ ------+
+                                                                  |
+Paperless ---- local redaction (optional) -> sources/paperless/ --+--> OpenCode
+                                                                        |
+                                                                        v
+                                                                   wiki/ + Git
+                                                                        |
+                                                                        v
+                                                                   SilverBullet
+
+OpenCode sessions -- optional PDF export ------------------------> Nextcloud
+```
+
+OpenCode reads source directories and writes generated Markdown to `wiki/`.
+SilverBullet reads the wiki space. Services do not publish host ports; the
+reverse proxy reaches them through `WEBPROXY_NETWORK` using these aliases:
+
+```text
+${STACK_ID}-silverbullet:3000
+${STACK_ID}-opencode:4096
+${STACK_ID}-raw-files:8080
+```
+
+`COMPOSE_PROJECT_NAME` separates containers and private networks. `STACK_ID`
+provides unique aliases on the shared proxy network, allowing multiple
+installations to run independently with different environment files and data
+roots. Only trusted proxy infrastructure should join `WEBPROXY_NETWORK`.
+
+The experimental analysis UI is not part of this stack. It can be added later
+without changing the source and wiki contracts.
