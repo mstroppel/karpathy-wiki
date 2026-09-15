@@ -206,5 +206,9 @@ class ConfigTests(unittest.TestCase):
         self.assertNotIn("webdav", generic_status)
         self.assertNotIn("paperless", generic_status)
 
+    def test_compose_passes_paperless_state_to_opencode(self):
+        compose = (ROOT / "compose.yaml").read_text()
+        self.assertIn("PAPERLESS_ENABLED: ${PAPERLESS_ENABLED:-false}", compose)
+
 if __name__ == "__main__":
     unittest.main()
