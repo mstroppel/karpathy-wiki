@@ -30,6 +30,7 @@ jobs:
       - name: Validate scripts and configuration
         run: |
           sh -n config/init.sh
+          sh -n install.sh
           sh -n session-export/export-session.sh
           node --check config/tools/wiki_ingest_status.js
           docker compose --env-file .env.example config --quiet

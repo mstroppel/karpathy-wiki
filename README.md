@@ -39,32 +39,102 @@ adapters are enabled independently through Compose profiles:
 The experimental analysis UI is deliberately not part of this project. It can
 be added later without changing the source and wiki contracts.
 
-## Quick Start
+## Create Your First Wiki
 
-Requirements:
+You need Docker Engine with Docker Compose v2, a reverse proxy attached to a
+Docker network, and an account with an
+[OpenCode-supported model provider](https://opencode.ai/docs/providers/).
+Nextcloud, Paperless, and the other Compose profiles are optional and are not
+needed for the first start.
 
-- Docker Engine with Docker Compose v2
-- An existing external proxy network, named `webproxy` by default
-- An OpenCode-supported model provider
+1. Download the small installer. It resolves the latest release, downloads its
+   `compose.yaml` and `.env.example`, and pins the matching container image
+   version in the generated `.env`. A Git checkout is not required:
 
-Create the proxy network once if your reverse proxy does not create it:
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/mstroppel/karpathy-wiki/main/install.sh \
+     | INSTALL_DIR=my-wiki sh
+   cd my-wiki
+   ```
 
-```bash
-docker network create webproxy
-```
+   `INSTALL_DIR` only sets the local installation directory. Configure the wiki
+   name with `WIKI_NAME` and its unique container/DNS prefix with
+   `COMPOSE_PROJECT_NAME` and `STACK_ID` in `.env`.
 
-Configure and start one instance:
+   Review [`install.sh`](install.sh) before piping it to a shell if required by
+   your security policy. Set `INSTALL_DIR` or `KARPATHY_WIKI_VERSION` on `sh` to
+   choose another directory or a specific release:
 
-```bash
-cp .env.example .env
-# Edit the URLs, DATA_ROOT, and OPENCODE_SERVER_PASSWORD at minimum.
-docker compose config --quiet
-docker compose up -d
-```
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/mstroppel/karpathy-wiki/main/install.sh \
+     | INSTALL_DIR=personal-wiki KARPATHY_WIKI_VERSION=0.1.0 sh
+   ```
+
+2. Edit `.env`. For a minimal installation, set these values and leave
+   `COMPOSE_PROFILES` empty:
+
+   ```env
+   WIKI_NAME=My Wiki
+   WIKI_PUBLIC_URL=https://wiki.example.com
+   OPENCODE_PUBLIC_URL=https://chat.example.com
+   DATA_ROOT=./data
+   OPENCODE_SERVER_PASSWORD=replace-with-a-long-random-password
+   COMPOSE_PROFILES=
+   ```
+
+   Keep the default `PUID=1000` and `PGID=1000` only if they match the host user
+   that should own the wiki files. A password can be generated with
+   `openssl rand -base64 32`.
+
+3. Create the shared proxy network if it does not exist, validate the
+   configuration, and start the wiki:
+
+   ```bash
+   docker network inspect webproxy >/dev/null 2>&1 || docker network create webproxy
+   docker compose config --quiet
+   docker compose up -d
+   ```
+
+   The first start creates `${DATA_ROOT}`, initializes the Markdown wiki as an
+   independent Git repository, and starts OpenCode and SilverBullet. Configure
+   the reverse proxy with these upstreams (replace `karpathy-wiki` if you changed
+   `STACK_ID`):
+
+   ```text
+   karpathy-wiki-silverbullet:3000  # WIKI_PUBLIC_URL
+   karpathy-wiki-opencode:4096      # OPENCODE_PUBLIC_URL
+   ```
+
+4. Open `OPENCODE_PUBLIC_URL`, sign in with user `opencode` and the configured
+   password, and connect the model provider in the OpenCode UI. To create the
+   first wiki content without an adapter, copy a document into the local source
+   directory and explicitly ask OpenCode to ingest it:
+
+   ```bash
+   cp /path/to/my-document.pdf ./data/sources/nextcloud/
+   ```
+
+   This path assumes the minimal `DATA_ROOT=./data` setting above. Use the
+   configured data directory if you changed it.
+
+   Example prompt:
+
+   ```text
+   Import /knowledge/sources/nextcloud/my-document.pdf into the wiki.
+   ```
+
+   OpenCode writes the linked Markdown pages and creates a focused Git commit.
+   Read the result at `WIKI_PUBLIC_URL`. Add the `nextcloud` or `paperless`
+   profile later when sources should be synchronized automatically.
 
 OpenCode provider credentials and session state are persisted below
-`${DATA_ROOT}`. Complete provider authentication through the OpenCode UI after
-the first start.
+`${DATA_ROOT}`. The services do not publish host ports; the reverse proxy must be
+attached to `WEBPROXY_NETWORK`. See [configuration](docs/configuration.md) for
+proxy, permissions, profiles, and production path settings.
+
+All persistent service directories use subdirectories of `DATA_ROOT`, so a new
+installation does not need a Compose override file. Secret files can remain
+elsewhere through `PAPERLESS_TOKEN_FILE` and `REDACTIONS_FILE`.
 
 ## Multiple Instances
 
@@ -145,6 +215,7 @@ python3 -m unittest discover -s tests -v
 (cd paperless-ingest && python3 -m unittest discover -s tests -v)
 (cd session-export && python3 -m unittest discover -s tests -v)
 sh -n config/init.sh
+sh -n install.sh
 sh -n session-export/export-session.sh
 node --check config/tools/wiki_ingest_status.js
 docker compose --env-file .env.example config --quiet

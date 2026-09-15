@@ -20,6 +20,10 @@ when reproducible upgrades are required.
 
 `COMPOSE_PROJECT_NAME` and `STACK_ID` should contain lowercase letters, digits,
 hyphens, or underscores. Use a different pair and `DATA_ROOT` for every instance.
+Every persistent service directory is created below `DATA_ROOT`; no Compose
+override file is needed to place a new instance's data on another filesystem.
+Use an absolute path in production, for example
+`DATA_ROOT=/srv/karpathy-wiki/personal`.
 
 ## Profiles
 
