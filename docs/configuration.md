@@ -80,6 +80,11 @@ source adapter. `WEBDAV_VENDOR` defaults to `nextcloud`; rclone also supports
 other WebDAV implementations. The legacy `nextcloud` profile and `NEXTCLOUD_*`
 source variables remain accepted for one migration release.
 
+WebDAV files are synchronized into a private staging directory first. The
+`webdav-ingest` service applies `REDACTIONS_FILE` locally and publishes only
+UTF-8 text files to `sources/webdav`; files that cannot be read as text are
+kept out of the source tree and written to `quarantine/webdav`.
+
 Paperless credentials and redaction values use files rather than environment
 values. Set absolute paths when possible:
 

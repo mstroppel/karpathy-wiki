@@ -137,6 +137,7 @@ migrate_directory "$sources/nextcloud" "$sources/webdav"
 migrate_quarantine
 
 mkdir -p "$sources/webdav" \
+  "$KNOWLEDGE_ROOT/incoming/webdav" \
   "$wiki/assets" \
   "$wiki/sources/webdav" \
   "$wiki/entities" \

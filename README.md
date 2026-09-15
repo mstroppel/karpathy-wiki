@@ -13,7 +13,7 @@ separate.
 ## Architecture
 
 ```text
-WebDAV ------- rclone --------------------> sources/webdav/ ------+
+WebDAV ------- rclone -> local redaction -> sources/webdav/ ------+
                                                                  |
 Paperless ---- local redaction (optional) -> sources/paperless/ --+--> OpenCode
                                                                        |
@@ -31,7 +31,7 @@ adapters are enabled independently through Compose profiles:
 
 | Profile | Purpose |
 | --- | --- |
-| `webdav` | Mirror a selected WebDAV folder into the read-only source tree |
+| `webdav` | Mirror and locally redact a selected WebDAV folder into the source tree |
 | `paperless` | Export tagged OCR text and redact configured personal data locally |
 | `session-export` | Archive inactive OpenCode sessions as PDFs in Nextcloud |
 | `raw-files` | Expose source files to a trusted reverse proxy |
