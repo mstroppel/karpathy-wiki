@@ -25,13 +25,38 @@ case "$out" in
 esac
 """
 
+INSTALL_FALLBACK_CURL_STUB = """#!/bin/sh
+out=""
+previous=""
+url=""
+for argument in "$@"; do
+  if [ "$previous" = "-o" ]; then out=$argument; fi
+  case "$argument" in
+    https://raw.githubusercontent.com/*) url=$argument ;;
+  esac
+  previous=$argument
+done
+case "$url" in
+  */v1.2.3/karpathy-wiki.sh)
+    printf '%s\n' 'curl: (22) The requested URL returned error: 404' >&2
+    exit 22
+    ;;
+  */main/karpathy-wiki.sh) printf '%s\n' '#!/bin/sh' > "$out" ;;
+  */v1.2.3/.env.example) printf '%s\n' \
+    'COMPOSE_PROJECT_NAME=karpathy-wiki' \
+    'STACK_ID=karpathy-wiki' \
+    'KARPATHY_WIKI_VERSION=latest' > "$out" ;;
+  *) exit 1 ;;
+esac
+"""
+
 
 class InstallTests(unittest.TestCase):
     def run_installer(self, directory, **overrides):
         bin_dir = Path(directory).parent / "bin"
         bin_dir.mkdir(exist_ok=True)
         curl = bin_dir / "curl"
-        curl.write_text(INSTALL_CURL_STUB)
+        curl.write_text(overrides.pop("CURL_STUB", INSTALL_CURL_STUB))
         curl.chmod(0o755)
         environment = {
             **os.environ,
@@ -75,6 +100,17 @@ class InstallTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("must be empty", result.stderr)
             self.assertFalse((directory / ".env").exists())
+
+    def test_install_suppresses_expected_missing_release_launcher(self):
+        with tempfile.TemporaryDirectory() as parent:
+            directory = Path(parent) / "my-wiki"
+            directory.mkdir()
+
+            result = self.run_installer(directory, CURL_STUB=INSTALL_FALLBACK_CURL_STUB)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stderr, "")
+            self.assertTrue((directory / "karpathy-wiki.sh").exists())
 
     def test_install_rejects_unsafe_directory_name(self):
         with tempfile.TemporaryDirectory() as parent:
