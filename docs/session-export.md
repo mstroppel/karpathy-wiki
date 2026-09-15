@@ -20,14 +20,16 @@ locally and is excluded from the Nextcloud mirror.
 ## Configuration
 
 ```env
-COMPOSE_PROFILES=nextcloud,session-export
+COMPOSE_PROFILES=webdav,session-export
 OPENCODE_PUBLIC_URL=https://chat.example.com
 NEXTCLOUD_SESSION_PATH=OpenCode Sessions
 SESSION_EXPORT_INTERVAL=15m
 ```
 
-The exporter reuses the configured Nextcloud WebDAV credentials. Exported
-conversations remain confidential even though internal tool details are omitted.
+The exporter reuses the configured WebDAV credentials by default. Set the
+corresponding `NEXTCLOUD_*` variables when it should use a separate Nextcloud
+account or endpoint. Exported conversations remain confidential even though
+internal tool details are omitted.
 
 ## Raw One-Off Export
 

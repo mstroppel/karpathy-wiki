@@ -29,7 +29,7 @@ class InitTests(unittest.TestCase):
             ["sh", str(INIT)], env=env, text=True, capture_output=True, check=True
         )
 
-    def test_nextcloud_only_initialization(self):
+    def test_webdav_only_initialization(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "knowledge"
             self.run_init(root)
@@ -38,7 +38,7 @@ class InitTests(unittest.TestCase):
             self.assertIn("# Example Wiki", agents)
             self.assertIn("https://wiki.example.test/<pfad-ohne-.md>", agents)
             self.assertFalse((root / "sources" / "paperless").exists())
-            self.assertTrue((root / "sources" / "nextcloud").is_dir())
+            self.assertTrue((root / "sources" / "webdav").is_dir())
             self.assertTrue((root / "wiki" / ".git").is_dir())
             self.assertTrue((root / "exports" / "sessions").is_dir())
             self.assertTrue((root / "opencode" / "config").is_dir())
@@ -103,6 +103,7 @@ class InitTests(unittest.TestCase):
                 "opencode-share/auth.json": "credentials",
                 "opencode-state/.lock": "state",
                 "session-exports/2026/session.pdf": "pdf",
+                "sources/nextcloud/folder/source.pdf": "source",
                 "quarantine/document-42.txt": "error",
                 "quarantine/.marker": "marker",
             }
@@ -117,6 +118,7 @@ class InitTests(unittest.TestCase):
                 "opencode/data",
                 "opencode/state",
                 "exports/sessions",
+                "sources/webdav",
                 "quarantine/paperless",
             ):
                 (root / relative).mkdir(parents=True, exist_ok=True)
@@ -128,6 +130,7 @@ class InitTests(unittest.TestCase):
                 "opencode/data/auth.json": "credentials",
                 "opencode/state/.lock": "state",
                 "exports/sessions/2026/session.pdf": "pdf",
+                "sources/webdav/folder/source.pdf": "source",
                 "quarantine/paperless/document-42.txt": "error",
                 "quarantine/paperless/.marker": "marker",
             }
@@ -138,8 +141,25 @@ class InitTests(unittest.TestCase):
                 "opencode-share",
                 "opencode-state",
                 "session-exports",
+                "sources/nextcloud",
             ):
                 self.assertFalse((root / legacy).exists())
+
+    def test_webdav_migration_refuses_populated_old_and_new_paths(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "knowledge"
+            old = root / "sources" / "nextcloud" / "old.pdf"
+            new = root / "sources" / "webdav" / "new.pdf"
+            old.parent.mkdir(parents=True)
+            new.parent.mkdir(parents=True)
+            old.write_text("old")
+            new.write_text("new")
+
+            with self.assertRaises(subprocess.CalledProcessError):
+                self.run_init(root)
+
+            self.assertEqual(old.read_text(), "old")
+            self.assertEqual(new.read_text(), "new")
 
     def test_migration_refuses_populated_legacy_and_current_paths(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -175,6 +195,10 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(
             set(config["skills"]["paths"]), {"/etc/opencode/skills"}
         )
+
+    def test_compose_passes_paperless_state_to_opencode(self):
+        compose = (ROOT / "compose.yaml").read_text()
+        self.assertIn("PAPERLESS_ENABLED: ${PAPERLESS_ENABLED:-false}", compose)
 
 
 if __name__ == "__main__":

@@ -13,7 +13,7 @@ separate.
 ## Architecture
 
 ```text
-Nextcloud ---- rclone --------------------> sources/nextcloud/ ---+
+WebDAV ------- rclone --------------------> sources/webdav/ ------+
                                                                  |
 Paperless ---- local redaction (optional) -> sources/paperless/ --+--> OpenCode
                                                                        |
@@ -31,7 +31,7 @@ adapters are enabled independently through Compose profiles:
 
 | Profile | Purpose |
 | --- | --- |
-| `nextcloud` | Mirror a selected WebDAV folder into the read-only source tree |
+| `webdav` | Mirror a selected WebDAV folder into the read-only source tree |
 | `paperless` | Export tagged OCR text and redact configured personal data locally |
 | `session-export` | Archive inactive OpenCode sessions as PDFs in Nextcloud |
 | `raw-files` | Expose source files to a trusted reverse proxy |
@@ -44,7 +44,7 @@ be added later without changing the source and wiki contracts.
 You need Docker Engine with Docker Compose v2, a reverse proxy attached to a
 Docker network, and an account with an
 [OpenCode-supported model provider](https://opencode.ai/docs/providers/).
-Nextcloud, Paperless, and the other Compose profiles are optional and are not
+WebDAV, Paperless, and the other Compose profiles are optional and are not
 needed for the first start.
 
 1. Download the small installer. It resolves the latest release, downloads its
@@ -111,7 +111,7 @@ needed for the first start.
    directory and explicitly ask OpenCode to ingest it:
 
    ```bash
-   cp /path/to/my-document.pdf ./data/sources/nextcloud/
+   cp /path/to/my-document.pdf ./data/sources/webdav/
    ```
 
    This path assumes the minimal `DATA_ROOT=./data` setting above. Use the
@@ -120,11 +120,11 @@ needed for the first start.
    Example prompt:
 
    ```text
-   Import /knowledge/sources/nextcloud/my-document.pdf into the wiki.
+   Import /knowledge/sources/webdav/my-document.pdf into the wiki.
    ```
 
    OpenCode writes the linked Markdown pages and creates a focused Git commit.
-   Read the result at `WIKI_PUBLIC_URL`. Add the `nextcloud` or `paperless`
+   Read the result at `WIKI_PUBLIC_URL`. Add the `webdav` or `paperless`
    profile later when sources should be synchronized automatically.
 
 OpenCode provider credentials and session state are persisted below
@@ -177,7 +177,7 @@ DATA_ROOT=/srv/karpathy-wiki/personal
 WIKI_PUBLIC_URL=https://wiki.example.com
 OPENCODE_PUBLIC_URL=https://chat.example.com
 OPENCODE_SERVER_PASSWORD=replace-with-a-long-random-password
-COMPOSE_PROFILES=nextcloud,paperless
+COMPOSE_PROFILES=webdav,paperless
 PAPERLESS_ENABLED=true
 KARPATHY_WIKI_VERSION=latest
 ```
@@ -192,7 +192,7 @@ and [migration](docs/migration.md) for complete setup details.
 ```text
 ${DATA_ROOT}/
 ├── sources/
-│   ├── nextcloud/
+│   ├── webdav/
 │   └── paperless/
 ├── wiki/                 # Independent Git repository and SilverBullet space
 ├── quarantine/
@@ -209,12 +209,18 @@ Source directories are read-only inside OpenCode. Generated knowledge is written
 only to `wiki/`, and every successful write operation ends in a focused
 Conventional Commit.
 
+WebDAV source pages store the normalized path relative to `sources/webdav` and a
+SHA-256 hash of the source bytes. `/ingest-new` uses these values to process new
+and changed WebDAV and Paperless sources sequentially without silently deleting
+knowledge for removed sources.
+
 ## Development
 
 Run all local checks:
 
 ```bash
 python3 -m unittest discover -s tests -v
+node --test tests/test_wiki_ingest_status.mjs
 (cd paperless-ingest && python3 -m unittest discover -s tests -v)
 (cd session-export && python3 -m unittest discover -s tests -v)
 sh -n config/init.sh
@@ -239,7 +245,7 @@ protected CI checks pass. Major runtime updates remain manual. See
 - Paperless redaction is an explicit deny-list, not general anonymization.
   Unknown values and OCR variants can remain in the output. Review samples before
   sending material to an external model provider.
-- Nextcloud material is not redacted.
+- WebDAV material is not redacted.
 - `raw-files` serves all configured sources and should only be enabled behind a
   trusted, authenticated proxy.
 - The OpenCode configuration blocks source edits and direct `.git` edits, but it
@@ -252,7 +258,7 @@ Report vulnerabilities according to [SECURITY.md](SECURITY.md).
 
 - Activate the prepared deployment overlays for both existing installations in
   separate maintenance windows and complete a soak test after each cutover.
-- Rotate the legacy Paperless, Nextcloud, and other deployment credentials that
+- Rotate the legacy Paperless, WebDAV/Nextcloud, and other deployment credentials that
   previously entered a Git history; removing them from the index does not remove
   them from existing commits.
 - Move Paperless and its importer from a shared proxy network to a dedicated
@@ -273,9 +279,7 @@ Report vulnerabilities according to [SECURITY.md](SECURITY.md).
 ## Possible Extensions
 
 - Queue and automatically ingest new Paperless revisions one at a time.
-- Add revision-aware ingestion for changed Nextcloud files.
-- Provide optional source adapters for local directories, S3, or other WebDAV
-  services.
+- Provide optional source adapters for local directories or S3.
 - Add backup/restore verification and migration tooling for the wiki Git history.
 - Add an optional, separately tested analysis UI in a future release.
 - Add OpenTelemetry-compatible health and operational metrics.

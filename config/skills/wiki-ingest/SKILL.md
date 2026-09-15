@@ -1,6 +1,6 @@
 ---
 name: wiki-ingest
-description: Liest einzelne Nextcloud- oder optional anonymisierte Paperless-Quellen sowie neue Paperless-Revisionen in das Wiki ein. NUR bei ausdrücklichem Einlesen, Importieren, Verarbeiten, Aufnehmen oder Übernehmen ins Wiki verwenden.
+description: Liest einzelne WebDAV- oder optional anonymisierte Paperless-Quellen sowie neue Revisionen in das Wiki ein. NUR bei ausdrücklichem Einlesen, Importieren, Verarbeiten, Aufnehmen oder Übernehmen ins Wiki verwenden.
 ---
 
 # Wiki-Quelle Einlesen
@@ -31,18 +31,38 @@ anzulegen. Arbeite und berichte auf Deutsch.
    nach dem Commit und nenne Quellpfad, Commit-Hash, geänderte Seiten,
    Widersprüche und Extraktionsgrenzen.
 
-## Nextcloud
+## WebDAV
 
-Nextcloud-Quellen liegen unter `/knowledge/sources/nextcloud`; ihre
-Zusammenfassungen liegen unter `sources/nextcloud/`. Prüfe anhand des exakten
-Quellpfads, ob eine Quelle bereits eingelesen wurde. Brich ohne Änderungen ab,
-wenn ihr Format nicht zuverlässig gelesen werden kann.
+WebDAV-Quellen liegen unter `/knowledge/sources/webdav`. Rufe vor dem Einlesen
+`wiki_ingest_status` auf und verwende ausschließlich die dort gemeldete Revision.
+Der relative Pfad unterhalb des WebDAV-Verzeichnisses ist die stabile Identität
+der Quelle. Ihre Quellenseite liegt unter demselben Pfad in `sources/webdav/`,
+ergänzt um `index.md`: Aus `ordner/datei.pdf` wird
+`sources/webdav/ordner/datei.pdf/index.md`.
+
+Beginne jede WebDAV-Quellenseite mit diesem Frontmatter und übernimm Pfad und
+Revision exakt aus dem Tool-Ergebnis:
+
+```yaml
+---
+source_adapter: webdav
+source_path: "ordner/datei.pdf"
+source_revision: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+---
+```
+
+Brich ohne Änderungen ab, wenn das Dateiformat nicht zuverlässig gelesen werden
+kann. Bei gleicher Revision ändere und committe nichts. Bei einer neuen Revision
+aktualisiere dieselbe Quellenseite und korrigiere nur von der alten Revision
+abhängige Aussagen. Ein geänderter Pfad gilt als entfernte und neue Quelle;
+bereinige `orphaned` nie automatisch.
 
 ## Optionales Paperless
 
 Paperless ist nur aktiviert, wenn `/knowledge/sources/paperless` existiert und
-`wiki_ingest_status` `enabled: true` meldet. Greife andernfalls nicht darauf zu
-und melde Paperless-Stapelaufträge ohne Wiki-Änderung als nicht aktiviert.
+`wiki_ingest_status` für den Adapter `paperless` `enabled: true` meldet. Greife
+andernfalls nicht darauf zu und melde Paperless-Stapelaufträge ohne Wiki-Änderung
+als nicht aktiviert.
 
 Für eine einzelne Paperless-Quelle:
 
@@ -58,8 +78,12 @@ Für eine einzelne Paperless-Quelle:
    aktualisiere dieselbe Seite und korrigiere nur von der alten Revision
    abhängige Aussagen.
 
-Für alle neuen oder geänderten Paperless-Quellen rufe zuerst
-`wiki_ingest_status` auf. Brich den Stapel vor Änderungen bei `invalid` oder
-`conflict` ab, melde `revoked` und `orphaned` ohne automatische Bereinigung und
-verarbeite `new` und `outdated` einzeln nach aufsteigender ID mit je einem
-Commit. Prüfe Status und Revision vor jeder Quelle und abschließend erneut.
+## Stapelverarbeitung
+
+Für alle neuen oder geänderten Quellen rufe zuerst `wiki_ingest_status` auf.
+Brich den gesamten Stapel vor Änderungen ab, wenn irgendein aktivierter Adapter
+`invalid` oder `conflict` meldet. Melde `revoked` und `orphaned` ohne automatische
+Bereinigung. Verarbeite danach zunächst WebDAV-Elemente nach
+`source_relative_path` und anschließend Paperless-Elemente nach aufsteigender ID.
+Verarbeite jedes Element aus `new` und `outdated` einzeln mit je einem Commit.
+Prüfe Status und Revision unmittelbar vor jeder Quelle und abschließend erneut.

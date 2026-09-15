@@ -30,7 +30,7 @@ Use an absolute path in production, for example
 Select optional services with a comma-separated value:
 
 ```env
-COMPOSE_PROFILES=nextcloud,paperless,session-export,raw-files
+COMPOSE_PROFILES=webdav,paperless,session-export,raw-files
 ```
 
 An installation can run without source adapters and receive files through a
@@ -40,12 +40,18 @@ rules and directories.
 
 ## Secrets
 
-Nextcloud uses rclone's obscured password format. Obscuring is not encryption;
+WebDAV uses rclone's obscured password format. Obscuring is not encryption;
 protect the environment file as a credential:
 
 ```bash
-docker run --rm rclone/rclone:1.75.1 obscure 'NEXTCLOUD_APP_PASSWORD'
+docker run --rm rclone/rclone:1.75.1 obscure 'WEBDAV_PASSWORD'
 ```
+
+Set `WEBDAV_URL`, `WEBDAV_VENDOR`, `WEBDAV_USERNAME`,
+`WEBDAV_PASSWORD_OBSCURED`, `WEBDAV_PATH`, and `WEBDAV_SYNC_INTERVAL` for the
+source adapter. `WEBDAV_VENDOR` defaults to `nextcloud`; rclone also supports
+other WebDAV implementations. The legacy `nextcloud` profile and `NEXTCLOUD_*`
+source variables remain accepted for one migration release.
 
 Paperless credentials and redaction values use files rather than environment
 values. Set absolute paths when possible:
