@@ -47,7 +47,7 @@ Docker network, and an account with an
 WebDAV, Paperless, and the other Compose profiles are optional and are not
 needed for the first start.
 
-1. Download the small installer. It resolves the latest release, downloads the
+1. Create an empty directory for the wiki, then download the small installer. It resolves the latest release, downloads the
    `karpathy-wiki.sh` launcher and `.env.example`, and pins the matching
    container image version in the generated `.env`. The Compose file is not
    copied into your directory; the launcher downloads and caches it per pinned
@@ -55,24 +55,26 @@ needed for the first start.
    and adoptions. A Git checkout is not required:
 
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/mstroppel/karpathy-wiki/main/install.sh \
-     | INSTALL_DIR=my-wiki sh
+   mkdir my-wiki
    cd my-wiki
+   curl -fsSL https://raw.githubusercontent.com/mstroppel/karpathy-wiki/main/install.sh \
+     | sh
    ```
 
-   `INSTALL_DIR` only sets the local installation directory. Configure the wiki
-   name with `WIKI_NAME` and its unique container/DNS prefix with
-   `COMPOSE_PROJECT_NAME` and `STACK_ID` in `.env`.
+   The directory must be empty. Its name becomes both
+   `COMPOSE_PROJECT_NAME` and `STACK_ID` in `.env`, so use lowercase letters,
+   digits, and hyphens.
 
    Review [`install.sh`](install.sh) and
    [`karpathy-wiki.sh`](karpathy-wiki.sh) before piping them to a shell if
-   required by your security policy. Set `INSTALL_DIR` or
-   `KARPATHY_WIKI_VERSION` on `sh` to choose another directory or a specific
-   release:
+   required by your security policy. Set `KARPATHY_WIKI_VERSION` on `sh` to
+   choose a specific release:
 
    ```bash
+   mkdir personal-wiki
+   cd personal-wiki
    curl -fsSL https://raw.githubusercontent.com/mstroppel/karpathy-wiki/main/install.sh \
-     | INSTALL_DIR=personal-wiki KARPATHY_WIKI_VERSION=0.1.0 sh
+     | KARPATHY_WIKI_VERSION=0.1.0 sh
    ```
 
 2. Edit `.env`. For a minimal installation, set these values and leave
