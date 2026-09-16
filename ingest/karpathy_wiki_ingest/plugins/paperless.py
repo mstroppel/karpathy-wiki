@@ -57,7 +57,6 @@ class PaperlessSource(Protocol):
 
 @dataclass(frozen=True)
 class Settings:
-    api_url: str
     public_url: str
     source_tag_id: int
     token: str
@@ -82,7 +81,6 @@ class Settings:
         if urllib.parse.urlsplit(public_url).scheme != "https":
             raise ValueError("PAPERLESS_PUBLIC_URL must use HTTPS")
         return cls(
-            api_url=os.getenv("PAPERLESS_API_URL", "http://paperless:8000").rstrip("/"),
             public_url=public_url,
             source_tag_id=source_tag_id,
             token=token,
@@ -110,8 +108,8 @@ def read_secret(value_name: str, file_name: str) -> str:
 
 
 class PaperlessClient:
-    def __init__(self, api_url: str, token: str, source_tag_id: int) -> None:
-        self.api_url = api_url
+    def __init__(self, public_url: str, token: str, source_tag_id: int) -> None:
+        self.public_url = public_url.rstrip("/")
         self.source_tag_id = source_tag_id
         self.headers = {
             "Accept": "application/json; version=10",
@@ -133,7 +131,7 @@ class PaperlessClient:
                     "page_size": 100,
                 }
             )
-            payload = self._get_json(f"{self.api_url}/api/documents/?{query}")
+            payload = self._get_json(f"{self.public_url}/api/documents/?{query}")
             results = payload.get("results")
             if not isinstance(results, list):
                 raise ValueError("Paperless document list has no results array")
@@ -144,7 +142,7 @@ class PaperlessClient:
         return sorted(document_ids)
 
     def document(self, document_id: int) -> dict[str, Any]:
-        payload = self._get_json(f"{self.api_url}/api/documents/{document_id}/")
+        payload = self._get_json(f"{self.public_url}/api/documents/{document_id}/")
         if int(payload.get("id", -1)) != document_id:
             raise ValueError(f"Paperless returned the wrong document for {document_id}")
         return payload
@@ -171,7 +169,7 @@ class PaperlessClient:
             raise ValueError(f"Paperless {resource} entry has no numeric ID") from error
         key = (resource, resource_id)
         if key not in self.resource_names:
-            payload = self._get_json(f"{self.api_url}/api/{resource}/{resource_id}/")
+            payload = self._get_json(f"{self.public_url}/api/{resource}/{resource_id}/")
             name = payload.get("name")
             if not isinstance(name, str) or not name.strip():
                 raise ValueError(f"Paperless {resource} entry has no name")
@@ -271,7 +269,7 @@ class Ingestor:
         self.settings = settings
         self.anonymizer = anonymizer
         self.client: PaperlessSource = PaperlessClient(
-            settings.api_url, settings.token, settings.source_tag_id
+            settings.public_url, settings.token, settings.source_tag_id
         )
         settings.sanitized_root.mkdir(parents=True, exist_ok=True)
         settings.quarantine_root.mkdir(parents=True, exist_ok=True)
