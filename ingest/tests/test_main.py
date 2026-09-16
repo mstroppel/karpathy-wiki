@@ -63,7 +63,6 @@ class FakeClient:
 class IngestTests(unittest.TestCase):
     def settings(self, root):
         return Settings(
-            api_url="http://paperless:8000",
             public_url="https://paperless.example.com",
             source_tag_id=5,
             token="token",

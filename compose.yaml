@@ -55,7 +55,6 @@ services:
     restart: unless-stopped
     environment:
       TZ: ${TZ:-UTC}
-      PAPERLESS_API_URL: ${PAPERLESS_API_URL:-http://paperless:8000}
       PAPERLESS_PUBLIC_URL: ${PAPERLESS_PUBLIC_URL:-https://paperless.example.com}
       PAPERLESS_SOURCE_TAG_ID: ${PAPERLESS_SOURCE_TAG_ID:-0}
       PAPERLESS_TOKEN_FILE: /run/secrets/paperless_token
