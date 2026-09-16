@@ -75,5 +75,5 @@ A module must guarantee the same properties the built-ins provide:
   ingest skill read this contract, not the plugin code.
 
 The core image provides the environment; a module must not require extra
-services reachable from the wiki network. Attach any needed network (like the
-`paperless` network) explicitly in Compose.
+services reachable from the wiki network. Attach any needed network
+explicitly in Compose.

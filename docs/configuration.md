@@ -16,7 +16,6 @@ when reproducible upgrades are required.
 | `DATA_ROOT` | Persistent instance directory; absolute paths are recommended |
 | `PUID`, `PGID` | Host identity used by long-running services |
 | `WEBPROXY_NETWORK` | Existing external reverse-proxy network |
-| `OPENCODE_SERVER_PASSWORD` | Long random password protecting the OpenCode server and API |
 
 `COMPOSE_PROJECT_NAME` and `STACK_ID` should contain lowercase letters, digits,
 hyphens, or underscores. Use a different pair and `DATA_ROOT` for every instance.
@@ -95,9 +94,6 @@ PAPERLESS_TOKEN_FILE=/private/personal-wiki/paperless-token
 absolute path, for example `/private/personal-wiki/redactions.json`. Apply mode
 `0600` to both files. Never place real values below the repository's `secrets/`
 directory in a commit.
-
-`OPENCODE_SERVER_PASSWORD` currently uses an environment value because OpenCode
-expects that variable directly. Protect the environment file with mode `0600`.
 
 ## Reverse Proxy
 

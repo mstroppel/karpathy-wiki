@@ -27,7 +27,6 @@ PAPERLESS_PUBLIC_URL=https://paperless.example.com
 PAPERLESS_SOURCE_TAG_ID=123
 PAPERLESS_TOKEN_FILE=/private/wiki/paperless-token
 REDACTIONS_FILE=/private/wiki/redactions.json
-PAPERLESS_NETWORK=paperless-backend
 ```
 
 Run a one-off synchronization before enabling continuous polling:
@@ -55,9 +54,9 @@ pages and process new or changed documents sequentially.
 
 ## Network Boundary
 
-Only `paperless-ingest` requires Paperless API access. Attach Paperless-ngx and
-the importer to the external network configured by `PAPERLESS_NETWORK`; do not
-attach OpenCode to that network. OpenCode's policy also prohibits direct API
-access, and `PAPERLESS_BLOCKED_HOSTNAME` maps the configured public hostname to
-loopback. These application controls remain defense in depth rather than a
-replacement for network isolation.
+Only `paperless-ingest` requires Paperless API access. Ensure the importer can
+reach the Paperless-ngx API over the network it shares; do not attach OpenCode
+to that network. OpenCode's policy also prohibits direct API access, and
+`PAPERLESS_BLOCKED_HOSTNAME` maps the configured public hostname to loopback.
+These application controls remain defense in depth rather than a replacement
+for network isolation.
