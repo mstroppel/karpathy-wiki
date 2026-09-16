@@ -71,8 +71,16 @@ jobs:
         run: |
           base=$(sed -n 's/^## \[\([0-9][0-9.]*\)\]-unreleased$/\1/p' CHANGELOG.md | head -n 1)
           if [ -z "$base" ]; then
-            printf 'No [x.y.z]-unreleased heading found in CHANGELOG.md\n' >&2
-            exit 1
+            if ! grep -q '^## \[Unreleased\]' CHANGELOG.md; then
+              printf 'No [x.y.z]-unreleased or [Unreleased] heading found in CHANGELOG.md\n' >&2
+              exit 1
+            fi
+            last=$(git tag --list --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1)
+            if [ -z "$last" ]; then
+              base="0.0.1"
+            else
+              base=$(printf '%s' "$last" | awk -F. '{printf "%d.%d.%d", $1, $2, $3+1}')
+            fi
           fi
           version=""
           for candidate in $(seq 0 99); do
