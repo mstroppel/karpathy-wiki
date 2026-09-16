@@ -47,12 +47,11 @@ WIKI_NAME=My Wiki
 WIKI_PUBLIC_URL=https://wiki.example.com
 OPENCODE_PUBLIC_URL=https://chat.example.com
 DATA_ROOT=./data
-OPENCODE_SERVER_PASSWORD=replace-with-a-long-random-password
 COMPOSE_PROFILES=
 ```
 
 Keep `PUID=1000` and `PGID=1000` only when they match the host user that should
-own the wiki files. Generate a password with `openssl rand -base64 32`.
+own the wiki files.
 
 Create the proxy network, validate the configuration, and start the stack:
 
@@ -70,7 +69,7 @@ karpathy-wiki-silverbullet:3000  # WIKI_PUBLIC_URL
 karpathy-wiki-opencode:4096     # OPENCODE_PUBLIC_URL
 ```
 
-Sign in to `OPENCODE_PUBLIC_URL` as `opencode`, connect a model provider, and
+Sign in to `OPENCODE_PUBLIC_URL`, connect a model provider, and
 ask OpenCode to ingest a source. For a first test without an adapter:
 
 ```bash

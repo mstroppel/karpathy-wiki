@@ -21,8 +21,6 @@ from zoneinfo import ZoneInfo
 API_URL = os.environ.get("OPENCODE_URL", "http://opencode:4096").rstrip("/")
 DIRECTORY = os.environ.get("OPENCODE_DIRECTORY", "/knowledge/wiki")
 PUBLIC_URL = os.environ.get("OPENCODE_PUBLIC_URL", "").strip()
-SERVER_USERNAME = os.environ.get("OPENCODE_SERVER_USERNAME", "opencode")
-SERVER_PASSWORD = os.environ.get("OPENCODE_SERVER_PASSWORD", "")
 EXPORT_ROOT = Path(os.environ.get("EXPORT_ROOT", "/exports"))
 RCLONE_REMOTE = os.environ.get("RCLONE_REMOTE", "nextcloud").strip().rstrip(":")
 REMOTE_PATH = os.environ.get("SESSION_EXPORT_REMOTE_PATH", "OpenCode Sessions").strip("/")
@@ -99,11 +97,6 @@ def api_get(path, query=None):
     if query:
         url += "?" + urllib.parse.urlencode(query)
     request = urllib.request.Request(url)
-    if SERVER_PASSWORD:
-        credentials = base64.b64encode(
-            f"{SERVER_USERNAME}:{SERVER_PASSWORD}".encode("utf-8")
-        ).decode("ascii")
-        request.add_header("Authorization", f"Basic {credentials}")
     try:
         with urllib.request.urlopen(request, timeout=60) as response:
             return json.load(response)

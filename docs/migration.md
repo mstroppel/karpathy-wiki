@@ -12,9 +12,7 @@ or publish source material as part of the software repository.
    Paperless tokens and credentials stored in tracked `.env` files.
 3. Create private environment and secret files outside this repository.
 4. Create the external reverse-proxy network if it does not already exist.
-5. For Paperless, create a dedicated external backend network and attach the
-   Paperless application to it.
-6. Stop the old instance before attaching its writable wiki directory to the new
+5. Stop the old instance before attaching its writable wiki directory to the new
    stack.
 
 ## SP-Wiki Mapping
@@ -53,7 +51,6 @@ Use profiles:
 COMPOSE_PROJECT_NAME=mein-wiki
 STACK_ID=mein-wiki
 COMPOSE_PROFILES=webdav,paperless
-PAPERLESS_NETWORK=paperless-backend
 ```
 
 The existing layout already closely matches the canonical structure:

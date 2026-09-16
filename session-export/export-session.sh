@@ -43,7 +43,7 @@ compose() {
 
 api_get() {
 	compose sh -c \
-		'exec curl --fail --silent --show-error --user "$OPENCODE_SERVER_USERNAME:$OPENCODE_SERVER_PASSWORD" --get "$1" --data-urlencode "directory=$2"' \
+		'exec curl --fail --silent --show-error --get "$1" --data-urlencode "directory=$2"' \
 		sh "$OPENCODE_URL$1" "$DIRECTORY"
 }
 
