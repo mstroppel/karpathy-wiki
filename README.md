@@ -125,7 +125,7 @@ Run the local checks:
 ```bash
 python3 -m unittest discover -s tests -v
 node --test tests/test_wiki_ingest_status.mjs
-(cd paperless-ingest && python3 -m unittest discover -s tests -v)
+(cd ingest && python3 -m unittest discover -s tests -v)
 (cd session-export && python3 -m unittest discover -s tests -v)
 sh -n config/init.sh && sh -n install.sh && sh -n karpathy-wiki.sh
 sh -n session-export/export-session.sh

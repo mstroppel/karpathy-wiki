@@ -26,8 +26,7 @@ jobs:
         run: |
           python -m unittest discover -s tests -v
           node --test tests/test_wiki_ingest_status.mjs
-          (cd paperless-ingest && python -m unittest discover -s tests -v)
-          (cd webdav-ingest && python -m unittest discover -s tests -v)
+          (cd ingest && python -m unittest discover -s tests -v)
           (cd session-export && python -m unittest discover -s tests -v)
       - name: Validate scripts and configuration
         run: |

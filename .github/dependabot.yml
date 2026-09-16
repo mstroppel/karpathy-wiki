@@ -18,11 +18,11 @@ updates:
         update-types: [minor, patch]
 
   - package-ecosystem: docker
-    directory: /paperless-ingest
+    directory: /ingest
     schedule:
       interval: weekly
     groups:
-      paperless-image:
+      ingest-image:
         update-types: [minor, patch]
 
   - package-ecosystem: docker

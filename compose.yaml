@@ -20,7 +20,8 @@ services:
       - no-new-privileges:true
 
   webdav-ingest:
-    image: ghcr.io/mstroppel/karpathy-wiki-webdav-ingest:${KARPATHY_WIKI_VERSION:-latest}
+    image: ghcr.io/mstroppel/karpathy-wiki-ingest:${KARPATHY_WIKI_VERSION:-latest}
+    command: ["webdav"]
     profiles: ["webdav", "nextcloud"]
     restart: unless-stopped
     environment:
@@ -47,7 +48,8 @@ services:
       - no-new-privileges:true
 
   paperless-ingest:
-    image: ghcr.io/mstroppel/karpathy-wiki-paperless-ingest:${KARPATHY_WIKI_VERSION:-latest}
+    image: ghcr.io/mstroppel/karpathy-wiki-ingest:${KARPATHY_WIKI_VERSION:-latest}
+    command: ["paperless"]
     profiles: ["paperless"]
     user: "${PUID:-1000}:${PGID:-1000}"
     restart: unless-stopped

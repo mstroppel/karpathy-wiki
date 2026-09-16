@@ -7,15 +7,15 @@ variable "IMAGE_VERSION" {
 }
 
 group "default" {
-  targets = ["opencode", "paperless-ingest", "webdav-ingest", "session-export"]
+  targets = ["opencode", "ingest", "session-export"]
 }
 
 group "release" {
-  targets = ["opencode-release", "paperless-ingest-release", "webdav-ingest-release", "session-export-release"]
+  targets = ["opencode-release", "ingest-release", "session-export-release"]
 }
 
 group "stable" {
-  targets = ["opencode-stable", "paperless-ingest-stable", "webdav-ingest-stable", "session-export-stable"]
+  targets = ["opencode-stable", "ingest-stable", "session-export-stable"]
 }
 
 target "common" {
@@ -32,17 +32,10 @@ target "opencode" {
   tags = ["karpathy-wiki-opencode:test"]
 }
 
-target "paperless-ingest" {
+target "ingest" {
   inherits = ["common"]
-  context = "paperless-ingest"
-  tags = ["karpathy-wiki-paperless-ingest:test"]
-}
-
-target "webdav-ingest" {
-  inherits = ["common"]
-  context = "."
-  dockerfile = "webdav-ingest/Dockerfile"
-  tags = ["karpathy-wiki-webdav-ingest:test"]
+  context = "ingest"
+  tags = ["karpathy-wiki-ingest:test"]
 }
 
 target "session-export" {
@@ -56,14 +49,9 @@ target "opencode-release" {
   tags = ["${REGISTRY}/karpathy-wiki-opencode:${IMAGE_VERSION}"]
 }
 
-target "paperless-ingest-release" {
-  inherits = ["paperless-ingest"]
-  tags = ["${REGISTRY}/karpathy-wiki-paperless-ingest:${IMAGE_VERSION}"]
-}
-
-target "webdav-ingest-release" {
-  inherits = ["webdav-ingest"]
-  tags = ["${REGISTRY}/karpathy-wiki-webdav-ingest:${IMAGE_VERSION}"]
+target "ingest-release" {
+  inherits = ["ingest"]
+  tags = ["${REGISTRY}/karpathy-wiki-ingest:${IMAGE_VERSION}"]
 }
 
 target "session-export-release" {
@@ -76,14 +64,9 @@ target "opencode-stable" {
   tags = ["${REGISTRY}/karpathy-wiki-opencode:${IMAGE_VERSION}", "${REGISTRY}/karpathy-wiki-opencode:latest"]
 }
 
-target "paperless-ingest-stable" {
-  inherits = ["paperless-ingest"]
-  tags = ["${REGISTRY}/karpathy-wiki-paperless-ingest:${IMAGE_VERSION}", "${REGISTRY}/karpathy-wiki-paperless-ingest:latest"]
-}
-
-target "webdav-ingest-stable" {
-  inherits = ["webdav-ingest"]
-  tags = ["${REGISTRY}/karpathy-wiki-webdav-ingest:${IMAGE_VERSION}", "${REGISTRY}/karpathy-wiki-webdav-ingest:latest"]
+target "ingest-stable" {
+  inherits = ["ingest"]
+  tags = ["${REGISTRY}/karpathy-wiki-ingest:${IMAGE_VERSION}", "${REGISTRY}/karpathy-wiki-ingest:latest"]
 }
 
 target "session-export-stable" {
