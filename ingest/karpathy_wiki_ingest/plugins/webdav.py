@@ -7,7 +7,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from .main import TargetedAnonymizer, atomic_write, required_env
+from ..shared import TargetedAnonymizer, atomic_write, required_env
 
 LOG = logging.getLogger("karpathy-wiki-webdav")
 

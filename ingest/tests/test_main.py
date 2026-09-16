@@ -4,7 +4,7 @@ from collections import Counter
 from pathlib import Path
 from unittest import mock
 
-from karpathy_wiki_ingest.main import (
+from karpathy_wiki_ingest.plugins.paperless import (
     Ingestor,
     PaperlessClient,
     Settings,
@@ -332,7 +332,7 @@ class ClientAndShutdownTests(unittest.TestCase):
         stop_event.is_set.return_value = False
         stop_event.wait.return_value = True
         with mock.patch(
-            "karpathy_wiki_ingest.main.TargetedAnonymizer.from_file"
+            "karpathy_wiki_ingest.plugins.paperless.TargetedAnonymizer.from_file"
         ) as from_file:
             run_continuously(ingestor, settings, stop_event)
         from_file.assert_called_once_with(settings.redactions_path)

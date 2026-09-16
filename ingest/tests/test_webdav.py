@@ -1,20 +1,9 @@
 import tempfile
 import unittest
 from pathlib import Path
-import importlib.util
-import sys
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "paperless-ingest"))
-from karpathy_wiki_ingest.main import TargetedAnonymizer
-
-spec = importlib.util.spec_from_file_location(
-    "karpathy_wiki_ingest.webdav",
-    Path(__file__).resolve().parents[1] / "karpathy_wiki_ingest" / "webdav.py",
-)
-webdav = importlib.util.module_from_spec(spec)
-sys.modules[spec.name] = webdav
-spec.loader.exec_module(webdav)
-sanitize_once = webdav.sanitize_once
+from karpathy_wiki_ingest.shared import TargetedAnonymizer
+from karpathy_wiki_ingest.plugins.webdav import sanitize_once
 
 
 class WebdavTests(unittest.TestCase):

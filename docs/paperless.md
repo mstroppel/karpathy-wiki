@@ -34,7 +34,7 @@ PAPERLESS_NETWORK=paperless-backend
 Run a one-off synchronization before enabling continuous polling:
 
 ```bash
-docker compose --profile paperless run --rm paperless-ingest --once
+docker compose --profile paperless run --rm paperless-ingest paperless --once
 ```
 
 Inspect sanitized output and the content-free error reports under
