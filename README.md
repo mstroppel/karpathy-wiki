@@ -32,6 +32,14 @@ curl -fsSL https://raw.githubusercontent.com/mstroppel/karpathy-wiki/main/instal
   | KARPATHY_WIKI_VERSION=0.1.0 sh
 ```
 
+To install the latest pre-release instead of the latest stable release, set
+`KARPATHY_WIKI_CHANNEL=pre`. The default channel is `stable`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mstroppel/karpathy-wiki/main/install.sh \
+  | KARPATHY_WIKI_CHANNEL=pre sh
+```
+
 Edit `.env` with at least:
 
 ```env

@@ -1,0 +1,120 @@
+name: Pre-release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: pre-release
+  cancel-in-progress: false
+
+jobs:
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - name: Run unit tests
+        run: |
+          python -m unittest discover -s tests -v
+          node --test tests/test_wiki_ingest_status.mjs
+          (cd ingest && python -m unittest discover -s tests -v)
+          (cd session-export && python -m unittest discover -s tests -v)
+      - name: Validate scripts and configuration
+        run: |
+          sh -n config/init.sh
+          sh -n install.sh
+          sh -n karpathy-wiki.sh
+          sh -n session-export/export-session.sh
+          node --check config/tools/wiki_ingest_status.js
+          node --check config/tools/wiki_ingest_status_core.mjs
+          node --check config/ingest-adapters/shared.mjs
+          for adapter in config/ingest-adapters/*/status.mjs; do
+            node --check "$adapter"
+          done
+          docker compose --env-file .env.example config --quiet
+
+  pre-release:
+    name: Pre-release
+    needs: tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Compute pre-release version
+        id: version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          base=$(sed -n 's/^## \[\([0-9][0-9.]*\)\]-unreleased$/\1/p' CHANGELOG.md | head -n 1)
+          if [ -z "$base" ]; then
+            printf 'No [x.y.z]-unreleased heading found in CHANGELOG.md\n' >&2
+            exit 1
+          fi
+          version=""
+          for candidate in $(seq 0 99); do
+            candidate="${base}-pre.${candidate}"
+            if ! gh release view "v${candidate}" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              version="$candidate"
+              break
+            fi
+          done
+          if [ -z "$version" ]; then
+            printf 'No free pre-release version under %s\n' "$base" >&2
+            exit 1
+          fi
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+      - name: Create git tag
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git config user.name "${GITHUB_ACTOR}"
+          git config user.email "${GITHUB_ACTOR}@users.noreply.github.com"
+          git tag -f "v${VERSION}" "$GITHUB_SHA"
+          git push origin "v${VERSION}" --force
+      - name: Build and publish pre-release images
+        uses: docker/bake-action@v7
+        env:
+          IMAGE_VERSION: ${{ steps.version.outputs.version }}
+        with:
+          source: .
+          files: docker-bake.hcl
+          targets: release
+          push: true
+          set: |
+            *.platform=linux/amd64,linux/arm64
+      - name: Create GitHub pre-release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          notes=$(awk '/^## \[/{found++} found==1' CHANGELOG.md | head -n 200)
+          gh release create "v${VERSION}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "v${VERSION}" \
+            --prerelease \
+            --notes "$notes"
