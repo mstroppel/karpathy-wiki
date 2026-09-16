@@ -36,6 +36,19 @@ validate_version() {
   esac
 }
 
+resolve_pre_version() {
+  require_curl
+  rp_json=$(curl -fsSL \
+    "https://api.github.com/repos/$repository/tags?per_page=100") || return 1
+  rp_tag=$(printf '%s' "$rp_json" |
+    grep -o '"name": *"v[0-9][0-9A-Za-z.-]*-pre\.[0-9]*"' |
+    head -n 1 | sed 's/.*"v/v/;s/"//') || rp_tag=""
+  [ -n "$rp_tag" ] || return 1
+  rp_version=${rp_tag#v}
+  validate_version "$rp_version" || return 1
+  printf '%s' "$rp_version"
+}
+
 resolve_latest_version() {
   require_curl
   rlv_url=$(curl -fsSL -o /dev/null -w '%{url_effective}' \
@@ -71,23 +84,34 @@ fetch_compose() {
 
 resolve_version() {
   rv_requested=${KARPATHY_WIKI_VERSION:-$(read_env_value KARPATHY_WIKI_VERSION)}
+  rv_channel=${KARPATHY_WIKI_CHANNEL:-$(read_env_value KARPATHY_WIKI_CHANNEL)}
   rv_requested=${rv_requested:-latest}
-  if [ "$rv_requested" != "latest" ]; then
+  if [ "$rv_requested" != "latest" ] && [ "$rv_requested" != "pre" ]; then
     validate_version "$rv_requested" ||
       die "invalid KARPATHY_WIKI_VERSION: $rv_requested"
     printf '%s\n' "$rv_requested"
     return 0
   fi
-  rv_version=$(resolve_latest_version) || rv_version=""
-  if [ -n "$rv_version" ]; then
-    mkdir -p "$cache_dir"
-    printf '%s\n' "$rv_version" >"$latest_pointer"
-  elif [ -f "$latest_pointer" ]; then
+  rv_version=""
+  if [ "$rv_channel" = pre ] || [ "$rv_requested" = pre ]; then
+    rv_version=$(resolve_pre_version) || rv_version=""
+    if [ -n "$rv_version" ]; then
+      mkdir -p "$cache_dir"
+      printf '%s\n' "$rv_version" >"$latest_pointer"
+    fi
+  else
+    rv_version=$(resolve_latest_version) || rv_version=""
+    if [ -n "$rv_version" ]; then
+      mkdir -p "$cache_dir"
+      printf '%s\n' "$rv_version" >"$latest_pointer"
+    fi
+  fi
+  if [ -z "$rv_version" ] && [ -f "$latest_pointer" ]; then
     rv_version=$(sed -n 1p "$latest_pointer" | tr -d '[:space:]')
     validate_version "$rv_version" || rv_version=""
   fi
   [ -n "$rv_version" ] || die \
-    "cannot resolve the latest release (offline?); pin KARPATHY_WIKI_VERSION in $env_file"
+    "cannot resolve the latest version (offline?); pin KARPATHY_WIKI_VERSION in $env_file"
   printf '%s\n' "$rv_version"
 }
 
@@ -130,9 +154,18 @@ set_env_version() {
 }
 
 cmd_update() {
+  cu_requested=${KARPATHY_WIKI_CHANNEL:-$(read_env_value KARPATHY_WIKI_CHANNEL)}
+  case "${cu_requested:-}" in
+    ''|stable) cu_channel=stable ;;
+    pre) cu_channel=pre ;;
+    *) die "unsupported KARPATHY_WIKI_CHANNEL: $cu_requested" ;;
+  esac
   if [ -n "${1:-}" ]; then
     validate_version "$1" || die "invalid version: $1"
     cu_target=$1
+  elif [ "$cu_channel" = pre ]; then
+    cu_target=$(resolve_pre_version) ||
+      die "cannot resolve the latest pre-release"
   else
     cu_target=$(resolve_latest_version) || die "cannot resolve the latest release"
   fi
@@ -156,13 +189,18 @@ next to this script is applied automatically.
 
 Usage:
   karpathy-wiki.sh <compose args...>   Forward to docker compose (up -d, ps, logs, ...)
-  karpathy-wiki.sh update [version]    Pin version (default: latest release) in .env,
-                                       back up .env, pull images, and restart (up -d)
+  karpathy-wiki.sh update [version]    Pin version (default: latest release, or
+                                       latest pre-release when the pre channel is
+                                       set) in .env, back up .env, pull images,
+                                       and restart (up -d)
   karpathy-wiki.sh version             Print the resolved version
   karpathy-wiki.sh help                Show this help
 
 Environment:
-  KARPATHY_WIKI_VERSION        Overrides the version pinned in .env
+  KARPATHY_WIKI_VERSION        Overrides the version pinned in .env; supports
+                               latest and pre in addition to pinned versions
+  KARPATHY_WIKI_CHANNEL        Update channel: stable (default) or pre; pre
+                               resolves to the newest v*-pre.* pre-release
   KARPATHY_WIKI_PROJECT_DIR    Project directory (default: directory of this script)
   KARPATHY_WIKI_CACHE_DIR      Compose cache directory (default: <project dir>/.cache)
 EOF

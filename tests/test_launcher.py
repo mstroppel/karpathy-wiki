@@ -37,6 +37,10 @@ case "$url" in
     printf '%s' "https://github.com/mstroppel/karpathy-wiki/releases/tag/v${STUB_LATEST_VERSION:-9.9.9}"
     exit 0
     ;;
+  *"api.github.com/repos/"*"/tags"*)
+    printf '[{"name": "v9.9.9"}, {"name": "v%s"}, {"name": "v2.0.0-pre.0"}]' "${STUB_PRE_VERSION:-2.0.0-pre.1}"
+    exit 0
+    ;;
   *"/compose.yaml")
     [ -n "$out" ] || exit 1
     printf 'name: stub-compose\\n' > "$out"
@@ -195,6 +199,39 @@ class LauncherTests(unittest.TestCase):
             self.curl_urls(),
             ["https://raw.githubusercontent.com/mstroppel/karpathy-wiki"
              "/main/compose.yaml"],
+        )
+
+    def test_pre_channel_resolves_newest_prerelease(self):
+        self.write_env("KARPATHY_WIKI_VERSION=pre\n")
+
+        result = self.run_launcher("version")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "2.0.0-pre.1\n")
+        self.assertEqual((self.cache / "latest").read_text(), "2.0.0-pre.1\n")
+
+    def test_pre_channel_env_resolves_when_version_is_latest(self):
+        self.write_env("KARPATHY_WIKI_VERSION=latest\nKARPATHY_WIKI_CHANNEL=pre\n")
+
+        result = self.run_launcher("version")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "2.0.0-pre.1\n")
+
+    def test_pre_channel_update_pins_newest_prerelease(self):
+        env_file = self.write_env(
+            "KARPATHY_WIKI_VERSION=0.0.1\nKARPATHY_WIKI_CHANNEL=pre\n"
+        )
+
+        result = self.run_launcher("update")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("KARPATHY_WIKI_VERSION=2.0.0-pre.1", env_file.read_text())
+        self.assertEqual(
+            self.curl_urls(),
+            ["https://api.github.com/repos/mstroppel/karpathy-wiki/tags?per_page=100",
+             "https://raw.githubusercontent.com/mstroppel/karpathy-wiki"
+             "/v2.0.0-pre.1/compose.yaml"],
         )
 
     def test_update_pins_latest_pulls_and_restarts(self):

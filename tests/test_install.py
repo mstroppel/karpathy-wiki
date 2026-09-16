@@ -21,7 +21,44 @@ case "$out" in
     'COMPOSE_PROJECT_NAME=karpathy-wiki' \
     'STACK_ID=karpathy-wiki' \
     'KARPATHY_WIKI_VERSION=latest' > "$out" ;;
+  *api.github.com/repos/*/tags*)
+    printf '%s\n' \
+      '[' \
+      '  {"name": "v1.2.3"},' \
+      '  {"name": "v2.0.0-pre.1"},' \
+      '  {"name": "v2.0.0-pre.0"}' \
+      ']' ;;
   *) exit 1 ;;
+esac
+"""
+
+INSTALL_PRERELEASE_CURL_STUB = """#!/bin/sh
+out=""
+url=""
+previous=""
+for argument in "$@"; do
+  if [ "$previous" = "-o" ]; then out=$argument; fi
+  case "$argument" in
+    http*) url=$argument ;;
+  esac
+  previous=$argument
+done
+case "$out" in
+  *karpathy-wiki.sh) printf '%s\\n' '#!/bin/sh' > "$out" ;;
+  *.env) printf '%s\\n' \
+    'COMPOSE_PROJECT_NAME=karpathy-wiki' \
+    'STACK_ID=karpathy-wiki' \
+    'KARPATHY_WIKI_VERSION=latest' > "$out" ;;
+esac
+case "$url" in
+  *api.github.com/repos/*/tags*)
+    printf '%s\\n' \
+      '[' \
+      '  {"name": "v1.2.3"},' \
+      '  {"name": "v2.0.0-pre.1"},' \
+      '  {"name": "v2.0.0-pre.0"}' \
+      ']' ;;
+  *) [ -n "$out" ] || exit 1 ;;
 esac
 """
 
@@ -121,6 +158,34 @@ class InstallTests(unittest.TestCase):
 
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("must start with", result.stderr)
+
+    def test_install_pre_channel_pins_newest_prerelease(self):
+        with tempfile.TemporaryDirectory() as parent:
+            directory = Path(parent) / "my-wiki"
+            directory.mkdir()
+
+            result = self.run_installer(
+                directory,
+                CURL_STUB=INSTALL_PRERELEASE_CURL_STUB,
+                KARPATHY_WIKI_VERSION="",
+                KARPATHY_WIKI_CHANNEL="pre",
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Installed Karpathy Wiki 2.0.0-pre.1", result.stdout)
+            self.assertIn(
+                "KARPATHY_WIKI_VERSION=2.0.0-pre.1", (directory / ".env").read_text()
+            )
+
+    def test_install_rejects_unknown_channel(self):
+        with tempfile.TemporaryDirectory() as parent:
+            directory = Path(parent) / "my-wiki"
+            directory.mkdir()
+
+            result = self.run_installer(directory, KARPATHY_WIKI_CHANNEL="beta")
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("unsupported channel", result.stderr)
 
 
 if __name__ == "__main__":

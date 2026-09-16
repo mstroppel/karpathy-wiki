@@ -4,6 +4,15 @@ set -eu
 repository="mstroppel/karpathy-wiki"
 install_dir=${INSTALL_DIR:-.}
 version=${KARPATHY_WIKI_VERSION:-}
+channel=${KARPATHY_WIKI_CHANNEL:-stable}
+
+case "$channel" in
+  stable|pre) ;;
+  *)
+    printf 'unsupported channel: %s (use stable or pre)\n' "$channel" >&2
+    exit 1
+    ;;
+esac
 
 if ! command -v curl >/dev/null 2>&1; then
   printf 'curl is required\n' >&2
@@ -33,9 +42,22 @@ for entry in "$install_dir"/* "$install_dir"/.[!.]* "$install_dir"/..?*; do
 done
 
 if [ -z "$version" ]; then
-  release_url=$(curl -fsSL -o /dev/null -w '%{url_effective}' \
-    "https://github.com/$repository/releases/latest")
-  tag=${release_url##*/}
+  if [ "$channel" = pre ]; then
+    # Pre-releases do not appear under releases/latest; resolve the newest
+    # v*-pre.* tag via the git provider API instead.
+    tag=$(curl -fsSL \
+      "https://api.github.com/repos/$repository/tags?per_page=100" |
+      grep -o '"name": *"v[0-9][0-9A-Za-z.-]*-pre\.[0-9]*"' |
+      head -n 1 | sed 's/.*"v/v/;s/"//') || tag=""
+    if [ -z "$tag" ]; then
+      printf 'Could not determine a pre-release version\n' >&2
+      exit 1
+    fi
+  else
+    release_url=$(curl -fsSL -o /dev/null -w '%{url_effective}' \
+      "https://github.com/$repository/releases/latest")
+    tag=${release_url##*/}
+  fi
   version=${tag#v}
 else
   version=${version#v}
