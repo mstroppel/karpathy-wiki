@@ -56,7 +56,9 @@ base_url="https://raw.githubusercontent.com/$repository/$tag"
 main_url="https://raw.githubusercontent.com/$repository/main"
 # Releases before the launcher was introduced do not contain karpathy-wiki.sh;
 # fall back to main, which stays compatible with any pinned version.
-curl -fsSL "$base_url/karpathy-wiki.sh" -o "$temporary_dir/karpathy-wiki.sh" ||
+# Older releases do not contain the launcher; suppress that expected miss while
+# keeping errors from the fallback download visible.
+curl -fsSL "$base_url/karpathy-wiki.sh" -o "$temporary_dir/karpathy-wiki.sh" 2>/dev/null ||
   curl -fsSL "$main_url/karpathy-wiki.sh" -o "$temporary_dir/karpathy-wiki.sh"
 curl -fsSL "$base_url/.env.example" -o "$temporary_dir/.env"
 sed \
