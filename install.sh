@@ -92,8 +92,10 @@ mv "$temporary_dir/.env.pinned" "$temporary_dir/.env"
 
 chmod 0755 "$temporary_dir/karpathy-wiki.sh"
 chmod 0600 "$temporary_dir/.env"
+printf '.cache/\n' >"$temporary_dir/.gitignore"
 mv "$temporary_dir/karpathy-wiki.sh" "$install_dir/karpathy-wiki.sh"
 mv "$temporary_dir/.env" "$install_dir/.env"
+mv "$temporary_dir/.gitignore" "$install_dir/.gitignore"
 
 printf 'Installed Karpathy Wiki %s in %s\n' "$version" "$install_dir"
 printf 'Configured COMPOSE_PROJECT_NAME and STACK_ID as %s\n' "$wiki_id"

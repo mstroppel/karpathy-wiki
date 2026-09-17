@@ -125,6 +125,7 @@ class InstallTests(unittest.TestCase):
                 "KARPATHY_WIKI_VERSION=1.2.3\n",
             )
             self.assertTrue((directory / "karpathy-wiki.sh").exists())
+            self.assertEqual((directory / ".gitignore").read_text(), ".cache/\n")
 
     def test_install_refuses_non_empty_directory_before_download(self):
         with tempfile.TemporaryDirectory() as parent:
