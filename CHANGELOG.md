@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Automatic pre-releases on every merge to `main` and a `pre` install/update
   channel to opt in to them.
+- The installer creates a `.gitignore` that ignores the `.cache` directory.
+
+### Fixed
+
+- The `raw-files` container failed to start with
+  `exec /usr/bin/caddy: operation not permitted` because `cap_drop: ALL`
+  removed the file capability Caddy needs to execute.
 
 ## [0.1.3] - 2026-09-15
 
