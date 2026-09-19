@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- OpenCode prompt execution failed immediately because version 1.18.30 shipped
+  a compiled-binary module initialization regression.
 - The `raw-files` container failed to start with
   `exec /usr/bin/caddy: operation not permitted` because `cap_drop: ALL`
   removed the file capability Caddy needs to execute.
