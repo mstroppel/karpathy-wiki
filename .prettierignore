@@ -1,0 +1,17 @@
+# Repository-managed JavaScript tooling (Prettier/ESLint). Third-party
+# JavaScript is not vendored in this repository.
+node_modules/
+package-lock.json
+
+# Fixtures and generated content
+temp/
+secrets/
+data/
+
+# Markdown, YAML workflows and Compose files are intentionally not
+# reformatted; formatting applies to JavaScript and JSON only.
+*.md
+*.yaml
+*.yml
+*.sh
+.github/

@@ -6,6 +6,12 @@ variable "IMAGE_VERSION" {
   default = "dev"
 }
 
+# Centralized third-party tool version for the ingest image. Keep the rclone
+# version in .env.example in sync; tests/test_dependencies.py validates it.
+variable "RCLONE_VERSION" {
+  default = "1.75.1"
+}
+
 group "default" {
   targets = ["opencode", "ingest"]
 }
@@ -35,6 +41,9 @@ target "opencode" {
 target "ingest" {
   inherits = ["common"]
   context = "ingest"
+  args = {
+    RCLONE_VERSION = RCLONE_VERSION
+  }
   tags = ["karpathy-wiki-ingest:test"]
 }
 

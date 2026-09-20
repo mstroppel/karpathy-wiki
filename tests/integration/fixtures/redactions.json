@@ -1,0 +1,9 @@
+{
+  "people": [
+    {
+      "replacement": "[PERSON_1]",
+      "first_name": "Max",
+      "last_name": "Mustermann"
+    }
+  ]
+}

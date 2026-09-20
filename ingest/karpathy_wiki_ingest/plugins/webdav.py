@@ -3,28 +3,23 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import signal
 import subprocess
-import time
+import threading
 from pathlib import Path
 
-from ..shared import TargetedAnonymizer, atomic_write, required_env
+from ..shared import (
+    TargetedAnonymizer,
+    atomic_write,
+    interval_seconds,
+    required_env,
+    write_health,
+)
 
 LOG = logging.getLogger("karpathy-wiki-webdav")
 
 
-def interval_seconds(value: str) -> int:
-    units = {"s": 1, "m": 60, "h": 3600}
-    try:
-        amount, unit = float(value[:-1]), value[-1].lower()
-        seconds = amount * units[unit]
-    except (KeyError, ValueError, IndexError):
-        seconds = float(value)
-    if seconds <= 0:
-        raise ValueError("WEBDAV_SYNC_INTERVAL must be greater than zero")
-    return int(seconds)
-
-
-def settings() -> tuple[Path, Path, Path, int, Path]:
+def settings() -> tuple[Path, Path, Path, int, Path, Path]:
     interval = interval_seconds(os.getenv("WEBDAV_SYNC_INTERVAL", "15m"))
     return (
         Path(os.getenv("WEBDAV_INCOMING_ROOT", "/data/incoming/webdav")),
@@ -32,10 +27,13 @@ def settings() -> tuple[Path, Path, Path, int, Path]:
         Path(os.getenv("WEBDAV_QUARANTINE_ROOT", "/data/quarantine/webdav")),
         interval,
         Path(required_env("REDACTIONS_FILE")),
+        Path(os.getenv("HEALTH_PATH", "/tmp/health.json")),
     )
 
 
-def sanitize_once(incoming: Path, sanitized: Path, quarantine: Path, anonymizer: TargetedAnonymizer) -> tuple[int, int]:
+def sanitize_once(
+    incoming: Path, sanitized: Path, quarantine: Path, anonymizer: TargetedAnonymizer
+) -> tuple[int, int]:
     incoming_files = {path.relative_to(incoming) for path in incoming.rglob("*") if path.is_file()}
     changed = failed = 0
     sanitized.mkdir(parents=True, exist_ok=True)
@@ -53,7 +51,10 @@ def sanitize_once(incoming: Path, sanitized: Path, quarantine: Path, anonymizer:
         except (OSError, UnicodeError, ValueError) as error:
             failed += 1
             target.unlink(missing_ok=True)
-            atomic_write(quarantine / f"{relative}.error", f"path={relative}\nerror_type={type(error).__name__}\n")
+            atomic_write(
+                quarantine / f"{relative}.error",
+                f"path={relative}\nerror_type={type(error).__name__}\n",
+            )
             LOG.error("WebDAV file %s was quarantined", relative)
     for path in sorted((path for path in sanitized.rglob("*") if path.is_file()), reverse=True):
         if path.relative_to(sanitized) not in incoming_files:
@@ -61,30 +62,65 @@ def sanitize_once(incoming: Path, sanitized: Path, quarantine: Path, anonymizer:
     return changed, failed
 
 
+def synchronize(incoming: Path, path: str) -> None:
+    subprocess.run(
+        [
+            "rclone",
+            "sync",
+            f"webdav:{path}",
+            str(incoming),
+            "--create-empty-src-dirs",
+            "--retries",
+            "3",
+            "--low-level-retries",
+            "10",
+            "--log-level",
+            "INFO",
+        ],
+        check=True,
+    )
+
+
+def install_stop_handler() -> threading.Event:
+    stop_event = threading.Event()
+
+    def stop(_signum, _frame) -> None:
+        stop_event.set()
+
+    for signum in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(signum, stop)
+    return stop_event
+
+
 def run(once: bool) -> None:
-    incoming, sanitized, quarantine, interval, redactions = settings()
+    incoming, sanitized, quarantine, interval, redactions, health_path = settings()
     anonymizer = TargetedAnonymizer.from_file(redactions)
+    stop_event = install_stop_handler()
     incoming.mkdir(parents=True, exist_ok=True)
-    while True:
-        subprocess.run(
-            [
-                "rclone",
-                "sync",
-                f"webdav:{os.environ['WEBDAV_PATH']}",
-                str(incoming),
-                "--create-empty-src-dirs",
-                "--log-level",
-                "INFO",
-            ],
-            check=True,
-        )
-        changed, failed = sanitize_once(incoming, sanitized, quarantine, anonymizer)
-        LOG.info("WebDAV synchronization complete: %s changed, %s quarantined", changed, failed)
+    while not stop_event.is_set():
+        failed = 0
+        try:
+            synchronize(incoming, os.environ["WEBDAV_PATH"])
+            changed, failed = sanitize_once(incoming, sanitized, quarantine, anonymizer)
+            LOG.info("WebDAV synchronization complete: %s changed, %s quarantined", changed, failed)
+        except KeyError as error:
+            failed = 1
+            LOG.exception("WebDAV configuration is incomplete: %s is missing", error)
+        except subprocess.CalledProcessError:
+            # rclone already retried internally; keep the daemon alive and
+            # retry on the next synchronization interval.
+            failed = 1
+            LOG.exception("rclone synchronization failed")
+        except (OSError, UnicodeError, ValueError):
+            failed = 1
+            LOG.exception("WebDAV synchronization failed")
+        write_health(health_path, failed)
         if once:
             if failed:
                 raise SystemExit(1)
             return
-        time.sleep(interval)
+        if stop_event.wait(interval):
+            break
 
 
 def main() -> None:

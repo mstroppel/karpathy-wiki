@@ -29,8 +29,8 @@ from karpathy_wiki_ingest.shared import (
     required_env,
 )
 
-def main() -> None:
-    ...
+
+def main() -> None: ...
 ```
 
 Dispatch accepts either of the following:

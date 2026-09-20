@@ -1,10 +1,9 @@
 import json
 import os
-from pathlib import Path
 import subprocess
 import tempfile
 import unittest
-
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 INIT = ROOT / "config" / "init.sh"
@@ -114,8 +113,7 @@ class ConfigTests(unittest.TestCase):
         self.assertNotIn("agent", config)
         self.assertNotIn("command", config)
         rules = {
-            (rule["action"], rule["resource"]): rule["effect"]
-            for rule in config["permissions"]
+            (rule["action"], rule["resource"]): rule["effect"] for rule in config["permissions"]
         }
         self.assertEqual(rules[("*", "*")], "deny")
         self.assertEqual(rules[("edit", "/knowledge/sources/**")], "deny")
@@ -165,6 +163,7 @@ class ConfigTests(unittest.TestCase):
         compose = (ROOT / "compose.yaml").read_text()
         self.assertIn("COMPOSE_PROFILES: ${COMPOSE_PROFILES:-}", compose)
         self.assertNotIn("PAPERLESS_ENABLED", compose)
+
 
 if __name__ == "__main__":
     unittest.main()

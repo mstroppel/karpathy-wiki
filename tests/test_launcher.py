@@ -1,11 +1,10 @@
 import os
-from pathlib import Path
 import shutil
 import stat
 import subprocess
 import tempfile
 import unittest
-
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 LAUNCHER = ROOT / "karpathy-wiki.sh"
@@ -38,7 +37,8 @@ case "$url" in
     exit 0
     ;;
   *"api.github.com/repos/"*"/tags"*)
-    printf '[{"name": "v9.9.9"}, {"name": "v%s"}, {"name": "v2.0.0-pre.0"}]' "${STUB_PRE_VERSION:-2.0.0-pre.1}"
+    printf '[{"name": "v9.9.9"}, {"name": "v%s"}, {"name": "v2.0.0-pre.0"}]' \
+      "${STUB_PRE_VERSION:-2.0.0-pre.1}"
     exit 0
     ;;
   *"/compose.yaml")
@@ -74,12 +74,14 @@ class LauncherTests(unittest.TestCase):
     def run_launcher(self, *args, env=None, cwd=None):
         environment = {**os.environ}
         environment.pop("KARPATHY_WIKI_VERSION", None)
-        environment.update({
-            "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}",
-            "DOCKER_STUB_LOG": str(self.docker_log),
-            "CURL_STUB_LOG": str(self.curl_log),
-            **(env or {}),
-        })
+        environment.update(
+            {
+                "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}",
+                "DOCKER_STUB_LOG": str(self.docker_log),
+                "CURL_STUB_LOG": str(self.curl_log),
+                **(env or {}),
+            }
+        )
         return subprocess.run(
             ["sh", str(self.launcher), *args],
             env=environment,
@@ -124,12 +126,17 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
             self.docker_calls(),
-            [[
-                "compose",
-                "--project-directory", str(self.project),
-                "-f", str(cached),
-                "up", "-d",
-            ]],
+            [
+                [
+                    "compose",
+                    "--project-directory",
+                    str(self.project),
+                    "-f",
+                    str(cached),
+                    "up",
+                    "-d",
+                ]
+            ],
         )
         self.assertEqual(self.curl_urls(), [])
 
@@ -143,8 +150,7 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(cached.read_text(), "name: stub-compose\n")
         self.assertEqual(
             self.curl_urls(),
-            ["https://raw.githubusercontent.com/mstroppel/karpathy-wiki"
-             "/v1.2.3/compose.yaml"],
+            ["https://raw.githubusercontent.com/mstroppel/karpathy-wiki/v1.2.3/compose.yaml"],
         )
         self.assertIn("-f", self.docker_calls()[0])
         self.assertIn(str(cached), self.docker_calls()[0])
@@ -160,13 +166,18 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
             self.docker_calls(),
-            [[
-                "compose",
-                "--project-directory", str(self.project),
-                "-f", str(cached),
-                "-f", str(override),
-                "ps",
-            ]],
+            [
+                [
+                    "compose",
+                    "--project-directory",
+                    str(self.project),
+                    "-f",
+                    str(cached),
+                    "-f",
+                    str(override),
+                    "ps",
+                ]
+            ],
         )
 
     def test_latest_resolves_release_and_remembers_pointer(self):
@@ -197,8 +208,7 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
             self.curl_urls(),
-            ["https://raw.githubusercontent.com/mstroppel/karpathy-wiki"
-             "/main/compose.yaml"],
+            ["https://raw.githubusercontent.com/mstroppel/karpathy-wiki/main/compose.yaml"],
         )
 
     def test_pre_channel_resolves_newest_prerelease(self):
@@ -219,9 +229,7 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(result.stdout, "2.0.0-pre.1\n")
 
     def test_pre_channel_update_pins_newest_prerelease(self):
-        env_file = self.write_env(
-            "KARPATHY_WIKI_VERSION=0.0.1\nKARPATHY_WIKI_CHANNEL=pre\n"
-        )
+        env_file = self.write_env("KARPATHY_WIKI_VERSION=0.0.1\nKARPATHY_WIKI_CHANNEL=pre\n")
 
         result = self.run_launcher("update")
 
@@ -229,9 +237,11 @@ class LauncherTests(unittest.TestCase):
         self.assertIn("KARPATHY_WIKI_VERSION=2.0.0-pre.1", env_file.read_text())
         self.assertEqual(
             self.curl_urls(),
-            ["https://api.github.com/repos/mstroppel/karpathy-wiki/tags?per_page=100",
-             "https://raw.githubusercontent.com/mstroppel/karpathy-wiki"
-             "/v2.0.0-pre.1/compose.yaml"],
+            [
+                "https://api.github.com/repos/mstroppel/karpathy-wiki/tags?per_page=100",
+                "https://raw.githubusercontent.com/mstroppel/karpathy-wiki"
+                "/v2.0.0-pre.1/compose.yaml",
+            ],
         )
 
     def test_update_pins_latest_pulls_and_restarts(self):
@@ -266,8 +276,7 @@ class LauncherTests(unittest.TestCase):
         self.assertIn("KARPATHY_WIKI_VERSION=1.2.3", env_file.read_text())
         self.assertEqual(
             self.curl_urls(),
-            ["https://raw.githubusercontent.com/mstroppel/karpathy-wiki"
-             "/v1.2.3/compose.yaml"],
+            ["https://raw.githubusercontent.com/mstroppel/karpathy-wiki/v1.2.3/compose.yaml"],
         )
 
     def test_update_without_env_file_fails(self):
@@ -308,12 +317,16 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
             self.docker_calls(),
-            [[
-                "compose",
-                "--project-directory", str(self.project),
-                "-f", str(cached),
-                "ps",
-            ]],
+            [
+                [
+                    "compose",
+                    "--project-directory",
+                    str(self.project),
+                    "-f",
+                    str(cached),
+                    "ps",
+                ]
+            ],
         )
 
     def test_help_is_shown_without_arguments(self):
@@ -324,9 +337,7 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(self.docker_calls(), [])
 
     def test_launcher_passes_shell_syntax_check(self):
-        result = subprocess.run(
-            ["sh", "-n", str(LAUNCHER)], text=True, capture_output=True
-        )
+        result = subprocess.run(["sh", "-n", str(LAUNCHER)], text=True, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_launcher_is_executable_in_repository(self):

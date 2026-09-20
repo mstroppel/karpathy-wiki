@@ -2,12 +2,8 @@
   "update": "disable",
   "share": "disabled",
   "snapshots": false,
-  "instructions": [
-    "/etc/opencode/routing.md"
-  ],
-  "skills": [
-    "/etc/opencode/skills"
-  ],
+  "instructions": ["/etc/opencode/routing.md"],
+  "skills": ["/etc/opencode/skills"],
   "tool_output": {
     "max_lines": 200,
     "max_bytes": 16384

@@ -1,6 +1,11 @@
-FROM debian:bookworm-slim
+FROM debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251
 
+# The OpenCode CLI is downloaded from the npm registry and verified against
+# these pinned sha512 digests (hex, one per supported target architecture).
+# Digests must be updated together with OPENCODE_VERSION.
 ARG OPENCODE_VERSION=2.0.10
+ARG OPENCODE_SHA512_LINUX_X64=1c4a595259b855c8e54bdc55d41ebfe6d0e816ca8c3b4690f12bf27291cc8c4bee054b5736e08f33de9e17558454bbf875278b9216b59c9770300eee6ce4b23d
+ARG OPENCODE_SHA512_LINUX_ARM64=84d5f6f8515f8c592ccf3d72bd8cea9ac16a1a3d305bd1e4da6b5e40fb1e3c5c75d4dd3fd8581ada8e8f57edfe3fa18766b80298b02fff725f611652d9c4cca4
 ARG TARGETARCH
 ARG APP_UID=1000
 ARG APP_GID=100
@@ -11,13 +16,14 @@ RUN apt-get update \
 
 RUN arch="${TARGETARCH:-$(dpkg --print-architecture)}" \
     && case "${arch}" in \
-        amd64) target=linux-x64 ;; \
-        arm64) target=linux-arm64 ;; \
+        amd64) target=linux-x64; digest="${OPENCODE_SHA512_LINUX_X64}" ;; \
+        arm64) target=linux-arm64; digest="${OPENCODE_SHA512_LINUX_ARM64}" ;; \
         *) printf 'unsupported architecture: %s\n' "${arch}" >&2; exit 1 ;; \
     esac \
     && curl --fail --location --retry 3 \
         "https://registry.npmjs.org/@opencode/cli-${target}/-/cli-${target}-${OPENCODE_VERSION}.tgz" \
         --output /tmp/opencode.tar.gz \
+    && printf '%s  /tmp/opencode.tar.gz\n' "${digest}" | sha512sum --check - \
     && tar -xzf /tmp/opencode.tar.gz -C /tmp \
     && install -m 0755 /tmp/package/bin/opencode /usr/local/bin/opencode \
     && rm -rf /tmp/opencode.tar.gz /tmp/package \

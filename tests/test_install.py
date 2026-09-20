@@ -1,9 +1,8 @@
 import os
-from pathlib import Path
 import subprocess
 import tempfile
 import unittest
-
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 INSTALLER = ROOT / "install.sh"
@@ -174,9 +173,7 @@ class InstallTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("Installed Karpathy Wiki 2.0.0-pre.1", result.stdout)
-            self.assertIn(
-                "KARPATHY_WIKI_VERSION=2.0.0-pre.1", (directory / ".env").read_text()
-            )
+            self.assertIn("KARPATHY_WIKI_VERSION=2.0.0-pre.1", (directory / ".env").read_text())
 
     def test_install_rejects_unknown_channel(self):
         with tempfile.TemporaryDirectory() as parent:
@@ -187,6 +184,49 @@ class InstallTests(unittest.TestCase):
 
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("unsupported channel", result.stderr)
+
+    def test_install_requires_curl(self):
+        with tempfile.TemporaryDirectory() as parent:
+            directory = Path(parent) / "my-wiki"
+            directory.mkdir()
+            empty_bin = Path(parent) / "empty-bin"
+            empty_bin.mkdir()
+
+            environment = {
+                **os.environ,
+                "KARPATHY_WIKI_VERSION": "1.2.3",
+                # A PATH without curl keeps `command -v curl` failing.
+                "PATH": str(empty_bin),
+            }
+            result = subprocess.run(
+                ["/bin/sh", str(INSTALLER)],
+                cwd=directory,
+                env=environment,
+                text=True,
+                capture_output=True,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("curl is required", result.stderr)
+            self.assertFalse((directory / ".env").exists())
+
+    def test_install_fails_without_touching_the_directory_on_download_error(self):
+        failing_stub = """#!/bin/sh
+case "$*" in
+  *".env.example"*) exit 18 ;;
+esac
+exit 0
+"""
+        with tempfile.TemporaryDirectory() as parent:
+            directory = Path(parent) / "my-wiki"
+            directory.mkdir()
+
+            result = self.run_installer(directory, CURL_STUB=failing_stub)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse((directory / ".env").exists())
+            self.assertFalse((directory / "karpathy-wiki.sh").exists())
+            self.assertFalse((directory / ".gitignore").exists())
 
 
 if __name__ == "__main__":

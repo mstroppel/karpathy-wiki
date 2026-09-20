@@ -1,0 +1,4 @@
+# Pinned Python quality-check tooling.
+# CI installs exactly this file; keep local versions identical to CI.
+ruff==0.16.8
+mypy==2.3.1

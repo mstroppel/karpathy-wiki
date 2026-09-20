@@ -1,0 +1,14 @@
+# Disposable integration overlay for tests/integration/run.sh.
+#
+# It retargets the images to locally built ones so the test exercises the
+# current repository code instead of published releases. Secrets and data
+# roots point at generated temporary files created by the test script.
+services:
+  init:
+    image: kw-opencode:integration
+  opencode:
+    image: kw-opencode:integration
+  webdav-ingest:
+    image: kw-ingest:integration
+  paperless-ingest:
+    image: kw-ingest:integration

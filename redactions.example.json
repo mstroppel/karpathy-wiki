@@ -3,13 +3,9 @@
     {
       "replacement": "[ICH]",
       "first_name": "Max",
-      "middle_names": [
-        "Moritz"
-      ],
+      "middle_names": ["Moritz"],
       "last_name": "Mustermann",
-      "aliases": [
-        "Max Musterman"
-      ]
+      "aliases": ["Max Musterman"]
     },
     {
       "replacement": "[ANGEHOERIGE_1]",
@@ -26,27 +22,20 @@
       "street": "Musterstraße",
       "house_number": "12",
       "postal_code": "12345",
-      "city": [
-        "Musterstadt",
-        "Musterort"
-      ],
+      "city": ["Musterstadt", "Musterort"],
       "aliases": []
     }
   ],
   "phones": [
     {
       "replacement": "[TELEFON]",
-      "values": [
-        "+49 170 1234567"
-      ]
+      "values": ["+49 170 1234567"]
     }
   ],
   "emails": [
     {
       "replacement": "[EMAIL_ICH]",
-      "values": [
-        "max.mustermann@example.de"
-      ]
+      "values": ["max.mustermann@example.de"]
     }
   ],
   "birth_dates": [

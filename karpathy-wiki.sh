@@ -3,6 +3,7 @@ set -eu
 
 repository="mstroppel/karpathy-wiki"
 
+# shellcheck disable=SC1007 # CDPATH is intentionally cleared for this command only
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 project_dir=${KARPATHY_WIKI_PROJECT_DIR:-$script_dir}
 env_file=$project_dir/.env

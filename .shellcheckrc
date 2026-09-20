@@ -1,0 +1,6 @@
+# Shared ShellCheck configuration for install.sh, karpathy-wiki.sh,
+# config/init.sh, and opencode/entrypoint.sh.
+#
+# SC2016: init.sh intentionally keeps ${VAR} literal inside single-quoted
+# heredoc content that is expanded later by the shell writing the file.
+disable=SC2016

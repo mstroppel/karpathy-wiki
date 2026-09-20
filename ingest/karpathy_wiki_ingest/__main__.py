@@ -26,7 +26,7 @@ def usage_error(plugin: str):
 def load_plugin(name: str):
     if name in BUILTIN_PLUGINS:
         module = importlib.import_module(f".plugins.{name}", package="karpathy_wiki_ingest")
-        return getattr(module, "main")
+        return module.main
 
     # Third-party plugins can either register an entry point pointing at
     # their main() callable or expose a package named karpathy_wiki_ingest_<name>.

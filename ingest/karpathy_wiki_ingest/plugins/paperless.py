@@ -9,7 +9,6 @@ import os
 import re
 import signal
 import threading
-import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -22,17 +21,15 @@ from ..shared import (
     PrivacyValidationError,
     TargetedAnonymizer,
     atomic_write,
-    canonical_phone,
     required_env,
+    write_health,
 )
 
 LOG = logging.getLogger("karpathy-wiki-ingest")
 SOURCE_FORMAT_VERSION = 2
 SOURCE_FILE_RE = re.compile(r"^document-(\d+)\.md$")
 DOCUMENTS_PER_DIRECTORY = 1000
-SOURCE_REVISION_RE = re.compile(
-    r'(?m)^source_revision:\s*["\']?([0-9a-f]{64})["\']?\s*$'
-)
+SOURCE_REVISION_RE = re.compile(r'(?m)^source_revision:\s*["\']?([0-9a-f]{64})["\']?\s*$')
 REVOKED_ID_RE = re.compile(r"(?m)^- (\d+)$")
 REVOKED_TITLE = "# Widerrufene Paperless-Dokumente"
 
@@ -67,7 +64,7 @@ class Settings:
     health_path: Path
 
     @classmethod
-    def from_env(cls) -> "Settings":
+    def from_env(cls) -> Settings:
         token = read_secret("PAPERLESS_TOKEN", "PAPERLESS_TOKEN_FILE")
         source_tag_id = int(required_env("PAPERLESS_SOURCE_TAG_ID"))
         if source_tag_id <= 0:
@@ -75,9 +72,7 @@ class Settings:
         interval_seconds = int(os.getenv("SYNC_INTERVAL_SECONDS", "900"))
         if interval_seconds <= 0:
             raise ValueError("SYNC_INTERVAL_SECONDS must be greater than zero")
-        public_url = os.getenv(
-            "PAPERLESS_PUBLIC_URL", "https://paperless.rafatz.de"
-        ).rstrip("/")
+        public_url = os.getenv("PAPERLESS_PUBLIC_URL", "https://paperless.rafatz.de").rstrip("/")
         if urllib.parse.urlsplit(public_url).scheme != "https":
             raise ValueError("PAPERLESS_PUBLIC_URL must use HTTPS")
         return cls(
@@ -86,12 +81,8 @@ class Settings:
             token=token,
             redactions_path=Path(required_env("REDACTIONS_FILE")),
             interval_seconds=interval_seconds,
-            sanitized_root=Path(
-                os.getenv("SANITIZED_ROOT", "/data/sanitized/paperless")
-            ),
-            quarantine_root=Path(
-                os.getenv("QUARANTINE_ROOT", "/data/quarantine/paperless")
-            ),
+            sanitized_root=Path(os.getenv("SANITIZED_ROOT", "/data/sanitized/paperless")),
+            quarantine_root=Path(os.getenv("QUARANTINE_ROOT", "/data/quarantine/paperless")),
             health_path=Path(os.getenv("HEALTH_PATH", "/tmp/health.json")),
         )
 
@@ -243,6 +234,7 @@ def render_document(
     source_url = f"{public_url}/documents/{document_id}"
     safe_title = " ".join(title.split())[:300] or f"Paperless-Dokument {document_id}"
     count_text = ", ".join(f"{kind}: {counts[kind]}" for kind in sorted(counts)) or "keine"
+    document_type_field = json.dumps(document_type, ensure_ascii=False) if document_type else "null"
     return (
         "---\n"
         f"title: {json.dumps(safe_title, ensure_ascii=False)}\n"
@@ -250,7 +242,7 @@ def render_document(
         f"paperless_url: {json.dumps(source_url)}\n"
         f"source_revision: {json.dumps(source_revision)}\n"
         f"issued_date: {json.dumps(issued_date) if issued_date else 'null'}\n"
-        f"document_type: {json.dumps(document_type, ensure_ascii=False) if document_type else 'null'}\n"
+        f"document_type: {document_type_field}\n"
         f"tags: {json.dumps(tags, ensure_ascii=False)}\n"
         "anonymized: true\n"
         "---\n\n"
@@ -306,9 +298,7 @@ class Ingestor:
             if resource_id(value, "tag") != self.settings.source_tag_id
         ]
         tag_names = sorted(self.client.tag_names(content_tag_values))
-        digest = source_hash(
-            document, self.anonymizer.fingerprint, document_type, tag_names
-        )
+        digest = source_hash(document, self.anonymizer.fingerprint, document_type, tag_names)
         target = source_document_path(self.settings.sanitized_root, document_id)
         if source_revision(target) == digest:
             self.set_revoked(document_id, False)
@@ -324,9 +314,7 @@ class Ingestor:
         safe_document_type = None
         metadata_counts: Counter[str] = Counter()
         if document_type:
-            safe_document_type, metadata_counts = self.anonymizer.anonymize(
-                document_type
-            )
+            safe_document_type, metadata_counts = self.anonymizer.anonymize(document_type)
         safe_tags: list[str] = []
         removed_person_tags = 0
         for tag_name in tag_names:
@@ -350,9 +338,7 @@ class Ingestor:
         )
         atomic_write(target, output)
         self.set_revoked(document_id, False)
-        (self.settings.quarantine_root / f"document-{document_id}.txt").unlink(
-            missing_ok=True
-        )
+        (self.settings.quarantine_root / f"document-{document_id}.txt").unlink(missing_ok=True)
         LOG.info("Document %s was anonymized", document_id)
         return True
 
@@ -361,11 +347,16 @@ class Ingestor:
         if target.is_file():
             self.set_revoked(document_id, True)
         target.unlink(missing_ok=True)
-        message = f"document_id={document_id}\ncategory=privacy-validation\nerror_type={type(error).__name__}\n"
+        message = (
+            f"document_id={document_id}\n"
+            f"category=privacy-validation\nerror_type={type(error).__name__}\n"
+        )
         atomic_write(self.settings.quarantine_root / f"document-{document_id}.txt", message)
 
     def record_error(self, document_id: int, error: Exception) -> None:
-        message = f"document_id={document_id}\ncategory=operational\nerror_type={type(error).__name__}\n"
+        message = (
+            f"document_id={document_id}\ncategory=operational\nerror_type={type(error).__name__}\n"
+        )
         atomic_write(self.settings.quarantine_root / f"document-{document_id}.txt", message)
 
     def reconcile(self, selected_ids: set[int], known_ids: set[int]) -> None:
@@ -376,9 +367,7 @@ class Ingestor:
         if removed_ids or not revoked_path.exists():
             write_revoked_ids(revoked_path, revoked_ids)
         for document_id in removed_ids:
-            source_document_path(self.settings.sanitized_root, document_id).unlink(
-                missing_ok=True
-            )
+            source_document_path(self.settings.sanitized_root, document_id).unlink(missing_ok=True)
             LOG.warning("Document %s was revoked because its tag was removed", document_id)
 
     def set_revoked(self, document_id: int, revoked: bool) -> None:
@@ -447,20 +436,10 @@ def write_revoked_ids(path: Path, ids: set[int]) -> None:
     atomic_write(path, "\n".join(lines))
 
 
-def write_health(path: Path, failed: int) -> None:
-    atomic_write(
-        path, json.dumps({"checked_at": int(time.time()), "failed": failed}) + "\n"
-    )
-
-
-def run_continuously(
-    ingestor: Ingestor, settings: Settings, stop_event: threading.Event
-) -> None:
+def run_continuously(ingestor: Ingestor, settings: Settings, stop_event: threading.Event) -> None:
     while not stop_event.is_set():
         try:
-            ingestor.anonymizer = TargetedAnonymizer.from_file(
-                settings.redactions_path
-            )
+            ingestor.anonymizer = TargetedAnonymizer.from_file(settings.redactions_path)
             ingestor.run_once()
         except (urllib.error.URLError, OSError, ValueError):
             LOG.exception("Paperless synchronization failed")

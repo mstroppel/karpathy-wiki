@@ -1,5 +1,5 @@
-import { readdir } from "node:fs/promises"
-import path from "node:path"
+import { readdir } from 'node:fs/promises'
+import path from 'node:path'
 
 export const REVISION_RE = /^[0-9a-f]{64}$/
 
@@ -23,13 +23,14 @@ export async function files(root, { markdownOnly = false, required = false } = {
     try {
       entries = await readdir(directory, { withFileTypes: true })
     } catch (error) {
-      if (error?.code === "ENOENT" && (!required || directory !== root)) return
+      if (error?.code === 'ENOENT' && (!required || directory !== root)) return
       throw error
     }
     for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
       const entryPath = path.join(directory, entry.name)
       if (entry.isDirectory()) await visit(entryPath)
-      else if (entry.isFile() && (!markdownOnly || entry.name.endsWith(".md"))) result.push(entryPath)
+      else if (entry.isFile() && (!markdownOnly || entry.name.endsWith('.md')))
+        result.push(entryPath)
     }
   }
 
@@ -38,10 +39,10 @@ export async function files(root, { markdownOnly = false, required = false } = {
 }
 
 export function frontmatter(text) {
-  const lines = text.replaceAll("\r\n", "\n").split("\n")
-  if (lines[0] !== "---") throw new Error("fehlendes Frontmatter")
-  const end = lines.indexOf("---", 1)
-  if (end === -1) throw new Error("nicht abgeschlossenes Frontmatter")
+  const lines = text.replaceAll('\r\n', '\n').split('\n')
+  if (lines[0] !== '---') throw new Error('fehlendes Frontmatter')
+  const end = lines.indexOf('---', 1)
+  if (end === -1) throw new Error('nicht abgeschlossenes Frontmatter')
   return lines.slice(1, end)
 }
 
@@ -58,11 +59,11 @@ export function field(lines, name) {
       throw new Error(`${name} enthält keine gültige Zeichenkette`)
     }
   }
-  return value.replace(/^'(.*)'$/, "$1")
+  return value.replace(/^'(.*)'$/, '$1')
 }
 
 export function revisionField(lines) {
-  const revision = field(lines, "source_revision")
-  if (!REVISION_RE.test(revision)) throw new Error("source_revision ist ungültig")
+  const revision = field(lines, 'source_revision')
+  if (!REVISION_RE.test(revision)) throw new Error('source_revision ist ungültig')
   return revision
 }
