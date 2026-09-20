@@ -1,6 +1,6 @@
 # GitHub Issue Implementation Plan
 
-This plan covers all issues currently tracked in the repository: **21 issues in total, 15 open and 6 closed**.
+This plan covers all issues currently tracked in the repository: **21 issues in total, 14 open and 7 closed**.
 
 ## Completed issues
 
@@ -17,28 +17,32 @@ No implementation work is planned for these issues unless a regression is found:
 
 - Paperless already writes `paperless_url` and a visible Paperless link into sanitized source documents. [#50](https://github.com/mstroppel/karpathy-wiki/issues/50) should first verify that the link is preserved in generated wiki pages.
 - WebDAV still publishes files one at a time and loads the redaction file only once per process. [#43](https://github.com/mstroppel/karpathy-wiki/issues/43) therefore requires a real generation-based publication design.
-- The session exporter can interpret an empty or invalid API/state result as authoritative and then delete files through `rclone sync`. [#45](https://github.com/mstroppel/karpathy-wiki/issues/45) is the most urgent data-loss prevention task.
+- The session exporter duplicates sharing that already exists: analyses are shared by wiki link and printable PDF view, and session access for analysis should use the authenticated OpenCode API. The exporter is therefore removed instead of hardened, and [#45](https://github.com/mstroppel/karpathy-wiki/issues/45) is closed without implementation.
 - OpenCode writes directly to the wiki and the SilverBullet mount is writable. These are central constraints addressed by [#44](https://github.com/mstroppel/karpathy-wiki/issues/44).
 
 ## Phase 0 — Safety and engineering baseline
 
-### [#45](https://github.com/mstroppel/karpathy-wiki/issues/45): Make session export deletion-safe — P0
+### Remove the session exporter — P0
 
-1. Version and strictly validate `.export-state.json`.
-2. Reject empty, incomplete, or suspiciously reduced API inventories.
-3. Record a reconciliation generation, timestamp, pagination/completeness metadata, and observed session count.
-4. Represent missing sessions as tombstones.
-5. Delete only after a configurable grace period or number of complete generations.
-6. Validate that the remote destination is a dedicated, non-root path.
-7. Save state atomically before remote synchronization so retries are safe.
-8. Expose the last complete reconciliation, pending tombstones, and sync failures through logs and health status.
-9. Document that the remote is a mirror, not a backup.
+Per the review decision on this plan, the exporter's use cases are already covered elsewhere:
+
+- Sharing by link and PDF is provided by the analysis export (`wiki-analysis-save`, `docs/analysis-export.md`).
+- Session access for analysis is provided by direct, authenticated API access to the OpenCode instance (internal API clients already use `OPENCODE_PASSWORD`).
+
+Work items:
+
+1. Remove the `session-export` Compose profile, image, exporter-only configuration, and `docs/session-export.md`.
+2. Decide whether the raw one-off `export-session.sh` remains as a debugging tool.
+3. Document how analysis tooling reaches the OpenCode server through its authenticated API instead of consuming mirrored PDF exports.
+4. Remove exporter references from the installer, health checks, and README.
+5. Document manual cleanup of `${DATA_ROOT}/exports/sessions` for existing installations; per repository policy, no automatic data-layout moves are added before 1.0.
+6. Close [#45](https://github.com/mstroppel/karpathy-wiki/issues/45) without implementing its deletion-safety hardening.
 
 ### [#26](https://github.com/mstroppel/karpathy-wiki/issues/26): Expand integration coverage and daemon hardening — P0
 
 - Test WebDAV configuration, rclone failures, retries, shutdown, and health.
 - Test malformed Paperless responses and persistence failures.
-- Add behavior tests for the installer and exporter, not only syntax checks.
+- Add behavior tests for the installer, not only syntax checks.
 - Add disposable Compose integration tests for startup, restart, and failure.
 - Make daemon lifecycle and health behavior explicit in CI.
 
@@ -123,7 +127,7 @@ This issue should be delivered as independently deployable work packages, not as
 4. **Serialized publisher:** isolated Git worktrees, stale-base detection, path/provenance/content validation, and one focused commit per publication.
 5. **Immutable releases:** atomically publish complete wiki revisions and mount published data read-only in SilverBullet.
 6. **Network boundaries:** keep services on private networks and expose only an authenticated gateway through the external proxy network.
-7. **Exporter boundary:** consume committed revisions/events and separate PDF rendering from remote uploading.
+7. **Analysis boundary:** share analyses through wiki links and printable PDF views, and reach OpenCode for session access through its authenticated internal API; the destructive session PDF mirror is removed.
 8. **Operational verification:** test restart recovery, duplicate jobs, concurrent jobs, failed validation, rollback, backup, and restore.
 
 Each package must preserve existing data and remain independently testable.
@@ -167,7 +171,7 @@ No pre-1.0 migration code, legacy aliases, or automatic data-layout moves should
 
 ## Suggested priority
 
-1. **Immediate:** #45, #26, #43.
+1. **Immediate:** #26, #43, and the session exporter removal.
 2. **Foundation:** #24, #25, #42, #28, #29, #27.
 3. **Transactional architecture:** #44, delivered incrementally.
 4. **Small independent improvements:** #40 and #50.
