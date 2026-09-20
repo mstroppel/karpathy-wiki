@@ -15,7 +15,7 @@ The destination must therefore be dedicated to this exporter because `rclone
 sync` removes files that do not exist locally.
 
 `${DATA_ROOT}/exports/sessions/.export-state.json` tracks exported revisions
-locally and is excluded from the Nextcloud mirror.
+locally and is excluded from the WebDAV mirror.
 
 ## Configuration
 

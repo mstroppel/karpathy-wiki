@@ -163,11 +163,11 @@ services:
       OPENCODE_PUBLIC_URL: ${OPENCODE_PUBLIC_URL:-https://chat.example.com}
       SESSION_EXPORT_REMOTE_PATH: ${WEBDAV_SESSION_PATH:-OpenCode Sessions}
       SESSION_EXPORT_INTERVAL: ${SESSION_EXPORT_INTERVAL:-15m}
-      RCLONE_CONFIG_NEXTCLOUD_TYPE: webdav
-      RCLONE_CONFIG_NEXTCLOUD_URL: ${WEBDAV_URL:-https://cloud.example.com/remote.php/dav/files/username/}
-      RCLONE_CONFIG_NEXTCLOUD_VENDOR: ${WEBDAV_VENDOR:-nextcloud}
-      RCLONE_CONFIG_NEXTCLOUD_USER: ${WEBDAV_USERNAME:-username}
-      RCLONE_CONFIG_NEXTCLOUD_PASS: ${WEBDAV_PASSWORD_OBSCURED:-}
+      RCLONE_CONFIG_WEBDAV_EXPORT_TYPE: webdav
+      RCLONE_CONFIG_WEBDAV_EXPORT_URL: ${WEBDAV_URL:-https://cloud.example.com/remote.php/dav/files/username/}
+      RCLONE_CONFIG_WEBDAV_EXPORT_VENDOR: ${WEBDAV_VENDOR:-nextcloud}
+      RCLONE_CONFIG_WEBDAV_EXPORT_USER: ${WEBDAV_USERNAME:-username}
+      RCLONE_CONFIG_WEBDAV_EXPORT_PASS: ${WEBDAV_PASSWORD_OBSCURED:-}
     volumes:
       - ${DATA_ROOT:-./data}/exports/sessions:/exports:rw
     depends_on:
