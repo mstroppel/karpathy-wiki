@@ -149,38 +149,6 @@ services:
     security_opt:
       - no-new-privileges:true
 
-  session-export:
-    image: ghcr.io/mstroppel/karpathy-wiki-session-export:${KARPATHY_WIKI_VERSION:-latest}
-    profiles: ["session-export"]
-    user: "${PUID:-1000}:${PGID:-1000}"
-    restart: unless-stopped
-    environment:
-      HOME: /tmp
-      TZ: ${TZ:-UTC}
-      OPENCODE_URL: http://opencode:4096
-      OPENCODE_PASSWORD: ${OPENCODE_PASSWORD:?OPENCODE_PASSWORD is required by OpenCode v2}
-      OPENCODE_DIRECTORY: /knowledge/wiki
-      OPENCODE_PUBLIC_URL: ${OPENCODE_PUBLIC_URL:-https://chat.example.com}
-      SESSION_EXPORT_REMOTE_PATH: ${WEBDAV_SESSION_PATH:-OpenCode Sessions}
-      SESSION_EXPORT_INTERVAL: ${SESSION_EXPORT_INTERVAL:-15m}
-      RCLONE_CONFIG_WEBDAV_EXPORT_TYPE: webdav
-      RCLONE_CONFIG_WEBDAV_EXPORT_URL: ${WEBDAV_URL:-https://cloud.example.com/remote.php/dav/files/username/}
-      RCLONE_CONFIG_WEBDAV_EXPORT_VENDOR: ${WEBDAV_VENDOR:-nextcloud}
-      RCLONE_CONFIG_WEBDAV_EXPORT_USER: ${WEBDAV_USERNAME:-username}
-      RCLONE_CONFIG_WEBDAV_EXPORT_PASS: ${WEBDAV_PASSWORD_OBSCURED:-}
-    volumes:
-      - ${DATA_ROOT:-./data}/exports/sessions:/exports:rw
-    depends_on:
-      opencode:
-        condition: service_started
-    read_only: true
-    tmpfs:
-      - /tmp
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-
   raw-files:
     image: caddy:2.11.4-alpine
     profiles: ["raw-files"]

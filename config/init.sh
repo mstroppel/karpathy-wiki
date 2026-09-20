@@ -60,8 +60,7 @@ mkdir -p "$sources/webdav" \
   "$wiki/analyses" \
   "$KNOWLEDGE_ROOT/opencode/config" \
   "$KNOWLEDGE_ROOT/opencode/data" \
-  "$KNOWLEDGE_ROOT/opencode/state" \
-  "$KNOWLEDGE_ROOT/exports/sessions"
+  "$KNOWLEDGE_ROOT/opencode/state"
 
 if [ "$PAPERLESS_ENABLED" = true ]; then
   mkdir -p "$sources/paperless" "$KNOWLEDGE_ROOT/quarantine/paperless"

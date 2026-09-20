@@ -10,5 +10,4 @@ htmlcov/
 secrets/*
 !secrets/.gitkeep
 temp/
-session-export/output/
 *.log
