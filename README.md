@@ -95,11 +95,11 @@ Set `COMPOSE_PROFILES` in `.env`; profiles can be enabled independently:
 | --- | --- |
 | `webdav` | Mirror and locally redact a selected WebDAV folder |
 | `paperless` | Export tagged OCR text and redact configured personal data |
-| `session-export` | Archive inactive OpenCode sessions as PDFs in Nextcloud |
+| `session-export` | Archive inactive OpenCode sessions as PDFs via WebDAV |
 | `raw-files` | Expose source files to a trusted reverse proxy |
 
 See [configuration](docs/configuration.md), [Paperless ingestion](docs/paperless.md),
-[session export](docs/session-export.md), and [migration](docs/migration.md) for
+and [session export](docs/session-export.md) for
 profile-specific setup and production paths. See [architecture](docs/architecture.md)
 for service boundaries and [data layout](docs/data-layout.md) for the persistent
 folder structure.

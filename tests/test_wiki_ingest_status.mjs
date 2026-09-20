@@ -103,37 +103,6 @@ test("uses collision-free pages for file and directory-like source names", async
   }
 })
 
-test("blocks batch ingestion while legacy Nextcloud pages remain", async () => {
-  const { root, sourceRoot, wikiSourceRoot } = await fixture()
-  try {
-    const legacy = path.join(wikiSourceRoot, "nextcloud", "old.md")
-    await mkdir(path.dirname(legacy), { recursive: true })
-    await writeFile(legacy, "# Legacy source\n")
-
-    const status = await scanIngestStatus({ sourceRoot, wikiSourceRoot, adapterRoot: ADAPTER_ROOT })
-
-    assert.equal(status.adapters.webdav.summary.invalid, 1)
-    assert.match(status.adapters.webdav.invalid[0].error, /migriert/)
-  } finally {
-    await rm(root, { recursive: true, force: true })
-  }
-})
-
-test("blocks batch ingestion while generated wiki rules still reference Nextcloud", async () => {
-  const { root, sourceRoot, wikiSourceRoot } = await fixture()
-  try {
-    const agents = path.join(wikiSourceRoot, "..", "AGENTS.md")
-    await writeFile(agents, "Quellenseiten: sources/nextcloud\n")
-
-    const status = await scanIngestStatus({ sourceRoot, wikiSourceRoot, adapterRoot: ADAPTER_ROOT })
-
-    assert.equal(status.adapters.webdav.summary.invalid, 1)
-    assert.equal(status.adapters.webdav.invalid[0].path, agents)
-  } finally {
-    await rm(root, { recursive: true, force: true })
-  }
-})
-
 test("preserves Paperless revision states", async () => {
   const { root, sourceRoot, wikiSourceRoot } = await fixture()
   try {

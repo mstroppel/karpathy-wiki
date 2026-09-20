@@ -15,7 +15,7 @@ The destination must therefore be dedicated to this exporter because `rclone
 sync` removes files that do not exist locally.
 
 `${DATA_ROOT}/exports/sessions/.export-state.json` tracks exported revisions
-locally and is excluded from the Nextcloud mirror.
+locally and is excluded from the WebDAV mirror.
 
 ## Configuration
 
@@ -26,10 +26,8 @@ WEBDAV_SESSION_PATH=OpenCode Sessions
 SESSION_EXPORT_INTERVAL=15m
 ```
 
-The exporter reuses the configured WebDAV credentials by default. Set the
-corresponding `NEXTCLOUD_*` variables when it should use a separate Nextcloud
-account or endpoint. Exported conversations remain confidential even though
-internal tool details are omitted.
+The exporter reuses the configured WebDAV credentials. Exported conversations
+remain confidential even though internal tool details are omitted.
 
 ## Raw One-Off Export
 

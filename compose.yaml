@@ -22,18 +22,18 @@ services:
   webdav-ingest:
     image: ghcr.io/mstroppel/karpathy-wiki-ingest:${KARPATHY_WIKI_VERSION:-latest}
     command: ["webdav"]
-    profiles: ["webdav", "nextcloud"]
+    profiles: ["webdav"]
     restart: unless-stopped
     environment:
       TZ: ${TZ:-UTC}
-      WEBDAV_PATH: ${WEBDAV_PATH:-${NEXTCLOUD_PATH:-Wiki Sources}}
-      WEBDAV_SYNC_INTERVAL: ${WEBDAV_SYNC_INTERVAL:-${NEXTCLOUD_SYNC_INTERVAL:-15m}}
+      WEBDAV_PATH: ${WEBDAV_PATH:-Wiki Sources}
+      WEBDAV_SYNC_INTERVAL: ${WEBDAV_SYNC_INTERVAL:-15m}
       REDACTIONS_FILE: /run/secrets/redactions
       RCLONE_CONFIG_WEBDAV_TYPE: webdav
-      RCLONE_CONFIG_WEBDAV_URL: ${WEBDAV_URL:-${NEXTCLOUD_WEBDAV_URL:-https://cloud.example.com/remote.php/dav/files/username/}}
+      RCLONE_CONFIG_WEBDAV_URL: ${WEBDAV_URL:-https://cloud.example.com/remote.php/dav/files/username/}
       RCLONE_CONFIG_WEBDAV_VENDOR: ${WEBDAV_VENDOR:-nextcloud}
-      RCLONE_CONFIG_WEBDAV_USER: ${WEBDAV_USERNAME:-${NEXTCLOUD_USERNAME:-username}}
-      RCLONE_CONFIG_WEBDAV_PASS: ${WEBDAV_PASSWORD_OBSCURED:-${NEXTCLOUD_PASSWORD_OBSCURED:-}}
+      RCLONE_CONFIG_WEBDAV_USER: ${WEBDAV_USERNAME:-username}
+      RCLONE_CONFIG_WEBDAV_PASS: ${WEBDAV_PASSWORD_OBSCURED:-}
     user: "${PUID:-1000}:${PGID:-1000}"
     volumes:
       - ${DATA_ROOT:-./data}/incoming/webdav:/data/incoming/webdav:rw
@@ -161,13 +161,13 @@ services:
       OPENCODE_PASSWORD: ${OPENCODE_PASSWORD:?OPENCODE_PASSWORD is required by OpenCode v2}
       OPENCODE_DIRECTORY: /knowledge/wiki
       OPENCODE_PUBLIC_URL: ${OPENCODE_PUBLIC_URL:-https://chat.example.com}
-      SESSION_EXPORT_REMOTE_PATH: ${WEBDAV_SESSION_PATH:-${NEXTCLOUD_SESSION_PATH:-OpenCode Sessions}}
+      SESSION_EXPORT_REMOTE_PATH: ${WEBDAV_SESSION_PATH:-OpenCode Sessions}
       SESSION_EXPORT_INTERVAL: ${SESSION_EXPORT_INTERVAL:-15m}
-      RCLONE_CONFIG_NEXTCLOUD_TYPE: webdav
-      RCLONE_CONFIG_NEXTCLOUD_URL: ${NEXTCLOUD_WEBDAV_URL:-${WEBDAV_URL:-https://cloud.example.com/remote.php/dav/files/username/}}
-      RCLONE_CONFIG_NEXTCLOUD_VENDOR: ${NEXTCLOUD_VENDOR:-${WEBDAV_VENDOR:-nextcloud}}
-      RCLONE_CONFIG_NEXTCLOUD_USER: ${NEXTCLOUD_USERNAME:-${WEBDAV_USERNAME:-username}}
-      RCLONE_CONFIG_NEXTCLOUD_PASS: ${NEXTCLOUD_PASSWORD_OBSCURED:-${WEBDAV_PASSWORD_OBSCURED:-}}
+      RCLONE_CONFIG_WEBDAV_EXPORT_TYPE: webdav
+      RCLONE_CONFIG_WEBDAV_EXPORT_URL: ${WEBDAV_URL:-https://cloud.example.com/remote.php/dav/files/username/}
+      RCLONE_CONFIG_WEBDAV_EXPORT_VENDOR: ${WEBDAV_VENDOR:-nextcloud}
+      RCLONE_CONFIG_WEBDAV_EXPORT_USER: ${WEBDAV_USERNAME:-username}
+      RCLONE_CONFIG_WEBDAV_EXPORT_PASS: ${WEBDAV_PASSWORD_OBSCURED:-}
     volumes:
       - ${DATA_ROOT:-./data}/exports/sessions:/exports:rw
     depends_on:

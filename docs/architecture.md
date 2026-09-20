@@ -18,7 +18,7 @@ Paperless ---- local redaction (optional) -> sources/paperless/ --+--> OpenCode
                                                                         v
                                                                    SilverBullet
 
-OpenCode sessions -- optional PDF export ------------------------> Nextcloud
+OpenCode sessions -- optional PDF export ------------------------> WebDAV
 ```
 
 OpenCode reads source directories and writes generated Markdown to `wiki/`.

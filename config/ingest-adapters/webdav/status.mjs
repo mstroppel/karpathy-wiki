@@ -100,23 +100,5 @@ export default async function scanWebdav({ sourceRoot, wikiSourceRoot }) {
     }
   }
 
-  for (const legacyPath of await files(path.join(wikiSourceRoot, "nextcloud"), { markdownOnly: true })) {
-    result.invalid.push({
-      path: legacyPath,
-      error: "Legacy-Nextcloud-Quellenseite muss nach sources/webdav migriert und um Revisionsmetadaten ergänzt werden",
-    })
-  }
-  const agentsPath = path.resolve(wikiSourceRoot, "..", "AGENTS.md")
-  try {
-    if ((await readFile(agentsPath, "utf8")).includes("sources/nextcloud")) {
-      result.invalid.push({
-        path: agentsPath,
-        error: "Legacy-Nextcloud-Regeln müssen auf /knowledge/sources/webdav aktualisiert werden",
-      })
-    }
-  } catch (error) {
-    if (error?.code !== "ENOENT") throw error
-  }
-
   return result
 }

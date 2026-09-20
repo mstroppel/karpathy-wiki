@@ -83,8 +83,7 @@ docker run --rm rclone/rclone:1.75.1 obscure 'WEBDAV_PASSWORD'
 Set `WEBDAV_URL`, `WEBDAV_VENDOR`, `WEBDAV_USERNAME`,
 `WEBDAV_PASSWORD_OBSCURED`, `WEBDAV_PATH`, and `WEBDAV_SYNC_INTERVAL` for the
 source adapter. `WEBDAV_VENDOR` defaults to `nextcloud`; rclone also supports
-other WebDAV implementations. The legacy `nextcloud` profile and `NEXTCLOUD_*`
-source variables remain accepted for one migration release.
+other WebDAV implementations.
 
 WebDAV files are synchronized into a private staging directory first. The
 `webdav-ingest` service applies `REDACTIONS_FILE` locally and publishes only
