@@ -59,6 +59,18 @@
           "effect": "deny"
         }
       ]
+    },
+    "wiki-analysis-save": {
+      "description": "Speichert eine fertige Analyse als Wiki-Seite mit verlinkbarer Druckansicht.",
+      "mode": "subagent",
+      "system": "Bearbeite ausschließlich Aufträge, eine fertige Analyse als Wiki-Seite zu speichern. Delegiere nicht erneut. Lade einmal den Skill wiki-analysis-save, befolge ihn vollständig und führe den Auftrag selbst aus.",
+      "permissions": [
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
     }
   },
   "commands": {
@@ -85,6 +97,12 @@
       "agent": "wiki-analysis",
       "subagent": false,
       "template": "$ARGUMENTS"
+    },
+    "analyse-save": {
+      "description": "Analyse im Wiki speichern (Seite und Druckansicht)",
+      "agent": "wiki-analysis-save",
+      "subagent": true,
+      "template": "Führe diesen Speicherauftrag vollständig aus, inklusive der vollständigen zu speichernden Analyse: $ARGUMENTS"
     }
   },
   "permissions": [
@@ -156,6 +174,11 @@
     {
       "action": "skill",
       "resource": "wiki-analysis",
+      "effect": "allow"
+    },
+    {
+      "action": "skill",
+      "resource": "wiki-analysis-save",
       "effect": "allow"
     },
     {

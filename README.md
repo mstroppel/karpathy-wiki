@@ -79,6 +79,14 @@ cp /path/to/document.pdf ./data/sources/webdav/
 Then ask OpenCode to import `/knowledge/sources/webdav/document.pdf`. Generated
 pages are written to `wiki/` and can be read at `WIKI_PUBLIC_URL`.
 
+## Analyses
+
+Scientific analyses (`/analyse`) can be saved into the wiki with
+`/analyse-save`: the analysis becomes a linked page at `WIKI_PUBLIC_URL/analyses/<slug>`
+and a print-optimized HTML view at `WIKI_PUBLIC_URL/.fs/assets/analyses/<slug>.html`,
+from which the browser's print dialog produces a shareable PDF. See
+[analysis export](docs/analysis-export.md).
+
 ## Profiles
 
 Set `COMPOSE_PROFILES` in `.env`; profiles can be enabled independently:

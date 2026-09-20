@@ -198,8 +198,9 @@ Markdown-Wiki. Neue Quellen liegen ausschließlich unter
 \`/knowledge/sources/webdav\`.$paperless_summary
 
 Der primäre Agent delegiert ausdrückliche Einleseaufträge an \`wiki-ingest\`,
-Prüf- und Wartungsaufträge an \`wiki-lint\` und ausdrücklich wissenschaftliche
-Analysen an \`wiki-analysis\`. Jede andere Anfrage bleibt eine Wiki-Abfrage.
+Prüf- und Wartungsaufträge an \`wiki-lint\`, ausdrücklich wissenschaftliche
+Analysen an \`wiki-analysis\` und das Speichern fertiger Analysen an
+\`wiki-analysis-save\`. Jede andere Anfrage bleibt eine Wiki-Abfrage.
 
 ## Sicherheitsgrenzen
 
@@ -220,6 +221,8 @@ Analysen an \`wiki-analysis\`. Jede andere Anfrage bleibt eine Wiki-Abfrage.
 - \`entities/\`: Dauerhafte Seiten zu Personen, Organisationen, Orten und Dingen.
 - \`concepts/\`: Konzepte, Methoden, Themen und wiederkehrende Ideen.
 - \`analyses/\`: Vergleiche, Synthesen und wiederverwendbare Ergebnisse.
+  Jede dort gespeicherte Analyse erhält eine Druckansicht unter
+  \`assets/analyses/\`, aus der der Browser über Drucken ein PDF erzeugt.
 - \`assets/\`: Für Wiki-Seiten erzeugte Dateien.
 
 Verwende kleingeschriebene Dateinamen in Kebab-Case und SilverBullet-Wikilinks

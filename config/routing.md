@@ -23,6 +23,11 @@ primäre Agenten; ein spezialisierter Agent führt seinen Auftrag selbst aus.
 - **Wissenschaftliche Analyse** nur bei einer ausdrücklich wissenschaftlichen
   Analyse oder Recherche, insbesondere zur Studien- oder Evidenzlage. Übergib
   nur die konkrete Frage an `wiki-analysis`.
+- **Analyse speichern** nur bei einer ausdrücklichen Aufforderung, eine fertige
+  Analyse im Wiki abzulegen, zu speichern, zu exportieren oder als PDF
+  verfügbar zu machen. Übergib den vollständigen Analysetext unverändert an
+  `wiki-analysis-save`; liegt keine fertige Analyse vor, erstelle keine und
+  verweise auf `/analyse`.
 - **Abfrage** für jede andere Anfrage. Beginne mit `index.md`, lies nur relevante
   Wiki-Seiten und verändere das Wiki nicht.
 
