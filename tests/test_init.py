@@ -41,7 +41,7 @@ class InitTests(unittest.TestCase):
             self.assertFalse((root / "sources" / "paperless").exists())
             self.assertTrue((root / "sources" / "webdav").is_dir())
             self.assertTrue((root / "wiki" / ".git").is_dir())
-            self.assertTrue((root / "exports" / "sessions").is_dir())
+            self.assertFalse((root / "exports").exists())
             self.assertTrue((root / "opencode" / "config").is_dir())
             self.assertTrue((root / "opencode" / "data").is_dir())
             self.assertTrue((root / "opencode" / "state").is_dir())
@@ -99,7 +99,7 @@ class InitTests(unittest.TestCase):
     def test_paperless_profile_controls_initialization(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "knowledge"
-            self.run_init(root, COMPOSE_PROFILES="webdav,paperless,session-export")
+            self.run_init(root, COMPOSE_PROFILES="webdav,paperless")
             self.assertTrue((root / "sources" / "paperless").is_dir())
             self.assertTrue((root / "quarantine" / "paperless").is_dir())
 

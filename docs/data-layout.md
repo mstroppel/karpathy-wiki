@@ -12,8 +12,6 @@ ${DATA_ROOT}/
 ├── quarantine/
 │   ├── webdav/             # WebDAV files that could not be processed
 │   └── paperless/          # Content-free Paperless error reports
-├── exports/
-│   └── sessions/           # Local OpenCode session PDF mirror
 └── opencode/
     ├── config/             # OpenCode configuration and generated policy
     ├── data/               # Credentials, sessions, messages, and logs
@@ -35,4 +33,10 @@ DATA_ROOT=/srv/karpathy-wiki/personal
 
 Secret files can live outside `DATA_ROOT` through `PAPERLESS_TOKEN_FILE` and
 `REDACTIONS_FILE`. Do not store credentials, source material, wiki content, or
-exported sessions in this repository.
+sessions in this repository.
+
+## Removed data directories
+
+The session PDF export was removed. Existing installations can manually delete
+the now-unused `${DATA_ROOT}/exports/sessions` directory; per repository policy,
+no automatic data-layout moves are performed before version 1.0.

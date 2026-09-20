@@ -25,22 +25,6 @@ updates:
       ingest-image:
         update-types: [minor, patch]
 
-  - package-ecosystem: docker
-    directory: /session-export
-    schedule:
-      interval: weekly
-    groups:
-      session-export-image:
-        update-types: [minor, patch]
-
-  - package-ecosystem: pip
-    directory: /session-export
-    schedule:
-      interval: weekly
-    groups:
-      python-runtime:
-        update-types: [minor, patch]
-
   - package-ecosystem: github-actions
     directory: /
     schedule:

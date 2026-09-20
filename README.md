@@ -95,12 +95,11 @@ Set `COMPOSE_PROFILES` in `.env`; profiles can be enabled independently:
 | --- | --- |
 | `webdav` | Mirror and locally redact a selected WebDAV folder |
 | `paperless` | Export tagged OCR text and redact configured personal data |
-| `session-export` | Archive inactive OpenCode sessions as PDFs via WebDAV |
 | `raw-files` | Expose source files to a trusted reverse proxy |
 
-See [configuration](docs/configuration.md), [Paperless ingestion](docs/paperless.md),
-and [session export](docs/session-export.md) for
-profile-specific setup and production paths. See [architecture](docs/architecture.md)
+See [configuration](docs/configuration.md) and
+[Paperless ingestion](docs/paperless.md) for profile-specific setup and
+production paths. See [architecture](docs/architecture.md)
 for service boundaries and [data layout](docs/data-layout.md) for the persistent
 folder structure.
 
@@ -125,7 +124,7 @@ data layout or generated policies. Local Compose changes belong in
 
 ## Security
 
-- Never commit `.env`, tokens, redaction lists, source material, wiki content, or exported sessions.
+- Never commit `.env`, tokens, redaction lists, source material, wiki content, or sessions.
 - Paperless redaction is an explicit deny-list, not general anonymization. Review output before sending it to an external model provider.
 - WebDAV material is not redacted.
 - Put OpenCode and `raw-files` behind a trusted, authenticated reverse proxy; do not expose them directly to the internet.
@@ -141,9 +140,7 @@ Run the local checks:
 python3 -m unittest discover -s tests -v
 node --test tests/test_wiki_ingest_status.mjs
 (cd ingest && python3 -m unittest discover -s tests -v)
-(cd session-export && python3 -m unittest discover -s tests -v)
 sh -n config/init.sh && sh -n install.sh && sh -n karpathy-wiki.sh
-sh -n session-export/export-session.sh
 node --check config/plugins/wiki-ingest-status.js
 node --check config/tools/wiki_ingest_status_core.mjs
 for adapter in config/ingest-adapters/*/status.mjs; do node --check "$adapter"; done

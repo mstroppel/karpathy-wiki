@@ -37,7 +37,7 @@ browser.
 Select optional services with a comma-separated value:
 
 ```env
-COMPOSE_PROFILES=webdav,paperless,session-export,raw-files
+COMPOSE_PROFILES=webdav,paperless,raw-files
 ```
 
 An installation can run without source adapters and receive files through a
@@ -159,8 +159,7 @@ The alias must match `${STACK_ID}-opencode`, and Caddy must be attached to
 without separate authentication: Caddy would otherwise grant every visitor
 access to OpenCode. Restart or reload Caddy after changing the environment. If
 `OPENCODE_PASSWORD` changes, regenerate `OPENCODE_UPSTREAM_AUTH` before restarting
-OpenCode to avoid locking out proxy traffic. The session exporter continues to
-use `OPENCODE_PASSWORD` directly on the private Compose network.
+OpenCode to avoid locking out proxy traffic.
 
 ## Upgrades
 

@@ -20,8 +20,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Remove all migration code and documentation from pre-1.0.0 releases; data
   migrations will be introduced with the first major release 1.0.0.
-- Migrate OpenCode, its configuration and custom ingest-status tool to v2, and
-  update session export for the v2 HTTP API.
+- Migrate OpenCode, its configuration and custom ingest-status tool to v2.
+
+### Removed
+
+- The session exporter (`session-export` Compose profile and image) and its
+  documentation. Sharing finished analyses by wiki link and printable PDF view
+  already covers the exporter's use cases, and analysis runs directly in
+  OpenCode, which has session access. Existing installations can manually
+  delete the unused `${DATA_ROOT}/exports/sessions` directory.
 
 ### Fixed
 

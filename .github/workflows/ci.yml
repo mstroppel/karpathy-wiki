@@ -27,13 +27,11 @@ jobs:
           python -m unittest discover -s tests -v
           node --test tests/test_wiki_ingest_status.mjs
           (cd ingest && python -m unittest discover -s tests -v)
-          (cd session-export && python -m unittest discover -s tests -v)
       - name: Validate scripts and configuration
         run: |
           sh -n config/init.sh
           sh -n install.sh
           sh -n karpathy-wiki.sh
-          sh -n session-export/export-session.sh
           node --check config/plugins/wiki-ingest-status.js
           node --check config/tools/wiki_ingest_status_core.mjs
           node --check config/ingest-adapters/shared.mjs

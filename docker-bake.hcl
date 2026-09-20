@@ -7,15 +7,15 @@ variable "IMAGE_VERSION" {
 }
 
 group "default" {
-  targets = ["opencode", "ingest", "session-export"]
+  targets = ["opencode", "ingest"]
 }
 
 group "release" {
-  targets = ["opencode-release", "ingest-release", "session-export-release"]
+  targets = ["opencode-release", "ingest-release"]
 }
 
 group "stable" {
-  targets = ["opencode-stable", "ingest-stable", "session-export-stable"]
+  targets = ["opencode-stable", "ingest-stable"]
 }
 
 target "common" {
@@ -38,12 +38,6 @@ target "ingest" {
   tags = ["karpathy-wiki-ingest:test"]
 }
 
-target "session-export" {
-  inherits = ["common"]
-  context = "session-export"
-  tags = ["karpathy-wiki-session-export:test"]
-}
-
 target "opencode-release" {
   inherits = ["opencode"]
   tags = ["${REGISTRY}/karpathy-wiki-opencode:${IMAGE_VERSION}"]
@@ -54,11 +48,6 @@ target "ingest-release" {
   tags = ["${REGISTRY}/karpathy-wiki-ingest:${IMAGE_VERSION}"]
 }
 
-target "session-export-release" {
-  inherits = ["session-export"]
-  tags = ["${REGISTRY}/karpathy-wiki-session-export:${IMAGE_VERSION}"]
-}
-
 target "opencode-stable" {
   inherits = ["opencode"]
   tags = ["${REGISTRY}/karpathy-wiki-opencode:${IMAGE_VERSION}", "${REGISTRY}/karpathy-wiki-opencode:latest"]
@@ -67,9 +56,4 @@ target "opencode-stable" {
 target "ingest-stable" {
   inherits = ["ingest"]
   tags = ["${REGISTRY}/karpathy-wiki-ingest:${IMAGE_VERSION}", "${REGISTRY}/karpathy-wiki-ingest:latest"]
-}
-
-target "session-export-stable" {
-  inherits = ["session-export"]
-  tags = ["${REGISTRY}/karpathy-wiki-session-export:${IMAGE_VERSION}", "${REGISTRY}/karpathy-wiki-session-export:latest"]
 }
