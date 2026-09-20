@@ -1,4 +1,5 @@
 import base64
+import io
 import os
 import sys
 import tempfile
@@ -55,6 +56,20 @@ class PublicUrlTests(unittest.TestCase):
         )
 
 
+class ApiTests(unittest.TestCase):
+    def test_api_get_authenticates_with_opencode_password(self):
+        response = mock.MagicMock()
+        response.__enter__.return_value = io.StringIO('{"data": []}')
+        with mock.patch.object(export_sessions, "API_PASSWORD", "secret"), mock.patch.object(
+            export_sessions.urllib.request, "urlopen", return_value=response
+        ) as urlopen:
+            export_sessions.api_get("/api/session")
+
+        request = urlopen.call_args.args[0]
+        expected = base64.b64encode(b"opencode:secret").decode()
+        self.assertEqual(request.get_header("Authorization"), f"Basic {expected}")
+
+
 class SafeTitleTests(unittest.TestCase):
     def test_replaces_path_characters_and_normalizes_whitespace(self):
         self.assertEqual(export_sessions.safe_title('  Plan: a/b?  "yes"  '), "Plan - a - b - - yes -")
@@ -99,6 +114,31 @@ class SelectSessionsTests(unittest.TestCase):
             export_sessions.select_sessions(self.sessions, "missing")
 
 
+class ListSessionsTests(unittest.TestCase):
+    def test_follows_v2_pagination_cursor(self):
+        with mock.patch.object(
+            export_sessions,
+            "api_get",
+            side_effect=[
+                {"data": [{"id": "first"}], "cursor": {"next": "next-page"}},
+                {"data": [{"id": "second"}], "cursor": {}},
+            ],
+        ) as api_get:
+            sessions = export_sessions.list_sessions()
+
+        self.assertEqual([session["id"] for session in sessions], ["first", "second"])
+        self.assertEqual(
+            api_get.call_args_list,
+            [
+                mock.call(
+                    "/api/session",
+                    {"directory": "/knowledge/wiki", "limit": 200, "order": "asc"},
+                ),
+                mock.call("/api/session", {"cursor": "next-page", "limit": 200}),
+            ],
+        )
+
+
 class ExportTests(unittest.TestCase):
     def test_active_session_path_is_reserved_for_colliding_idle_session(self):
         created = 1767225600000
@@ -113,7 +153,13 @@ class ExportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, mock.patch.object(
             export_sessions, "EXPORT_ROOT", Path(directory)
         ), mock.patch.object(
-            export_sessions, "api_get", side_effect=[sessions, statuses, []]
+            export_sessions,
+            "api_get",
+            side_effect=[
+                {"data": sessions, "cursor": {}},
+                {"data": statuses},
+                {"data": {"messages": []}},
+            ],
         ), mock.patch.object(
             export_sessions, "load_state", return_value=state
         ), mock.patch.object(
@@ -137,6 +183,27 @@ class ExportTests(unittest.TestCase):
                 {"id": "session", "title": "Title", "time": {}}, []
             )
         self.assertIn("default-src 'none'; img-src data:", rendered)
+
+    def test_rendered_html_uses_v2_message_shape(self):
+        messages = [
+            {"type": "user", "text": "Hello", "files": [{"name": "notes.pdf"}]},
+            {
+                "type": "assistant",
+                "content": [{"type": "text", "text": "Answer"}],
+            },
+        ]
+        with mock.patch.object(
+            export_sessions, "PUBLIC_URL", "https://chat.example.com"
+        ), mock.patch.object(
+            export_sessions, "markdown_renderer", return_value=lambda text: f"<p>{text}</p>"
+        ):
+            rendered = export_sessions.render_html(
+                {"id": "session", "title": "Title", "time": {}}, messages
+            )
+
+        self.assertIn("Hello", rendered)
+        self.assertIn("Answer", rendered)
+        self.assertIn("Attachment: notes.pdf", rendered)
 
 
 if __name__ == "__main__":

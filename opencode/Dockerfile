@@ -1,6 +1,6 @@
 FROM debian:bookworm-slim
 
-ARG OPENCODE_VERSION=1.18.31
+ARG OPENCODE_VERSION=2.0.10
 ARG TARGETARCH
 ARG APP_UID=1000
 ARG APP_GID=100
@@ -11,15 +11,16 @@ RUN apt-get update \
 
 RUN arch="${TARGETARCH:-$(dpkg --print-architecture)}" \
     && case "${arch}" in \
-        amd64) archive=opencode-linux-x64.tar.gz ;; \
-        arm64) archive=opencode-linux-arm64.tar.gz ;; \
+        amd64) target=linux-x64 ;; \
+        arm64) target=linux-arm64 ;; \
         *) printf 'unsupported architecture: %s\n' "${arch}" >&2; exit 1 ;; \
     esac \
     && curl --fail --location --retry 3 \
-        "https://github.com/anomalyco/opencode/releases/download/v${OPENCODE_VERSION}/${archive}" \
+        "https://registry.npmjs.org/@opencode/cli-${target}/-/cli-${target}-${OPENCODE_VERSION}.tgz" \
         --output /tmp/opencode.tar.gz \
-    && tar -xzf /tmp/opencode.tar.gz -C /usr/local/bin opencode \
-    && rm /tmp/opencode.tar.gz \
+    && tar -xzf /tmp/opencode.tar.gz -C /tmp \
+    && install -m 0755 /tmp/package/bin/opencode /usr/local/bin/opencode \
+    && rm -rf /tmp/opencode.tar.gz /tmp/package \
     && opencode --version
 
 RUN getent group "$APP_GID" >/dev/null || groupadd --gid "$APP_GID" app \
@@ -33,6 +34,7 @@ COPY config/init.sh /etc/opencode/init.sh
 COPY config/opencode.json /etc/opencode/opencode.json
 COPY config/routing.md /etc/opencode/routing.md
 COPY config/skills /etc/opencode/skills
+COPY config/plugins /etc/opencode/plugins
 COPY config/tools /etc/opencode/tools
 COPY config/ingest-adapters /etc/opencode/ingest-adapters
 COPY opencode/entrypoint.sh /usr/local/bin/karpathy-wiki-entrypoint

@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   channel to opt in to them.
 - The installer creates a `.gitignore` that ignores the `.cache` directory.
 
+### Changed
+
+- Migrate OpenCode, its configuration and custom ingest-status tool to v2, and
+  update session export for the v2 HTTP API.
+
 ### Fixed
 
 - OpenCode prompt execution failed immediately because version 1.18.30 shipped

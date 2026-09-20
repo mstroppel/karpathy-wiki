@@ -43,8 +43,11 @@ compose() {
 
 api_get() {
 	compose sh -c \
-		'exec curl --fail --silent --show-error --get "$1" --data-urlencode "directory=$2"' \
-		sh "$OPENCODE_URL$1" "$DIRECTORY"
+		'if [ -n "$3" ]; then
+			exec curl --fail --silent --show-error --user "opencode:$OPENCODE_PASSWORD" --get "$1" --data-urlencode "directory=$2" --data-urlencode "cursor=$3"
+		fi
+		exec curl --fail --silent --show-error --user "opencode:$OPENCODE_PASSWORD" --get "$1" --data-urlencode "directory=$2"' \
+		sh "$OPENCODE_URL$1" "$DIRECTORY" "${2:-}"
 }
 
 mkdir -p "$OUTPUT_DIR"
@@ -54,7 +57,15 @@ TEMP_DIR="$(mktemp -d "$OUTPUT_DIR/.session-export.XXXXXX")"
 TEMP_FILE="$TEMP_DIR/records.ndjson"
 trap 'rm -rf "$TEMP_DIR"' EXIT HUP INT TERM
 
-api_get /session >"$TEMP_DIR/all-sessions.json"
+: >"$TEMP_DIR/sessions.ndjson"
+CURSOR=""
+while :; do
+	api_get '/api/session?limit=200&order=asc' "$CURSOR" >"$TEMP_DIR/session-response.json"
+	jq -c '.data[]' "$TEMP_DIR/session-response.json" >>"$TEMP_DIR/sessions.ndjson"
+	CURSOR=$(jq -r '.cursor.next // empty' "$TEMP_DIR/session-response.json")
+	[ -n "$CURSOR" ] || break
+done
+jq -s '.' "$TEMP_DIR/sessions.ndjson" >"$TEMP_DIR/all-sessions.json"
 if ! jq -e --arg id "$SESSION_ID" 'any(.[]; .id == $id)' \
 	"$TEMP_DIR/all-sessions.json" >/dev/null; then
 	printf 'Error: session not found: %s\n' "$SESSION_ID" >&2
@@ -79,12 +90,8 @@ while [ -n "$QUEUE" ]; do
 	esac
 	VISITED="$VISITED $CURRENT_ID"
 
-	jq -c --arg id "$CURRENT_ID" '.[] | select(.id == $id)' \
-		"$TEMP_DIR/all-sessions.json" >"$TEMP_DIR/session.json"
-	api_get "/session/$CURRENT_ID/message" >"$TEMP_DIR/messages.json"
-	jq -cn --slurpfile session "$TEMP_DIR/session.json" \
-		--slurpfile messages "$TEMP_DIR/messages.json" \
-		'{session: $session[0], messages: $messages[0]}' >>"$TEMP_FILE"
+	api_get "/api/experimental/session/$CURRENT_ID/export" >"$TEMP_DIR/export.json"
+	jq -c '.data | {session: .info, messages}' "$TEMP_DIR/export.json" >>"$TEMP_FILE"
 
 	CHILDREN="$(jq -r --arg id "$CURRENT_ID" \
 		'.[] | select(.parentID == $id) | .id' "$TEMP_DIR/all-sessions.json")"

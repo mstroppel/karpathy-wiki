@@ -136,7 +136,7 @@ node --test tests/test_wiki_ingest_status.mjs
 (cd session-export && python3 -m unittest discover -s tests -v)
 sh -n config/init.sh && sh -n install.sh && sh -n karpathy-wiki.sh
 sh -n session-export/export-session.sh
-node --check config/tools/wiki_ingest_status.js
+node --check config/plugins/wiki-ingest-status.js
 node --check config/tools/wiki_ingest_status_core.mjs
 for adapter in config/ingest-adapters/*/status.mjs; do node --check "$adapter"; done
 docker compose --env-file .env.example config --quiet

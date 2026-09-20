@@ -20,6 +20,7 @@ case "$out" in
   *.env) printf '%s\n' \
     'COMPOSE_PROJECT_NAME=karpathy-wiki' \
     'STACK_ID=karpathy-wiki' \
+    'OPENCODE_PASSWORD=' \
     'KARPATHY_WIKI_VERSION=latest' > "$out" ;;
   *api.github.com/repos/*/tags*)
     printf '%s\n' \
@@ -118,12 +119,11 @@ class InstallTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("COMPOSE_PROJECT_NAME and STACK_ID as my-wiki", result.stdout)
-            self.assertEqual(
-                (directory / ".env").read_text(),
-                "COMPOSE_PROJECT_NAME=my-wiki\n"
-                "STACK_ID=my-wiki\n"
-                "KARPATHY_WIKI_VERSION=1.2.3\n",
-            )
+            environment = (directory / ".env").read_text()
+            self.assertIn("COMPOSE_PROJECT_NAME=my-wiki\n", environment)
+            self.assertIn("STACK_ID=my-wiki\n", environment)
+            self.assertIn("KARPATHY_WIKI_VERSION=1.2.3\n", environment)
+            self.assertRegex(environment, r"OPENCODE_PASSWORD=[0-9a-f]{48}\n")
             self.assertTrue((directory / "karpathy-wiki.sh").exists())
             self.assertEqual((directory / ".gitignore").read_text(), ".cache/\n")
 
