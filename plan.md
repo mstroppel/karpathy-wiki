@@ -1,0 +1,177 @@
+# GitHub Issue Implementation Plan
+
+This plan covers all issues currently tracked in the repository: **21 issues in total, 15 open and 6 closed**.
+
+## Completed issues
+
+No implementation work is planned for these issues unless a regression is found:
+
+- [#14](https://github.com/mstroppel/karpathy-wiki/issues/14) — renamed the Nextcloud integration to WebDAV and added ingest tracking.
+- [#17](https://github.com/mstroppel/karpathy-wiki/issues/17) — saves analyses as wiki pages with printable PDF views.
+- [#20](https://github.com/mstroppel/karpathy-wiki/issues/20) — anonymizes WebDAV input.
+- [#23](https://github.com/mstroppel/karpathy-wiki/issues/23) — provides the version-aware installer and update launcher.
+- [#47](https://github.com/mstroppel/karpathy-wiki/issues/47) — migrated the stack to OpenCode v2.
+- [#53](https://github.com/mstroppel/karpathy-wiki/issues/53) — removed migration code before version 1.0.
+
+## Current findings
+
+- Paperless already writes `paperless_url` and a visible Paperless link into sanitized source documents. [#50](https://github.com/mstroppel/karpathy-wiki/issues/50) should first verify that the link is preserved in generated wiki pages.
+- WebDAV still publishes files one at a time and loads the redaction file only once per process. [#43](https://github.com/mstroppel/karpathy-wiki/issues/43) therefore requires a real generation-based publication design.
+- The session exporter can interpret an empty or invalid API/state result as authoritative and then delete files through `rclone sync`. [#45](https://github.com/mstroppel/karpathy-wiki/issues/45) is the most urgent data-loss prevention task.
+- OpenCode writes directly to the wiki and the SilverBullet mount is writable. These are central constraints addressed by [#44](https://github.com/mstroppel/karpathy-wiki/issues/44).
+
+## Phase 0 — Safety and engineering baseline
+
+### [#45](https://github.com/mstroppel/karpathy-wiki/issues/45): Make session export deletion-safe — P0
+
+1. Version and strictly validate `.export-state.json`.
+2. Reject empty, incomplete, or suspiciously reduced API inventories.
+3. Record a reconciliation generation, timestamp, pagination/completeness metadata, and observed session count.
+4. Represent missing sessions as tombstones.
+5. Delete only after a configurable grace period or number of complete generations.
+6. Validate that the remote destination is a dedicated, non-root path.
+7. Save state atomically before remote synchronization so retries are safe.
+8. Expose the last complete reconciliation, pending tombstones, and sync failures through logs and health status.
+9. Document that the remote is a mirror, not a backup.
+
+### [#26](https://github.com/mstroppel/karpathy-wiki/issues/26): Expand integration coverage and daemon hardening — P0
+
+- Test WebDAV configuration, rclone failures, retries, shutdown, and health.
+- Test malformed Paperless responses and persistence failures.
+- Add behavior tests for the installer and exporter, not only syntax checks.
+- Add disposable Compose integration tests for startup, restart, and failure.
+- Make daemon lifecycle and health behavior explicit in CI.
+
+### [#28](https://github.com/mstroppel/karpathy-wiki/issues/28): Add consistent quality checks
+
+- Add a shared Python configuration, formatter, linter, and type checker.
+- Add JavaScript formatting/linting and ShellCheck configuration.
+- Run all checks in CI with pinned tool versions.
+- Document intentional exclusions and align README commands with CI.
+
+### [#29](https://github.com/mstroppel/karpathy-wiki/issues/29): Close supply-chain gaps
+
+- Cover every Dockerfile and package source with Dependabot.
+- Add a repository-managed JavaScript manifest and lockfile.
+- Centralize repeated versions, especially rclone.
+- Verify OpenCode downloads with checksums or signatures.
+- Pin critical base images by digest and validate dependency metadata in CI.
+
+## Phase 1 — Shared ingest contracts
+
+### [#24](https://github.com/mstroppel/karpathy-wiki/issues/24): Make WebDAV self-contained
+
+1. Create an explicit Python package and `pyproject.toml`.
+2. Put shared functionality in a documented core package.
+3. Build the WebDAV image without implicitly copying Paperless sources.
+4. Remove import-path workarounds from tests.
+5. Test the package independently from the main repository image.
+
+### [#25](https://github.com/mstroppel/karpathy-wiki/issues/25): Define one status contract
+
+- Define a versioned contract for revisions, `revoked.md`, ID ranges, filenames, intervals, and status values.
+- Store shared JSON conformance fixtures for Python and JavaScript.
+- Test valid, invalid, and boundary cases in both runtimes.
+
+### [#42](https://github.com/mstroppel/karpathy-wiki/issues/42): Define one end-to-end plugin contract
+
+After #24 and #25:
+
+1. Define a versioned provider manifest containing source keys, revisions, destination paths, frontmatter, revocations, and validation errors.
+2. Make the generic status scanner consume the manifest directly.
+3. Remove provider-specific JavaScript adapters from the OpenCode image.
+4. Move WebDAV and Paperless to the same contract.
+5. Add a third-party plugin example that does not require rebuilding the core OpenCode image.
+6. Add compatibility tests and document contract deprecation rules.
+
+## Phase 2 — Coherent source publication
+
+### [#43](https://github.com/mstroppel/karpathy-wiki/issues/43): Publish WebDAV generations
+
+1. Build each synchronization in a new temporary generation directory.
+2. Record the upstream inventory/revisions and redaction fingerprint.
+3. Validate and anonymize every file before publication.
+4. Atomically switch the active generation only after the full cycle succeeds.
+5. Keep the last successful generation active after any failure.
+6. Reload redaction configuration every cycle and regenerate on fingerprint changes.
+7. Quarantine failed generations without storing source content in reports.
+8. Document retention, cleanup, and abandoned-generation recovery.
+
+### [#27](https://github.com/mstroppel/karpathy-wiki/issues/27): Split the Paperless module
+
+Split the current module into clear boundaries for configuration, the HTTP client, anonymization, document modelling/hashing, rendering/frontmatter, persistence, and daemon/health lifecycle. Preserve the CLI and environment semantics while adding focused tests. Use the contracts from Phase 1 rather than introducing another provider-specific format.
+
+### [#50](https://github.com/mstroppel/karpathy-wiki/issues/50): Preserve Paperless links
+
+1. Verify that `paperless_url` survives source-to-wiki rendering.
+2. Ensure every Paperless source page has a visible, validated HTTPS link.
+3. Add a regression test covering frontmatter and rendered Markdown.
+
+### [#40](https://github.com/mstroppel/karpathy-wiki/issues/40): Use the wiki name in the browser title
+
+Determine the supported OpenCode v2 branding/title mechanism, connect it to `WIKI_NAME`, retain a safe fallback, and add a browser-level regression test.
+
+## Phase 3 — Transactional ingestion and publishing
+
+### [#44](https://github.com/mstroppel/karpathy-wiki/issues/44): Refactor into a transactional pipeline
+
+This issue should be delivered as independently deployable work packages, not as a flag-day rewrite:
+
+1. **Durable state:** SQLite tables for jobs, leases, source generations, publications, retries, and idempotency keys.
+2. **Queue:** recoverable jobs, backoff, restart recovery, and one active publisher lease.
+3. **Restricted workers:** workers read immutable inputs and return validated patches with provenance; they cannot commit, publish, access source systems, or make arbitrary outbound requests.
+4. **Serialized publisher:** isolated Git worktrees, stale-base detection, path/provenance/content validation, and one focused commit per publication.
+5. **Immutable releases:** atomically publish complete wiki revisions and mount published data read-only in SilverBullet.
+6. **Network boundaries:** keep services on private networks and expose only an authenticated gateway through the external proxy network.
+7. **Exporter boundary:** consume committed revisions/events and separate PDF rendering from remote uploading.
+8. **Operational verification:** test restart recovery, duplicate jobs, concurrent jobs, failed validation, rollback, backup, and restore.
+
+Each package must preserve existing data and remain independently testable.
+
+## Phase 4 — User-facing extensions
+
+### [#18](https://github.com/mstroppel/karpathy-wiki/issues/18): Multi-language support
+
+1. Add central `WIKI_LANGUAGE`/`WIKI_LOCALE` settings.
+2. Separate language selection for chat responses, wiki defaults, skills, analyses, and PDF output.
+3. Centralize prompts and generated UI text.
+4. Do not translate source documents implicitly; make translation explicit.
+5. Test German, English, and unsupported-locale fallbacks.
+
+### [#15](https://github.com/mstroppel/karpathy-wiki/issues/15): Audio ingest
+
+After the package and plugin contracts are stable:
+
+1. Add an audio provider with a versioned manifest.
+2. Discover audio files from WebDAV and process them idempotently by hash.
+3. Use a replaceable transcription backend with optional speaker diarization.
+4. Emit Markdown with timestamps, speaker labels, and provenance.
+5. Apply anonymization after transcription and before publication.
+6. Keep external transcription opt-in and explicitly configured.
+
+## Post-1.0 work
+
+### [#46](https://github.com/mstroppel/karpathy-wiki/issues/46): Version and migrate generated security policy
+
+This issue must remain deferred until the first stable 1.0 release, in line with the repository policy. At that point implement:
+
+- versioned release-managed security policy;
+- separately stored user-editable instructions;
+- persistent policy/schema versions;
+- explicit, idempotent migrations and upgrade logs;
+- detection of missing, newer, modified, or conflicting files;
+- documented rollback and release-note verification;
+- tests for fresh installs, repeated initialization, profile changes, forward migration, failure, and rollback.
+
+No pre-1.0 migration code, legacy aliases, or automatic data-layout moves should be added as part of this plan.
+
+## Suggested priority
+
+1. **Immediate:** #45, #26, #43.
+2. **Foundation:** #24, #25, #42, #28, #29, #27.
+3. **Transactional architecture:** #44, delivered incrementally.
+4. **Small independent improvements:** #40 and #50.
+5. **Future capabilities:** #18 and #15.
+6. **After 1.0:** #46.
+
+Every implementation PR should use a focused Conventional Commit and document behavior changes, security implications, data-layout/migration impact, and test evidence.
