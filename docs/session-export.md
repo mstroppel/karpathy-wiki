@@ -26,10 +26,8 @@ WEBDAV_SESSION_PATH=OpenCode Sessions
 SESSION_EXPORT_INTERVAL=15m
 ```
 
-The exporter reuses the configured WebDAV credentials by default. Set the
-corresponding `NEXTCLOUD_*` variables when it should use a separate Nextcloud
-account or endpoint. Exported conversations remain confidential even though
-internal tool details are omitted.
+The exporter reuses the configured WebDAV credentials. Exported conversations
+remain confidential even though internal tool details are omitted.
 
 ## Raw One-Off Export
 

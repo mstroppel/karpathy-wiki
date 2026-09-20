@@ -99,7 +99,7 @@ Set `COMPOSE_PROFILES` in `.env`; profiles can be enabled independently:
 | `raw-files` | Expose source files to a trusted reverse proxy |
 
 See [configuration](docs/configuration.md), [Paperless ingestion](docs/paperless.md),
-[session export](docs/session-export.md), and [migration](docs/migration.md) for
+and [session export](docs/session-export.md) for
 profile-specific setup and production paths. See [architecture](docs/architecture.md)
 for service boundaries and [data layout](docs/data-layout.md) for the persistent
 folder structure.

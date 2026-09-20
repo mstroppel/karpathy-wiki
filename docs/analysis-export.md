@@ -41,4 +41,4 @@ authentication rules as the rest of `WIKI_PUBLIC_URL`.
 
 The `AGENTS.md` generated during first initialization lists the delegation
 targets. Add the `wiki-analysis-save` delegation sentence to an existing
-`wiki/AGENTS.md` manually, as described in [migration](migration.md).
+`wiki/AGENTS.md` manually.
