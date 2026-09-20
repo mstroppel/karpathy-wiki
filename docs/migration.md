@@ -110,6 +110,15 @@ its frontmatter. Also update the generated `wiki/AGENTS.md` references from
 counterparts. The status tool reports remaining legacy pages and source paths as
 invalid so a batch import cannot accidentally duplicate their knowledge.
 
+## Adoption of the Analysis Export
+
+Existing installations keep their generated `wiki/AGENTS.md`. To route analysis
+savings the same way as fresh installs, append one sentence to the delegation
+paragraph of `wiki/AGENTS.md` in a reviewed wiki commit so it reads
+"… ausdrücklich wissenschaftliche Analysen an `wiki-analysis` und das Speichern
+fertiger Analysen an `wiki-analysis-save`." No data migration is required; see
+[analysis export](analysis-export.md).
+
 ## Validation
 
 For each instance:

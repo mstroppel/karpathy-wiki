@@ -37,6 +37,7 @@ class InitTests(unittest.TestCase):
             agents = (root / "wiki" / "AGENTS.md").read_text()
             self.assertIn("# Example Wiki", agents)
             self.assertIn("https://wiki.example.test/<pfad-ohne-.md>", agents)
+            self.assertIn("wiki-analysis-save", agents)
             self.assertFalse((root / "sources" / "paperless").exists())
             self.assertTrue((root / "sources" / "webdav").is_dir())
             self.assertTrue((root / "wiki" / ".git").is_dir())
@@ -206,6 +207,16 @@ class ConfigTests(unittest.TestCase):
         self.assertNotIn("WebDAV", ingest_new["description"] + ingest_new["template"])
         self.assertNotIn("Paperless", ingest_new["description"] + ingest_new["template"])
         self.assertIn("/knowledge/sources", ingest_new["template"])
+        analyse_save = config["commands"]["analyse-save"]
+        self.assertEqual(analyse_save["agent"], "wiki-analysis-save")
+        self.assertTrue(analyse_save["subagent"])
+        save_agent = config["agents"]["wiki-analysis-save"]
+        self.assertEqual(save_agent["mode"], "subagent")
+        self.assertEqual(
+            [rule["effect"] for rule in save_agent["permissions"] if rule["action"] == "subagent"],
+            ["deny"],
+        )
+        self.assertEqual(rules[("skill", "wiki-analysis-save")], "allow")
         generic_status = "".join(
             path.read_text().lower()
             for path in (
@@ -215,6 +226,22 @@ class ConfigTests(unittest.TestCase):
         )
         self.assertNotIn("webdav", generic_status)
         self.assertNotIn("paperless", generic_status)
+
+    def test_skills_declare_matching_frontmatter(self):
+        skills = ROOT / "config" / "skills"
+        directories = sorted(path.name for path in skills.iterdir() if path.is_dir())
+        self.assertEqual(
+            directories, ["wiki-analysis", "wiki-analysis-save", "wiki-ingest", "wiki-lint"]
+        )
+        for directory in directories:
+            text = (skills / directory / "SKILL.md").read_text()
+            self.assertTrue(text.startswith("---\n"), directory)
+            self.assertIn(f"name: {directory}\n", text)
+            self.assertIn("description: ", text)
+        save_skill = (skills / "wiki-analysis-save" / "SKILL.md").read_text()
+        self.assertIn("wiki/assets/analyses/", save_skill)
+        self.assertIn("{{inhalt}}", save_skill)
+        self.assertIn(".fs/assets/analyses/", save_skill)
 
     def test_compose_passes_profiles_to_init(self):
         compose = (ROOT / "compose.yaml").read_text()
