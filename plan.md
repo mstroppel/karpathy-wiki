@@ -17,26 +17,28 @@ No implementation work is planned for these issues unless a regression is found:
 
 - Paperless already writes `paperless_url` and a visible Paperless link into sanitized source documents. [#50](https://github.com/mstroppel/karpathy-wiki/issues/50) should first verify that the link is preserved in generated wiki pages.
 - WebDAV still publishes files one at a time and loads the redaction file only once per process. [#43](https://github.com/mstroppel/karpathy-wiki/issues/43) therefore requires a real generation-based publication design.
-- The session exporter duplicates sharing that already exists: analyses are shared by wiki link and printable PDF view, and session access for analysis should use the authenticated OpenCode API. The exporter is therefore removed instead of hardened, and [#45](https://github.com/mstroppel/karpathy-wiki/issues/45) is closed without implementation.
+- The session exporter duplicates sharing that already exists: analyses are shared by wiki link and printable PDF view, and analysis happens directly in OpenCode. The exporter is therefore removed instead of hardened; [#45](https://github.com/mstroppel/karpathy-wiki/issues/45) was closed without implementation and [#56](https://github.com/mstroppel/karpathy-wiki/issues/56) now tracks the removal.
 - OpenCode writes directly to the wiki and the SilverBullet mount is writable. These are central constraints addressed by [#44](https://github.com/mstroppel/karpathy-wiki/issues/44).
 
 ## Phase 0 — Safety and engineering baseline
 
-### Remove the session exporter — P0
+### Remove the session exporter — P0 ([#56](https://github.com/mstroppel/karpathy-wiki/issues/56))
 
 Per the review decision on this plan, the exporter's use cases are already covered elsewhere:
 
 - Sharing by link and PDF is provided by the analysis export (`wiki-analysis-save`, `docs/analysis-export.md`).
-- Session access for analysis is provided by direct, authenticated API access to the OpenCode instance (internal API clients already use `OPENCODE_PASSWORD`).
+- Analysis runs directly in OpenCode, which already has session access; no dedicated analysis client or additional API integration is needed.
 
 Work items:
 
 1. Remove the `session-export` Compose profile, image, exporter-only configuration, and `docs/session-export.md`.
-2. Decide whether the raw one-off `export-session.sh` remains as a debugging tool.
-3. Document how analysis tooling reaches the OpenCode server through its authenticated API instead of consuming mirrored PDF exports.
-4. Remove exporter references from the installer, health checks, and README.
-5. Document manual cleanup of `${DATA_ROOT}/exports/sessions` for existing installations; per repository policy, no automatic data-layout moves are added before 1.0.
-6. Close [#45](https://github.com/mstroppel/karpathy-wiki/issues/45) without implementing its deletion-safety hardening.
+2. Remove exporter automation references: the `cd session-export` test and syntax-check steps in `.github/workflows/ci.yml` and `.github/workflows/pre-release.yml`, the `/session-export` entries and `session-export-image` group in `.github/dependabot.yml`, and the `session-export*` targets in `docker-bake.hcl`.
+3. Remove exporter tests and build configuration: the `session-export` unittest and `sh -n` entries in the README validation commands, and the `session-export/output/` entry in `.gitignore`.
+4. Decide whether the raw one-off `export-session.sh` remains as a debugging tool.
+5. Remove remaining exporter references from the installer/health checks, README profile table, `.env.example` profile list, `docs/configuration.md`, and the `exports/sessions` entry in `config/init.sh`.
+6. Update `tests/test_init.py` to stop asserting the `session-export` profile.
+7. Document manual cleanup of `${DATA_ROOT}/exports/sessions` for existing installations; per repository policy, no automatic data-layout moves are added before 1.0.
+8. [#45](https://github.com/mstroppel/karpathy-wiki/issues/45) is closed; [#56](https://github.com/mstroppel/karpathy-wiki/issues/56) tracks this work until the removal is released.
 
 ### [#26](https://github.com/mstroppel/karpathy-wiki/issues/26): Expand integration coverage and daemon hardening — P0
 
@@ -127,7 +129,7 @@ This issue should be delivered as independently deployable work packages, not as
 4. **Serialized publisher:** isolated Git worktrees, stale-base detection, path/provenance/content validation, and one focused commit per publication.
 5. **Immutable releases:** atomically publish complete wiki revisions and mount published data read-only in SilverBullet.
 6. **Network boundaries:** keep services on private networks and expose only an authenticated gateway through the external proxy network.
-7. **Analysis boundary:** share analyses through wiki links and printable PDF views, and reach OpenCode for session access through its authenticated internal API; the destructive session PDF mirror is removed.
+7. **Analysis boundary:** share analyses through wiki links and printable PDF views; analysis runs directly in OpenCode with session access, and the destructive session PDF mirror is removed.
 8. **Operational verification:** test restart recovery, duplicate jobs, concurrent jobs, failed validation, rollback, backup, and restore.
 
 Each package must preserve existing data and remain independently testable.
@@ -171,7 +173,7 @@ No pre-1.0 migration code, legacy aliases, or automatic data-layout moves should
 
 ## Suggested priority
 
-1. **Immediate:** #26, #43, and the session exporter removal.
+1. **Immediate:** #26, #43, and the session exporter removal ([#56](https://github.com/mstroppel/karpathy-wiki/issues/56)).
 2. **Foundation:** #24, #25, #42, #28, #29, #27.
 3. **Transactional architecture:** #44, delivered incrementally.
 4. **Small independent improvements:** #40 and #50.
