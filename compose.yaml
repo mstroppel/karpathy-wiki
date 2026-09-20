@@ -126,7 +126,7 @@ services:
       - no-new-privileges:true
 
   silverbullet:
-    image: ghcr.io/silverbulletmd/silverbullet:2.10.0
+    image: ghcr.io/silverbulletmd/silverbullet:2.11.0
     user: "${PUID:-1000}:${PGID:-1000}"
     restart: unless-stopped
     environment:
