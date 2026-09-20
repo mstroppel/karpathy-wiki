@@ -146,6 +146,50 @@ class InitTests(unittest.TestCase):
             ):
                 self.assertFalse((root / legacy).exists())
 
+    def test_second_init_with_service_data_succeeds(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "knowledge"
+            self.run_init(root, COMPOSE_PROFILES="paperless")
+
+            # Service data between two init runs: paperless error reports and
+            # quarantined WebDAV files in the current layout.
+            webdav_quarantine = root / "quarantine" / "webdav"
+            webdav_quarantine.mkdir()
+            (webdav_quarantine / "file.pdf.error").write_text("error")
+            (root / "quarantine" / "paperless" / "document-42.txt").write_text("error")
+
+            self.run_init(root, COMPOSE_PROFILES="paperless")
+
+            self.assertEqual(
+                (root / "quarantine" / "webdav" / "file.pdf.error").read_text(),
+                "error",
+            )
+            self.assertEqual(
+                (root / "quarantine" / "paperless" / "document-42.txt").read_text(),
+                "error",
+            )
+
+    def test_quarantine_migration_ignores_webdav_quarantine(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "knowledge"
+            # A legacy layout: flat quarantine files plus an already current
+            # WebDAV quarantine directory.
+            (root / "quarantine" / "webdav").mkdir(parents=True)
+            (root / "quarantine" / "webdav" / "file.pdf.error").write_text("error")
+            (root / "quarantine" / "document-42.txt").write_text("legacy")
+
+            self.run_init(root, COMPOSE_PROFILES="paperless")
+
+            self.assertEqual(
+                (root / "quarantine" / "webdav" / "file.pdf.error").read_text(),
+                "error",
+            )
+            self.assertEqual(
+                (root / "quarantine" / "paperless" / "document-42.txt").read_text(),
+                "legacy",
+            )
+            self.assertFalse((root / "quarantine" / "document-42.txt").exists())
+
     def test_webdav_migration_refuses_populated_old_and_new_paths(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "knowledge"

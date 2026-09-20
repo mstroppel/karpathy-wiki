@@ -90,6 +90,7 @@ migrate_directory() {
 migrate_quarantine() {
   old="$KNOWLEDGE_ROOT/quarantine"
   new="$old/paperless"
+  current="$old/webdav"
   if [ ! -e "$old" ] && [ ! -L "$old" ]; then
     return 0
   fi
@@ -100,7 +101,7 @@ migrate_quarantine() {
 
   has_legacy=false
   for entry in "$old"/* "$old"/.[!.]* "$old"/..?*; do
-    if { [ -e "$entry" ] || [ -L "$entry" ]; } && [ "$entry" != "$new" ]; then
+    if { [ -e "$entry" ] || [ -L "$entry" ]; } && [ "$entry" != "$new" ] && [ "$entry" != "$current" ]; then
       has_legacy=true
       break
     fi
@@ -118,7 +119,7 @@ migrate_quarantine() {
   fi
 
   for entry in "$old"/* "$old"/.[!.]* "$old"/..?*; do
-    if { [ -e "$entry" ] || [ -L "$entry" ]; } && [ "$entry" != "$new" ]; then
+    if { [ -e "$entry" ] || [ -L "$entry" ]; } && [ "$entry" != "$new" ] && [ "$entry" != "$current" ]; then
       destination="$new/${entry##*/}"
       if [ -e "$destination" ] || [ -L "$destination" ]; then
         printf 'quarantine migration would overwrite: %s\n' "$destination" >&2
