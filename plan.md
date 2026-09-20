@@ -1,0 +1,183 @@
+# GitHub Issue Implementation Plan
+
+This plan covers all issues currently tracked in the repository: **21 issues in total, 14 open and 7 closed**.
+
+## Completed issues
+
+No implementation work is planned for these issues unless a regression is found:
+
+- [#14](https://github.com/mstroppel/karpathy-wiki/issues/14) — renamed the Nextcloud integration to WebDAV and added ingest tracking.
+- [#17](https://github.com/mstroppel/karpathy-wiki/issues/17) — saves analyses as wiki pages with printable PDF views.
+- [#20](https://github.com/mstroppel/karpathy-wiki/issues/20) — anonymizes WebDAV input.
+- [#23](https://github.com/mstroppel/karpathy-wiki/issues/23) — provides the version-aware installer and update launcher.
+- [#47](https://github.com/mstroppel/karpathy-wiki/issues/47) — migrated the stack to OpenCode v2.
+- [#53](https://github.com/mstroppel/karpathy-wiki/issues/53) — removed migration code before version 1.0.
+
+## Current findings
+
+- Paperless already writes `paperless_url` and a visible Paperless link into sanitized source documents. [#50](https://github.com/mstroppel/karpathy-wiki/issues/50) should first verify that the link is preserved in generated wiki pages.
+- WebDAV still publishes files one at a time and loads the redaction file only once per process. [#43](https://github.com/mstroppel/karpathy-wiki/issues/43) therefore requires a real generation-based publication design.
+- The session exporter duplicates sharing that already exists: analyses are shared by wiki link and printable PDF view, and analysis happens directly in OpenCode. The exporter is therefore removed instead of hardened; [#45](https://github.com/mstroppel/karpathy-wiki/issues/45) was closed without implementation and [#56](https://github.com/mstroppel/karpathy-wiki/issues/56) now tracks the removal.
+- OpenCode writes directly to the wiki and the SilverBullet mount is writable. These are central constraints addressed by [#44](https://github.com/mstroppel/karpathy-wiki/issues/44).
+
+## Phase 0 — Safety and engineering baseline
+
+### Remove the session exporter — P0 ([#56](https://github.com/mstroppel/karpathy-wiki/issues/56))
+
+Per the review decision on this plan, the exporter's use cases are already covered elsewhere:
+
+- Sharing by link and PDF is provided by the analysis export (`wiki-analysis-save`, `docs/analysis-export.md`).
+- Analysis runs directly in OpenCode, which already has session access; no dedicated analysis client or additional API integration is needed.
+
+Work items:
+
+1. Remove the `session-export` Compose profile, image, exporter-only configuration, and `docs/session-export.md`.
+2. Remove exporter automation references: the `cd session-export` test and syntax-check steps in `.github/workflows/ci.yml` and `.github/workflows/pre-release.yml`, the `/session-export` entries and `session-export-image` group in `.github/dependabot.yml`, and the `session-export*` targets in `docker-bake.hcl`.
+3. Remove exporter tests and build configuration: the `session-export` unittest and `sh -n` entries in the README validation commands, and the `session-export/output/` entry in `.gitignore`.
+4. Decide whether the raw one-off `export-session.sh` remains as a debugging tool.
+5. Remove remaining exporter references from the installer/health checks, README profile table, `.env.example` profile list, `docs/configuration.md`, and the `exports/sessions` entry in `config/init.sh`.
+6. Update `tests/test_init.py` to stop asserting the `session-export` profile.
+7. Document manual cleanup of `${DATA_ROOT}/exports/sessions` for existing installations; per repository policy, no automatic data-layout moves are added before 1.0.
+8. [#45](https://github.com/mstroppel/karpathy-wiki/issues/45) is closed; [#56](https://github.com/mstroppel/karpathy-wiki/issues/56) tracks this work until the removal is released.
+
+### [#26](https://github.com/mstroppel/karpathy-wiki/issues/26): Expand integration coverage and daemon hardening — P0
+
+- Test WebDAV configuration, rclone failures, retries, shutdown, and health.
+- Test malformed Paperless responses and persistence failures.
+- Add behavior tests for the installer, not only syntax checks.
+- Add disposable Compose integration tests for startup, restart, and failure.
+- Make daemon lifecycle and health behavior explicit in CI.
+
+### [#28](https://github.com/mstroppel/karpathy-wiki/issues/28): Add consistent quality checks
+
+- Add a shared Python configuration, formatter, linter, and type checker.
+- Add JavaScript formatting/linting and ShellCheck configuration.
+- Run all checks in CI with pinned tool versions.
+- Document intentional exclusions and align README commands with CI.
+
+### [#29](https://github.com/mstroppel/karpathy-wiki/issues/29): Close supply-chain gaps
+
+- Cover every Dockerfile and package source with Dependabot.
+- Add a repository-managed JavaScript manifest and lockfile.
+- Centralize repeated versions, especially rclone.
+- Verify OpenCode downloads with checksums or signatures.
+- Pin critical base images by digest and validate dependency metadata in CI.
+
+## Phase 1 — Shared ingest contracts
+
+### [#24](https://github.com/mstroppel/karpathy-wiki/issues/24): Make WebDAV self-contained
+
+1. Create an explicit Python package and `pyproject.toml`.
+2. Put shared functionality in a documented core package.
+3. Build the WebDAV image without implicitly copying Paperless sources.
+4. Remove import-path workarounds from tests.
+5. Test the package independently from the main repository image.
+
+### [#25](https://github.com/mstroppel/karpathy-wiki/issues/25): Define one status contract
+
+- Define a versioned contract for revisions, `revoked.md`, ID ranges, filenames, intervals, and status values.
+- Store shared JSON conformance fixtures for Python and JavaScript.
+- Test valid, invalid, and boundary cases in both runtimes.
+
+### [#42](https://github.com/mstroppel/karpathy-wiki/issues/42): Define one end-to-end plugin contract
+
+After #24 and #25:
+
+1. Define a versioned provider manifest containing source keys, revisions, destination paths, frontmatter, revocations, and validation errors.
+2. Make the generic status scanner consume the manifest directly.
+3. Remove provider-specific JavaScript adapters from the OpenCode image.
+4. Move WebDAV and Paperless to the same contract.
+5. Add a third-party plugin example that does not require rebuilding the core OpenCode image.
+6. Add compatibility tests and document contract deprecation rules.
+
+## Phase 2 — Coherent source publication
+
+### [#43](https://github.com/mstroppel/karpathy-wiki/issues/43): Publish WebDAV generations
+
+1. Build each synchronization in a new temporary generation directory.
+2. Record the upstream inventory/revisions and redaction fingerprint.
+3. Validate and anonymize every file before publication.
+4. Atomically switch the active generation only after the full cycle succeeds.
+5. Keep the last successful generation active after any failure.
+6. Reload redaction configuration every cycle and regenerate on fingerprint changes.
+7. Quarantine failed generations without storing source content in reports.
+8. Document retention, cleanup, and abandoned-generation recovery.
+
+### [#27](https://github.com/mstroppel/karpathy-wiki/issues/27): Split the Paperless module
+
+Split the current module into clear boundaries for configuration, the HTTP client, anonymization, document modelling/hashing, rendering/frontmatter, persistence, and daemon/health lifecycle. Preserve the CLI and environment semantics while adding focused tests. Use the contracts from Phase 1 rather than introducing another provider-specific format.
+
+### [#50](https://github.com/mstroppel/karpathy-wiki/issues/50): Preserve Paperless links
+
+1. Verify that `paperless_url` survives source-to-wiki rendering.
+2. Ensure every Paperless source page has a visible, validated HTTPS link.
+3. Add a regression test covering frontmatter and rendered Markdown.
+
+### [#40](https://github.com/mstroppel/karpathy-wiki/issues/40): Use the wiki name in the browser title
+
+Determine the supported OpenCode v2 branding/title mechanism, connect it to `WIKI_NAME`, retain a safe fallback, and add a browser-level regression test.
+
+## Phase 3 — Transactional ingestion and publishing
+
+### [#44](https://github.com/mstroppel/karpathy-wiki/issues/44): Refactor into a transactional pipeline
+
+This issue should be delivered as independently deployable work packages, not as a flag-day rewrite:
+
+1. **Durable state:** SQLite tables for jobs, leases, source generations, publications, retries, and idempotency keys.
+2. **Queue:** recoverable jobs, backoff, restart recovery, and one active publisher lease.
+3. **Restricted workers:** workers read immutable inputs and return validated patches with provenance; they cannot commit, publish, access source systems, or make arbitrary outbound requests.
+4. **Serialized publisher:** isolated Git worktrees, stale-base detection, path/provenance/content validation, and one focused commit per publication.
+5. **Immutable releases:** atomically publish complete wiki revisions and mount published data read-only in SilverBullet.
+6. **Network boundaries:** keep services on private networks and expose only an authenticated gateway through the external proxy network.
+7. **Analysis boundary:** share analyses through wiki links and printable PDF views; analysis runs directly in OpenCode with session access, and the destructive session PDF mirror is removed.
+8. **Operational verification:** test restart recovery, duplicate jobs, concurrent jobs, failed validation, rollback, backup, and restore.
+
+Each package must preserve existing data and remain independently testable.
+
+## Phase 4 — User-facing extensions
+
+### [#18](https://github.com/mstroppel/karpathy-wiki/issues/18): Multi-language support
+
+1. Add central `WIKI_LANGUAGE`/`WIKI_LOCALE` settings.
+2. Separate language selection for chat responses, wiki defaults, skills, analyses, and PDF output.
+3. Centralize prompts and generated UI text.
+4. Do not translate source documents implicitly; make translation explicit.
+5. Test German, English, and unsupported-locale fallbacks.
+
+### [#15](https://github.com/mstroppel/karpathy-wiki/issues/15): Audio ingest
+
+After the package and plugin contracts are stable:
+
+1. Add an audio provider with a versioned manifest.
+2. Discover audio files from WebDAV and process them idempotently by hash.
+3. Use a replaceable transcription backend with optional speaker diarization.
+4. Emit Markdown with timestamps, speaker labels, and provenance.
+5. Apply anonymization after transcription and before publication.
+6. Keep external transcription opt-in and explicitly configured.
+
+## Post-1.0 work
+
+### [#46](https://github.com/mstroppel/karpathy-wiki/issues/46): Version and migrate generated security policy
+
+This issue must remain deferred until the first stable 1.0 release, in line with the repository policy. At that point implement:
+
+- versioned release-managed security policy;
+- separately stored user-editable instructions;
+- persistent policy/schema versions;
+- explicit, idempotent migrations and upgrade logs;
+- detection of missing, newer, modified, or conflicting files;
+- documented rollback and release-note verification;
+- tests for fresh installs, repeated initialization, profile changes, forward migration, failure, and rollback.
+
+No pre-1.0 migration code, legacy aliases, or automatic data-layout moves should be added as part of this plan.
+
+## Suggested priority
+
+1. **Immediate:** #26, #43, and the session exporter removal ([#56](https://github.com/mstroppel/karpathy-wiki/issues/56)).
+2. **Foundation:** #24, #25, #42, #28, #29, #27.
+3. **Transactional architecture:** #44, delivered incrementally.
+4. **Small independent improvements:** #40 and #50.
+5. **Future capabilities:** #18 and #15.
+6. **After 1.0:** #46.
+
+Every implementation PR should use a focused Conventional Commit and document behavior changes, security implications, data-layout/migration impact, and test evidence.
