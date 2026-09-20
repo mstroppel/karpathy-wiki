@@ -19,6 +19,7 @@ from zoneinfo import ZoneInfo
 
 
 API_URL = os.environ.get("OPENCODE_URL", "http://opencode:4096").rstrip("/")
+API_PASSWORD = os.environ.get("OPENCODE_PASSWORD", "")
 DIRECTORY = os.environ.get("OPENCODE_DIRECTORY", "/knowledge/wiki")
 PUBLIC_URL = os.environ.get("OPENCODE_PUBLIC_URL", "").strip()
 EXPORT_ROOT = Path(os.environ.get("EXPORT_ROOT", "/exports"))
@@ -97,6 +98,8 @@ def api_get(path, query=None):
     if query:
         url += "?" + urllib.parse.urlencode(query)
     request = urllib.request.Request(url)
+    credentials = base64.b64encode(f"opencode:{API_PASSWORD}".encode()).decode()
+    request.add_header("Authorization", f"Basic {credentials}")
     try:
         with urllib.request.urlopen(request, timeout=60) as response:
             return json.load(response)
@@ -136,14 +139,24 @@ def markdown_renderer():
     return _markdown
 
 
-def render_message_parts(parts):
-    text = "\n\n".join(part.get("text", "") for part in parts if part.get("type") == "text").strip()
+def render_message(message):
+    if message.get("type") == "user":
+        text = message.get("text", "").strip()
+        files = message.get("files", [])
+    elif message.get("type") == "assistant":
+        text = "\n\n".join(
+            part.get("text", "")
+            for part in message.get("content", [])
+            if part.get("type") == "text"
+        ).strip()
+        files = []
+    else:
+        return ""
+
     content = str(markdown_renderer()(text)) if text else ""
     attachments = []
-    for part in parts:
-        if part.get("type") != "file":
-            continue
-        label = part.get("filename") or part.get("mime") or "File"
+    for part in files:
+        label = part.get("name") or part.get("mime") or "File"
         attachments.append(f'<div class="attachment">Attachment: {html.escape(str(label))}</div>')
     return content + "".join(attachments)
 
@@ -155,11 +168,10 @@ def render_html(session, messages):
     public_session_url = session_url(session.get("id", ""))
     blocks = []
     for message in messages:
-        info = message.get("info", {})
-        role = info.get("role", "unknown")
+        role = message.get("type")
         if role not in ("user", "assistant"):
             continue
-        content = render_message_parts(message.get("parts", []))
+        content = render_message(message)
         if not content:
             continue
         label = "User" if role == "user" else "OpenCode"
@@ -288,10 +300,22 @@ def select_sessions(sessions, root_id=None):
     return selected
 
 
+def list_sessions():
+    sessions = []
+    query = {"directory": DIRECTORY, "limit": 200, "order": "asc"}
+    while True:
+        response = api_get("/api/session", query)
+        sessions.extend(response.get("data", []))
+        cursor = response.get("cursor", {}).get("next")
+        if not cursor:
+            return sessions
+        query = {"cursor": cursor, "limit": 200}
+
+
 def export_once(root_id=None):
-    all_sessions = api_get("/session", {"directory": DIRECTORY})
+    all_sessions = list_sessions()
     sessions = select_sessions(all_sessions, root_id)
-    statuses = api_get("/session/status", {"directory": DIRECTORY})
+    statuses = api_get("/api/session/active").get("data", {})
     explicit = root_id is not None
 
     state = load_state()
@@ -343,7 +367,10 @@ def export_once(root_id=None):
         }
         destination = EXPORT_ROOT / relative
         if state.get(session_id) != marker or not destination.exists():
-            messages = api_get(f"/session/{urllib.parse.quote(session_id, safe='')}/message", {"directory": DIRECTORY})
+            exported = api_get(
+                f"/api/experimental/session/{urllib.parse.quote(session_id, safe='')}/export"
+            ).get("data", {})
+            messages = exported.get("messages", [])
             create_pdf(session, messages, destination)
             print(f"Exported {session_id} to {relative}", flush=True)
         next_state[session_id] = marker

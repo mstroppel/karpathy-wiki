@@ -143,14 +143,25 @@ set_env_version() {
   [ -f "$env_file" ] || die "missing $env_file; create it from .env.example first"
   cp -f "$env_file" "$env_file.bak"
   chmod 0600 "$env_file.bak" 2>/dev/null || true
+  sev_tmp="$env_file.tmp.$$"
   if grep -q '^KARPATHY_WIKI_VERSION=' "$env_file"; then
-    sev_tmp="$env_file.tmp.$$"
     sed "s/^KARPATHY_WIKI_VERSION=.*/KARPATHY_WIKI_VERSION=$1/" "$env_file" >"$sev_tmp"
-    chmod 0600 "$sev_tmp"
-    mv -f "$sev_tmp" "$env_file"
   else
-    printf 'KARPATHY_WIKI_VERSION=%s\n' "$1" >>"$env_file"
+    cp "$env_file" "$sev_tmp"
+    printf 'KARPATHY_WIKI_VERSION=%s\n' "$1" >>"$sev_tmp"
   fi
+  if ! grep -q '^OPENCODE_PASSWORD=.' "$sev_tmp"; then
+    sev_password=$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')
+    if grep -q '^OPENCODE_PASSWORD=' "$sev_tmp"; then
+      sed "s/^OPENCODE_PASSWORD=.*/OPENCODE_PASSWORD=$sev_password/" \
+        "$sev_tmp" >"$sev_tmp.password"
+      mv -f "$sev_tmp.password" "$sev_tmp"
+    else
+      printf 'OPENCODE_PASSWORD=%s\n' "$sev_password" >>"$sev_tmp"
+    fi
+  fi
+  chmod 0600 "$sev_tmp"
+  mv -f "$sev_tmp" "$env_file"
 }
 
 cmd_update() {

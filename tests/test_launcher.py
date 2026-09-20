@@ -243,6 +243,7 @@ class LauncherTests(unittest.TestCase):
         updated = env_file.read_text()
         self.assertIn("KARPATHY_WIKI_VERSION=9.9.9", updated)
         self.assertIn("OTHER=keep", updated)
+        self.assertRegex(updated, r"OPENCODE_PASSWORD=[0-9a-f]{48}\n")
         self.assertEqual(
             (self.project / ".env.bak").read_text(),
             "KARPATHY_WIKI_VERSION=0.0.1\nOTHER=keep\n",

@@ -97,6 +97,7 @@ services:
       HOME: /home/opencode
       TZ: ${TZ:-UTC}
       OPENCODE_CONFIG: /etc/opencode/opencode.json
+      OPENCODE_PASSWORD: ${OPENCODE_PASSWORD:?OPENCODE_PASSWORD is required by OpenCode v2}
       OPENCODE_DISABLE_PROJECT_CONFIG: "1"
       OPENCODE_DISABLE_EXTERNAL_SKILLS: "1"
       OPENCODE_DISABLE_CLAUDE_CODE_SKILLS: "1"
@@ -157,6 +158,7 @@ services:
       HOME: /tmp
       TZ: ${TZ:-UTC}
       OPENCODE_URL: http://opencode:4096
+      OPENCODE_PASSWORD: ${OPENCODE_PASSWORD:?OPENCODE_PASSWORD is required by OpenCode v2}
       OPENCODE_DIRECTORY: /knowledge/wiki
       OPENCODE_PUBLIC_URL: ${OPENCODE_PUBLIC_URL:-https://chat.example.com}
       SESSION_EXPORT_REMOTE_PATH: ${WEBDAV_SESSION_PATH:-${NEXTCLOUD_SESSION_PATH:-OpenCode Sessions}}

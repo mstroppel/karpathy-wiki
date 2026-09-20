@@ -188,20 +188,30 @@ class InitTests(unittest.TestCase):
 class ConfigTests(unittest.TestCase):
     def test_config_is_json_and_restricts_sources(self):
         config = json.loads((ROOT / "config" / "opencode.json").read_text())
-        self.assertEqual(config["$schema"], "https://opencode.ai/config.json")
-        self.assertEqual(config["permission"]["external_directory"]["*"], "deny")
-        self.assertEqual(config["permission"]["edit"]["/knowledge/sources/**"], "deny")
-        self.assertEqual(config["permission"]["edit"]["/knowledge/raw/**"], "deny")
-        self.assertEqual(
-            set(config["skills"]["paths"]), {"/etc/opencode/skills"}
-        )
-        ingest_new = config["command"]["ingest-new"]
+        self.assertNotIn("$schema", config)
+        self.assertEqual(config["update"], "disable")
+        self.assertEqual(config["skills"], ["/etc/opencode/skills"])
+        self.assertNotIn("permission", config)
+        self.assertNotIn("agent", config)
+        self.assertNotIn("command", config)
+        rules = {
+            (rule["action"], rule["resource"]): rule["effect"]
+            for rule in config["permissions"]
+        }
+        self.assertEqual(rules[("*", "*")], "deny")
+        self.assertEqual(rules[("edit", "/knowledge/sources/**")], "deny")
+        self.assertEqual(rules[("edit", "/knowledge/raw/**")], "deny")
+        self.assertEqual(rules[("external_directory", "/knowledge/sources/**")], "allow")
+        ingest_new = config["commands"]["ingest-new"]
         self.assertNotIn("WebDAV", ingest_new["description"] + ingest_new["template"])
         self.assertNotIn("Paperless", ingest_new["description"] + ingest_new["template"])
         self.assertIn("/knowledge/sources", ingest_new["template"])
         generic_status = "".join(
-            (ROOT / "config" / "tools" / name).read_text().lower()
-            for name in ("wiki_ingest_status.js", "wiki_ingest_status_core.mjs")
+            path.read_text().lower()
+            for path in (
+                ROOT / "config" / "plugins" / "wiki-ingest-status.js",
+                ROOT / "config" / "tools" / "wiki_ingest_status_core.mjs",
+            )
         )
         self.assertNotIn("webdav", generic_status)
         self.assertNotIn("paperless", generic_status)

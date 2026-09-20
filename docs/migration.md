@@ -87,6 +87,19 @@ destinations. If both a legacy and current path contain data, init stops without
 merging or overwriting either directory. Resolve that conflict manually from the
 backup before restarting the stack.
 
+## Upgrade To OpenCode v2
+
+OpenCode v2 migrates credentials and v1 sessions in `opencode/data` to its new
+database on startup. This is a one-way data migration. Stop the stack and back
+up the complete `opencode` directory before upgrading, then allow the OpenCode
+container to finish migration before testing existing sessions or enabling the
+session exporter. Keep the backup until the upgraded instance has passed its
+soak test; rolling the image back does not reverse the database migration.
+Before starting v2, add a strong random `OPENCODE_PASSWORD` to the instance
+environment. The `karpathy-wiki.sh update` command generates one when it is
+missing; manual deployments must set it themselves. After startup, use
+`docker compose exec opencode opencode pair` to obtain the browser pairing URL.
+
 The init service does not rewrite the independently versioned wiki. Before using
 `/ingest-new`, migrate existing `wiki/sources/nextcloud` pages in one reviewed
 wiki commit: move each page below `wiki/sources/webdav` to the source-relative

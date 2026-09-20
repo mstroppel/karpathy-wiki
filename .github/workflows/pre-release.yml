@@ -37,7 +37,7 @@ jobs:
           sh -n install.sh
           sh -n karpathy-wiki.sh
           sh -n session-export/export-session.sh
-          node --check config/tools/wiki_ingest_status.js
+          node --check config/plugins/wiki-ingest-status.js
           node --check config/tools/wiki_ingest_status_core.mjs
           node --check config/ingest-adapters/shared.mjs
           for adapter in config/ingest-adapters/*/status.mjs; do
