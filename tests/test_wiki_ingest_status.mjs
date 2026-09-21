@@ -291,9 +291,11 @@ test('reports reserved folder names and invalid adapter contracts', async () => 
     await mkdir(path.join(sourceRoot, 'broken'), { recursive: true })
     await mkdir(path.join(sourceRoot, 'pathtrick'), { recursive: true })
     await mkdir(path.join(sourceRoot, 'toxic'), { recursive: true })
+    await mkdir(path.join(sourceRoot, 'extraneous'), { recursive: true })
     await mkdir(path.join(adapterRoot, 'broken'), { recursive: true })
     await mkdir(path.join(adapterRoot, 'pathtrick'), { recursive: true })
     await mkdir(path.join(adapterRoot, 'toxic'), { recursive: true })
+    await mkdir(path.join(adapterRoot, 'extraneous'), { recursive: true })
     await writeFile(
       path.join(adapterRoot, 'broken', 'status.mjs'),
       'export default async () => ({ new: [] })\n',
@@ -323,6 +325,15 @@ test('reports reserved folder names and invalid adapter contracts', async () => 
       })
     `,
     )
+    await writeFile(
+      path.join(adapterRoot, 'extraneous', 'status.mjs'),
+      `
+      export default async () => ({
+        new: [], outdated: [], current: [], conflict: [], revoked: [], orphaned: [],
+        invalid: [], extra: [],
+      })
+    `,
+    )
 
     const status = await scanIngestStatus({ sourceRoot, wikiSourceRoot, adapterRoot })
 
@@ -334,6 +345,8 @@ test('reports reserved folder names and invalid adapter contracts', async () => 
     assert.match(status.adapters.toxic.invalid[0].error, /JSON-kompatiblen Wert/)
     assert.equal(status.adapters.pathtrick.summary.invalid, 1)
     assert.match(status.adapters.pathtrick.invalid[0].error, /wiki_path/)
+    assert.equal(status.adapters.extraneous.summary.invalid, 1)
+    assert.match(status.adapters.extraneous.invalid[0].error, /unbekanntes Adapterfeld extra/)
   } finally {
     await rm(root, { recursive: true, force: true })
   }

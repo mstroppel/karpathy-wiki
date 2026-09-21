@@ -2,6 +2,8 @@ import { readdir } from 'node:fs/promises'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
+import { REVISION_RE } from '../ingest-adapters/shared.mjs'
+
 export const RESULT_NAMES = [
   'new',
   'outdated',
@@ -11,7 +13,6 @@ export const RESULT_NAMES = [
   'orphaned',
   'invalid',
 ]
-const REVISION_RE = /^[0-9a-f]{64}$/
 
 function errorMessage(error) {
   return error instanceof Error ? error.message : String(error)
@@ -99,6 +100,9 @@ function finalize(result, sourceRoot, wikiSourceRoot) {
     validateJsonValue(result)
   } catch (error) {
     throw new Error(`Adapterergebnis ${errorMessage(error)}`, { cause: error })
+  }
+  for (const key of Object.keys(result)) {
+    if (!RESULT_NAMES.includes(key)) throw new Error(`unbekanntes Adapterfeld ${key}`)
   }
   const normalized = {}
   for (const name of RESULT_NAMES) {

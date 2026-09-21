@@ -43,7 +43,8 @@ from karpathy_wiki_ingest.shared import (
 def main() -> None: ...
 ```
 
-Dispatch accepts either of the following:
+Dispatch accepts either of the following; both are discovered automatically,
+so a sole installed plugin runs even when it is not named explicitly:
 
 1. **Package convention** - a package named `karpathy_wiki_ingest_<plugin>`
    with a `main()`. This is the recommended path; it needs no extra metadata.

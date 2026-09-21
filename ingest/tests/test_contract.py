@@ -3,10 +3,13 @@
 The versioned contract document lives in ``contracts/ingest-status/`` at the
 repository root; the JSON fixtures in the same directory are executed here
 against the Python implementations and by the JavaScript scanner tests
-(``tests/test_contract_fixtures.mjs``) against theirs.
+(``tests/test_contract_fixtures.mjs``) against theirs. Every topic test
+iterates all fixture files of its topic, so a newly added file cannot
+silently go untested.
 """
 
 import json
+import re
 import unittest
 from pathlib import Path
 
@@ -23,10 +26,30 @@ ROOT = Path(__file__).resolve().parents[2]
 CONTRACT_DIRECTORY = ROOT / "contracts" / "ingest-status" / "v1"
 CONTRACT = json.loads((CONTRACT_DIRECTORY / "contract.json").read_text(encoding="utf-8"))
 
+# Every fixture topic a runtime test executes. A fixture with a topic outside
+# this list fails the coverage test, and every listed topic must have at least
+# one fixture file.
+KNOWN_TOPICS = ("revisions", "intervals", "id-ranges", "revoked-lists", "frontmatter-fields")
 
-def load_cases(fixture: str) -> list[dict]:
-    document = json.loads((CONTRACT_DIRECTORY / "fixtures" / fixture).read_text(encoding="utf-8"))
-    return document["cases"]
+
+def fixture_documents() -> dict[str, dict]:
+    return {
+        path.name: json.loads(path.read_text(encoding="utf-8"))
+        for path in sorted((CONTRACT_DIRECTORY / "fixtures").glob("*.json"))
+    }
+
+
+FIXTURES = fixture_documents()
+
+
+def cases_for_topic(topic: str) -> list[tuple[str, dict]]:
+    """All cases of ``topic`` from every fixture file declaring it."""
+    return [
+        (name, case)
+        for name, document in sorted(FIXTURES.items())
+        if document.get("topic") == topic
+        for case in document["cases"]
+    ]
 
 
 class ContractDocumentTests(unittest.TestCase):
@@ -50,10 +73,24 @@ class ContractDocumentTests(unittest.TestCase):
         )
 
 
+class FixtureCoverageTests(unittest.TestCase):
+    def test_every_fixture_is_versioned_with_a_known_topic(self):
+        self.assertTrue(FIXTURES, "no fixture files found")
+        for name, document in sorted(FIXTURES.items()):
+            with self.subTest(fixture=name):
+                self.assertIn("version", document)
+                self.assertIn(document.get("topic"), KNOWN_TOPICS)
+
+    def test_every_topic_has_fixture_cases(self):
+        for topic in KNOWN_TOPICS:
+            with self.subTest(topic=topic):
+                self.assertTrue(cases_for_topic(topic), f"no cases for topic {topic}")
+
+
 class RevisionContractTests(unittest.TestCase):
     def test_cases(self):
-        for case in load_cases("revisions.json"):
-            with self.subTest(case=case["name"]):
+        for fixture, case in cases_for_topic("revisions"):
+            with self.subTest(fixture=fixture, case=case["name"]):
                 self.assertEqual(
                     bool(REVISION_RE.fullmatch(case["input"])), case["valid"], msg=case["input"]
                 )
@@ -61,8 +98,8 @@ class RevisionContractTests(unittest.TestCase):
 
 class IntervalContractTests(unittest.TestCase):
     def test_cases(self):
-        for case in load_cases("intervals.json"):
-            with self.subTest(case=case["name"]):
+        for fixture, case in cases_for_topic("intervals"):
+            with self.subTest(fixture=fixture, case=case["name"]):
                 if case["valid"]:
                     self.assertEqual(interval_seconds(case["input"]), case["seconds"])
                 else:
@@ -72,15 +109,17 @@ class IntervalContractTests(unittest.TestCase):
 
 class IdRangeContractTests(unittest.TestCase):
     def test_cases(self):
-        for case in load_cases("id-ranges.json"):
-            with self.subTest(case=case["name"]):
+        pattern = re.compile(CONTRACT["paperless"]["directoryPattern"])
+        for fixture, case in cases_for_topic("id-ranges"):
+            with self.subTest(fixture=fixture, case=case["name"]):
                 self.assertEqual(document_directory(case["id"]), case["directory"])
+                self.assertTrue(pattern.fullmatch(case["directory"]), msg=case["directory"])
 
 
 class RevokedListContractTests(unittest.TestCase):
     def test_cases(self):
-        for case in load_cases("revoked-lists.json"):
-            with self.subTest(case=case["name"]):
+        for fixture, case in cases_for_topic("revoked-lists"):
+            with self.subTest(fixture=fixture, case=case["name"]):
                 if case["valid"]:
                     self.assertEqual(parse_revoked_ids(case["input"]), set(case["ids"]))
                 else:
@@ -90,8 +129,8 @@ class RevokedListContractTests(unittest.TestCase):
 
 class FrontmatterContractTests(unittest.TestCase):
     def test_cases(self):
-        for case in load_cases("frontmatter-fields.json"):
-            with self.subTest(case=case["name"]):
+        for fixture, case in cases_for_topic("frontmatter-fields"):
+            with self.subTest(fixture=fixture, case=case["name"]):
                 if case["valid"]:
                     fields = parse_frontmatter_fields(case["input"])
                     for name, value in case["expected"].items():

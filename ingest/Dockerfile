@@ -19,9 +19,18 @@ ENV PYTHONUNBUFFERED=1 \
 COPY core/ /src/core/
 COPY webdav/ /src/webdav/
 COPY paperless/ /src/paperless/
-# --no-deps: the plugin wheels declare an exact dependency on the core wheel,
-# which is built here as well; the index must not be consulted.
-RUN python -m pip wheel --no-deps --wheel-dir /wheels /src/core /src/webdav /src/paperless
+# The PEP 517 build backend is preinstalled from a hash-pinned wheel so the
+# wheel builds below can run with --no-build-isolation and never execute
+# index-resolved tooling. This install is the only index access in the build.
+COPY build-requirements.txt /src/build-requirements.txt
+RUN python -m pip install --require-hashes --no-deps -r /src/build-requirements.txt
+# Each distribution builds into its own wheel directory so every final stage
+# can copy exactly the wheels it needs. --no-deps is safe because the plugin
+# wheels declare an exact dependency on the core wheel, which is built here.
+RUN mkdir -p /wheels/core /wheels/webdav /wheels/paperless \
+    && python -m pip wheel --no-deps --no-build-isolation --wheel-dir /wheels/core /src/core \
+    && python -m pip wheel --no-deps --no-build-isolation --wheel-dir /wheels/webdav /src/webdav \
+    && python -m pip wheel --no-deps --no-build-isolation --wheel-dir /wheels/paperless /src/paperless
 
 FROM python:3.14-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 AS core
 
@@ -32,20 +41,20 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 COPY --from=rclone /usr/local/bin/rclone /usr/local/bin/rclone
-COPY --from=build /wheels /wheels
 # --no-index: the runtime image installs only wheels built from this
-# repository; nothing is resolved from a package index at build time.
+# repository; nothing is resolved from a package index at runtime-install time.
+COPY --from=build /wheels/core /wheels
 RUN python -m pip install --no-index --find-links=/wheels karpathy-wiki-ingest \
     && rm -rf /wheels
 # The core image is the base for third-party plugins; it ships no plugins.
 ENTRYPOINT ["python", "-m", "karpathy_wiki_ingest"]
 
 FROM core AS webdav
-COPY --from=build /wheels /wheels
-RUN python -m pip install --no-index --find-links=/wheels karpathy-wiki-ingest-webdav \
+COPY --from=build /wheels/webdav /wheels
+RUN python -m pip install --no-deps --no-index --find-links=/wheels karpathy-wiki-ingest-webdav \
     && rm -rf /wheels
 
 FROM core AS paperless
-COPY --from=build /wheels /wheels
-RUN python -m pip install --no-index --find-links=/wheels karpathy-wiki-ingest-paperless \
+COPY --from=build /wheels/paperless /wheels
+RUN python -m pip install --no-deps --no-index --find-links=/wheels karpathy-wiki-ingest-paperless \
     && rm -rf /wheels

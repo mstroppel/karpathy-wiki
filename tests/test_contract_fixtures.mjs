@@ -14,16 +14,24 @@ import { RESULT_NAMES } from '../config/tools/wiki_ingest_status_core.mjs'
 
 // Conformance tests for the shared ingest status contract. The JSON fixtures
 // in contracts/ingest-status/v1 are the same files the Python ingest packages
-// run against (ingest/tests/test_contract.py).
+// run against (ingest/tests/test_contract.py). Every topic test iterates all
+// fixture files of its topic, so a newly added file cannot silently go
+// untested; topics without a JavaScript implementation are listed here and
+// are executed by the Python side only.
 const CONTRACT_DIR = path.resolve('contracts/ingest-status/v1')
 const contract = JSON.parse(await readFile(path.join(CONTRACT_DIR, 'contract.json'), 'utf8'))
 
-// Topics without a JavaScript implementation are listed here so a new fixture
-// file cannot silently go untested; intervals are parsed by Python only.
 const PYTHON_ONLY_TOPICS = new Set(['intervals'])
+const JAVASCRIPT_TOPICS = ['revisions', 'id-ranges', 'revoked-lists', 'frontmatter-fields']
 
-async function loadFixture(file) {
-  return JSON.parse(await readFile(path.join(CONTRACT_DIR, 'fixtures', file), 'utf8'))
+const fixtureFiles = (await readdir(path.join(CONTRACT_DIR, 'fixtures'))).sort()
+const fixtures = new Map()
+for (const file of fixtureFiles) {
+  fixtures.set(file, JSON.parse(await readFile(path.join(CONTRACT_DIR, 'fixtures', file), 'utf8')))
+}
+
+function topicFiles(topic) {
+  return [...fixtures].filter(([, document]) => document.topic === topic).map(([file]) => file)
 }
 
 // Mirrors karpathy_wiki_ingest.contract.parse_frontmatter_fields: parse the
@@ -48,54 +56,87 @@ test('contract version and status values match the implementation', () => {
   assert.deepEqual([...RESULT_NAMES], contract.statusValues)
 })
 
-test('every fixture topic is covered by a runtime', async () => {
-  const files = (await readdir(path.join(CONTRACT_DIR, 'fixtures'))).sort()
-  assert.ok(files.length > 0)
-  const covered = new Set(['revisions', 'id-ranges', 'revoked-lists', 'frontmatter-fields'])
-  for (const file of files) {
-    const document = await loadFixture(file)
+test('every fixture topic is known and covered by a runtime', () => {
+  assert.ok(fixtureFiles.length > 0)
+  const known = new Set([...JAVASCRIPT_TOPICS, ...PYTHON_ONLY_TOPICS])
+  for (const [file, document] of fixtures) {
     assert.ok(document.version, `${file} must be versioned`)
-    if (!PYTHON_ONLY_TOPICS.has(document.topic)) {
-      assert.ok(covered.has(document.topic), `${document.topic} must have a JavaScript test`)
+    assert.ok(known.has(document.topic), `${file}: unknown topic ${document.topic}`)
+  }
+  for (const topic of JAVASCRIPT_TOPICS) {
+    assert.ok(topicFiles(topic).length > 0, `no JavaScript fixture for topic ${topic}`)
+  }
+})
+
+test('revision cases', () => {
+  const files = topicFiles('revisions')
+  assert.ok(files.length > 0)
+  for (const file of files) {
+    const { cases } = fixtures.get(file)
+    for (const fixtureCase of cases) {
+      assert.equal(
+        REVISION_RE.test(fixtureCase.input),
+        fixtureCase.valid,
+        `${file}: ${fixtureCase.name}`,
+      )
     }
   }
 })
 
-test('revision cases', async () => {
-  const { cases } = await loadFixture('revisions.json')
-  for (const fixtureCase of cases) {
-    assert.equal(REVISION_RE.test(fixtureCase.input), fixtureCase.valid, fixtureCase.name)
-  }
-})
-
-test('paperless id range cases', async () => {
-  const { cases } = await loadFixture('id-ranges.json')
-  for (const fixtureCase of cases) {
-    assert.equal(rangeFor(fixtureCase.id), fixtureCase.directory, fixtureCase.name)
-  }
-})
-
-test('revocation list cases', async () => {
-  const { cases } = await loadFixture('revoked-lists.json')
-  for (const fixtureCase of cases) {
-    if (fixtureCase.valid) {
-      assert.deepEqual(parseRevokedList(fixtureCase.input), fixtureCase.ids, fixtureCase.name)
-    } else {
-      assert.throws(() => parseRevokedList(fixtureCase.input), undefined, fixtureCase.name)
+test('paperless id range cases', () => {
+  const pattern = new RegExp(contract.paperless.directoryPattern)
+  const files = topicFiles('id-ranges')
+  assert.ok(files.length > 0)
+  for (const file of files) {
+    const { cases } = fixtures.get(file)
+    for (const fixtureCase of cases) {
+      assert.equal(rangeFor(fixtureCase.id), fixtureCase.directory, `${file}: ${fixtureCase.name}`)
+      assert.match(fixtureCase.directory, pattern, `${file}: ${fixtureCase.name}`)
     }
   }
 })
 
-test('frontmatter field cases', async () => {
-  const { cases } = await loadFixture('frontmatter-fields.json')
-  for (const fixtureCase of cases) {
-    if (fixtureCase.valid) {
-      const fields = parseFields(fixtureCase.input)
-      for (const [name, value] of Object.entries(fixtureCase.expected)) {
-        assert.deepEqual(fields[name], value, `${fixtureCase.name}: ${name}`)
+test('revocation list cases', () => {
+  const files = topicFiles('revoked-lists')
+  assert.ok(files.length > 0)
+  for (const file of files) {
+    const { cases } = fixtures.get(file)
+    for (const fixtureCase of cases) {
+      if (fixtureCase.valid) {
+        assert.deepEqual(
+          parseRevokedList(fixtureCase.input),
+          fixtureCase.ids,
+          `${file}: ${fixtureCase.name}`,
+        )
+      } else {
+        assert.throws(
+          () => parseRevokedList(fixtureCase.input),
+          undefined,
+          `${file}: ${fixtureCase.name}`,
+        )
       }
-    } else {
-      assert.throws(() => parseFields(fixtureCase.input), undefined, fixtureCase.name)
+    }
+  }
+})
+
+test('frontmatter field cases', () => {
+  const files = topicFiles('frontmatter-fields')
+  assert.ok(files.length > 0)
+  for (const file of files) {
+    const { cases } = fixtures.get(file)
+    for (const fixtureCase of cases) {
+      if (fixtureCase.valid) {
+        const fields = parseFields(fixtureCase.input)
+        for (const [name, value] of Object.entries(fixtureCase.expected)) {
+          assert.deepEqual(fields[name], value, `${file}: ${fixtureCase.name}: ${name}`)
+        }
+      } else {
+        assert.throws(
+          () => parseFields(fixtureCase.input),
+          undefined,
+          `${file}: ${fixtureCase.name}`,
+        )
+      }
     }
   }
 })
