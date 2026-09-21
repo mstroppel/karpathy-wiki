@@ -7,29 +7,73 @@ from unittest import mock
 
 from karpathy_wiki_ingest import __main__ as dispatcher
 
+ENTRY_POINT_GROUP = "karpathy_wiki_ingest.plugins"
+
+
+def entry_point(name):
+    entry = mock.Mock()
+    entry.name = name
+    entry.load.return_value = mock.Mock()
+    return entry
+
 
 class DispatchTests(unittest.TestCase):
     def test_unknown_plugin_exits_with_usage_error(self):
-        with mock.patch("sys.stderr"):
+        with (
+            mock.patch("sys.stderr"),
+            mock.patch(f"{dispatcher.__name__}.metadata.entry_points", return_value=[]),
+        ):
             with self.assertRaises(SystemExit) as raised:
                 dispatcher.main(["karpathy_wiki_ingest", "no-such-plugin"])
         self.assertEqual(raised.exception.code, 2)
 
-    def test_help_lists_builtins(self):
-        with mock.patch("sys.stdout") as output:
+    def test_help_lists_installed_plugins(self):
+        plugins = [entry_point("paperless"), entry_point("webdav")]
+        with (
+            mock.patch("sys.stdout") as output,
+            mock.patch(
+                f"{dispatcher.__name__}.metadata.entry_points", return_value=plugins
+            ) as entry_points,
+        ):
             self.assertEqual(dispatcher.main(["karpathy_wiki_ingest", "--help"]), 0)
+        entry_points.assert_called_with(group=ENTRY_POINT_GROUP)
         self.assertTrue(output.write.called)
 
-    def test_default_is_paperless(self):
+    def test_runs_the_requested_entry_point_plugin(self):
+        plugin = entry_point("paperless")
         with (
-            mock.patch("sys.argv", ["karpathy_wiki_ingest", "--once"]),
-            mock.patch("karpathy_wiki_ingest.plugins.paperless.main") as plugin,
+            mock.patch("sys.argv", ["karpathy_wiki_ingest", "paperless", "--once"]),
+            mock.patch(f"{dispatcher.__name__}.metadata.entry_points", return_value=[plugin]),
         ):
             self.assertEqual(dispatcher.main(), 0)
-            plugin.assert_called_once()
+            plugin.load.return_value.assert_called_once()
             self.assertEqual(sys.argv, ["karpathy_wiki_ingest", "--once"])
 
+    def test_defaults_to_the_sole_installed_plugin(self):
+        plugin = entry_point("webdav")
+        with (
+            mock.patch("sys.argv", ["karpathy_wiki_ingest", "--once"]),
+            mock.patch(f"{dispatcher.__name__}.metadata.entry_points", return_value=[plugin]),
+        ):
+            self.assertEqual(dispatcher.main(), 0)
+            plugin.load.return_value.assert_called_once()
+            self.assertEqual(sys.argv, ["karpathy_wiki_ingest", "--once"])
+
+    def test_ambiguous_installation_requires_a_plugin_name(self):
+        plugins = [entry_point("paperless"), entry_point("webdav")]
+        with (
+            mock.patch("sys.stderr"),
+            mock.patch("sys.argv", ["karpathy_wiki_ingest", "--once"]),
+            mock.patch(f"{dispatcher.__name__}.metadata.entry_points", return_value=plugins),
+        ):
+            with self.assertRaises(SystemExit) as raised:
+                dispatcher.main()
+        self.assertEqual(raised.exception.code, 2)
+
     def test_external_module_convention(self):
+        # This exercises the documented third-party discovery path itself
+        # (a package named karpathy_wiki_ingest_<name> dropped on sys.path);
+        # the repository packages are imported normally, without path tricks.
         with tempfile.TemporaryDirectory() as directory:
             Path(directory, "karpathy_wiki_ingest_dummy").mkdir()
             Path(directory, "karpathy_wiki_ingest_dummy/__init__.py").write_text(

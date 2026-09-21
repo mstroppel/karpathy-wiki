@@ -20,10 +20,20 @@ select = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["karpathy_wiki_ingest"]
+known-first-party = [
+  "karpathy_wiki_ingest",
+  "karpathy_wiki_ingest_webdav",
+  "karpathy_wiki_ingest_paperless",
+]
 
 [tool.mypy]
-files = ["ingest/karpathy_wiki_ingest", "ingest/tests", "tests"]
+files = [
+  "ingest/core/src/karpathy_wiki_ingest",
+  "ingest/webdav/src/karpathy_wiki_ingest_webdav",
+  "ingest/paperless/src/karpathy_wiki_ingest_paperless",
+  "ingest/tests",
+  "tests",
+]
 python_version = "3.14"
 # The codebase uses gradual typing; enable definition-site checks without
 # requiring annotations on every test helper.

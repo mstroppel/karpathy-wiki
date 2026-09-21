@@ -8,7 +8,7 @@ import subprocess
 import threading
 from pathlib import Path
 
-from ..shared import (
+from karpathy_wiki_ingest.shared import (
     TargetedAnonymizer,
     atomic_write,
     interval_seconds,

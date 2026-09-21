@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Ingest is split into installable distributions: the plugin-free core
+  `karpathy-wiki-ingest` plus the plugin distributions
+  `karpathy-wiki-ingest-webdav` and `karpathy-wiki-ingest-paperless`, each
+  with its own pinned `pyproject.toml`. The WebDAV and Paperless images now
+  contain only the core and their own plugin; the core image remains the base
+  for third-party plugins.
+- A versioned ingest status contract
+  (`contracts/ingest-status/v1/contract.json`) for revisions, revocation
+  lists, ID ranges, filenames, intervals, and status values, with shared JSON
+  conformance fixtures that are executed by both the Python ingest tests and
+  the JavaScript status scanner tests.
 - A shared quality gate (`scripts/lint.sh`) with pinned tool versions:
   ruff formatting, linting, and mypy typing for Python, oxfmt and ESLint
   for repository JavaScript, and ShellCheck for all shell scripts. CI runs
@@ -33,6 +44,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `python -m karpathy_wiki_ingest` without a plugin name now runs the sole
+  installed plugin instead of defaulting to Paperless; with zero or multiple
+  plugins installed, a plugin name is required.
+- The ingest images no longer contain the test suite; tests run in CI from
+  the repository checkout against installed packages.
 - The OpenCode image download is now verified against pinned sha512
   checksums, and the base images are pinned by digest; the rclone build
   stage is pinned by tag and digest via `docker-bake.hcl`.

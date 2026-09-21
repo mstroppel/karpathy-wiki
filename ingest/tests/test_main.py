@@ -10,7 +10,8 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from karpathy_wiki_ingest.plugins.paperless import (
+from karpathy_wiki_ingest.shared import atomic_write, canonical_phone
+from karpathy_wiki_ingest_paperless import (
     Ingestor,
     PaperlessClient,
     Settings,
@@ -23,7 +24,6 @@ from karpathy_wiki_ingest.plugins.paperless import (
     source_hash,
     write_health,
 )
-from karpathy_wiki_ingest.shared import atomic_write, canonical_phone
 
 
 class FakeAnonymizer:
@@ -342,9 +342,7 @@ class ClientAndShutdownTests(unittest.TestCase):
         stop_event = mock.Mock()
         stop_event.is_set.return_value = False
         stop_event.wait.return_value = True
-        with mock.patch(
-            "karpathy_wiki_ingest.plugins.paperless.TargetedAnonymizer.from_file"
-        ) as from_file:
+        with mock.patch("karpathy_wiki_ingest_paperless.TargetedAnonymizer.from_file") as from_file:
             run_continuously(ingestor, settings, stop_event)
         from_file.assert_called_once_with(settings.redactions_path)
         ingestor.run_once.assert_called_once_with()
@@ -469,7 +467,7 @@ class PersistenceFailureTests(unittest.TestCase):
 
         document["content"] = "changed"
         with mock.patch(
-            "karpathy_wiki_ingest.plugins.paperless.atomic_write",
+            "karpathy_wiki_ingest_paperless.atomic_write",
             side_effect=failing_for_sources,
         ):
             changed, failed = ingestor.run_once()
@@ -508,7 +506,7 @@ class PersistenceFailureTests(unittest.TestCase):
             raise urllib.error.URLError("unreachable")
 
         ingestor.run_once.side_effect = fail_once
-        with mock.patch("karpathy_wiki_ingest.plugins.paperless.TargetedAnonymizer.from_file"):
+        with mock.patch("karpathy_wiki_ingest_paperless.TargetedAnonymizer.from_file"):
             run_continuously(ingestor, settings, stop_event)
         health = json.loads((self.root / "health.json").read_text())
         self.assertEqual(health["failed"], 1)

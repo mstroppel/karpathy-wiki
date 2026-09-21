@@ -3,6 +3,28 @@ import path from 'node:path'
 
 export const REVISION_RE = /^[0-9a-f]{64}$/
 
+// Contract: contracts/ingest-status/v1/contract.json (paperless.revoked.title)
+export const REVOKED_TITLE = '# Widerrufene Paperless-Dokumente'
+
+// Contract: contracts/ingest-status/v1/contract.json (paperless.idsPerDirectory)
+export function rangeFor(id) {
+  const start = Math.floor(id / 1000) * 1000
+  return `${String(start).padStart(4, '0')}-${String(start + 999).padStart(4, '0')}`
+}
+
+export function parseRevokedList(text) {
+  const lines = text.replaceAll('\r\n', '\n').split('\n')
+  if (lines[0] !== REVOKED_TITLE) throw new Error('Ungültige Widerrufsliste')
+  const ids = []
+  for (const line of lines.slice(1)) {
+    if (!line) continue
+    const match = line.match(/^- (\d+)$/)
+    if (!match) throw new Error('Ungültige Widerrufsliste')
+    ids.push(Number(match[1]))
+  }
+  return [...new Set(ids)].sort((left, right) => left - right)
+}
+
 export function emptyResult() {
   return {
     new: [],

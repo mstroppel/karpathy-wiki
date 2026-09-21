@@ -9,6 +9,6 @@ services:
   opencode:
     image: kw-opencode:integration
   webdav-ingest:
-    image: kw-ingest:integration
+    image: kw-ingest-webdav:integration
   paperless-ingest:
-    image: kw-ingest:integration
+    image: kw-ingest-paperless:integration

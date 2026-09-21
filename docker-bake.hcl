@@ -15,15 +15,15 @@ variable "RCLONE_VERSION" {
 }
 
 group "default" {
-  targets = ["opencode", "ingest"]
+  targets = ["opencode", "ingest", "ingest-webdav", "ingest-paperless"]
 }
 
 group "release" {
-  targets = ["opencode-release", "ingest-release"]
+  targets = ["opencode-release", "ingest-release", "ingest-webdav-release", "ingest-paperless-release"]
 }
 
 group "stable" {
-  targets = ["opencode-stable", "ingest-stable"]
+  targets = ["opencode-stable", "ingest-stable", "ingest-webdav-stable", "ingest-paperless-stable"]
 }
 
 target "common" {
@@ -43,10 +43,31 @@ target "opencode" {
 target "ingest" {
   inherits = ["common"]
   context = "ingest"
+  target = "core"
   args = {
     RCLONE_VERSION = RCLONE_VERSION
   }
   tags = ["karpathy-wiki-ingest:test"]
+}
+
+target "ingest-webdav" {
+  inherits = ["common"]
+  context = "ingest"
+  target = "webdav"
+  args = {
+    RCLONE_VERSION = RCLONE_VERSION
+  }
+  tags = ["karpathy-wiki-ingest-webdav:test"]
+}
+
+target "ingest-paperless" {
+  inherits = ["common"]
+  context = "ingest"
+  target = "paperless"
+  args = {
+    RCLONE_VERSION = RCLONE_VERSION
+  }
+  tags = ["karpathy-wiki-ingest-paperless:test"]
 }
 
 target "opencode-release" {
@@ -59,6 +80,16 @@ target "ingest-release" {
   tags = ["${REGISTRY}/karpathy-wiki-ingest:${IMAGE_VERSION}"]
 }
 
+target "ingest-webdav-release" {
+  inherits = ["ingest-webdav"]
+  tags = ["${REGISTRY}/karpathy-wiki-ingest-webdav:${IMAGE_VERSION}"]
+}
+
+target "ingest-paperless-release" {
+  inherits = ["ingest-paperless"]
+  tags = ["${REGISTRY}/karpathy-wiki-ingest-paperless:${IMAGE_VERSION}"]
+}
+
 target "opencode-stable" {
   inherits = ["opencode"]
   tags = ["${REGISTRY}/karpathy-wiki-opencode:${IMAGE_VERSION}", "${REGISTRY}/karpathy-wiki-opencode:latest"]
@@ -67,4 +98,14 @@ target "opencode-stable" {
 target "ingest-stable" {
   inherits = ["ingest"]
   tags = ["${REGISTRY}/karpathy-wiki-ingest:${IMAGE_VERSION}", "${REGISTRY}/karpathy-wiki-ingest:latest"]
+}
+
+target "ingest-webdav-stable" {
+  inherits = ["ingest-webdav"]
+  tags = ["${REGISTRY}/karpathy-wiki-ingest-webdav:${IMAGE_VERSION}", "${REGISTRY}/karpathy-wiki-ingest-webdav:latest"]
+}
+
+target "ingest-paperless-stable" {
+  inherits = ["ingest-paperless"]
+  tags = ["${REGISTRY}/karpathy-wiki-ingest-paperless:${IMAGE_VERSION}", "${REGISTRY}/karpathy-wiki-ingest-paperless:latest"]
 }

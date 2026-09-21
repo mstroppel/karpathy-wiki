@@ -2,7 +2,15 @@ import { readdir } from 'node:fs/promises'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-const RESULT_NAMES = ['new', 'outdated', 'current', 'conflict', 'revoked', 'orphaned', 'invalid']
+export const RESULT_NAMES = [
+  'new',
+  'outdated',
+  'current',
+  'conflict',
+  'revoked',
+  'orphaned',
+  'invalid',
+]
 const REVISION_RE = /^[0-9a-f]{64}$/
 
 function errorMessage(error) {

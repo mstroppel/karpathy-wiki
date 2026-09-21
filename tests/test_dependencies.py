@@ -7,6 +7,7 @@ manifest and lockfile drift apart.
 
 import json
 import re
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -22,12 +23,24 @@ PACKAGE_LOCK = ROOT / "package-lock.json"
 
 # Runtime base images must be pinned by digest; the rclone stage is a
 # build-time binary source pinned by tag and digest via the RCLONE_VERSION
-# build argument (docker-bake.hcl).
-DIGEST_RE = re.compile(r"^FROM \S+@sha256:[0-9a-f]{64}$")
+# build argument (docker-bake.hcl). Internal stages (FROM core AS webdav)
+# reuse an earlier stage of the same build and are not base images.
+DIGEST_RE = re.compile(r"^FROM \S+@sha256:[0-9a-f]{64}(?: AS \S+)?$")
+INTERNAL_STAGE_RE = re.compile(r"^FROM core(?: AS \S+)?$")
+
+
+# The PEP 517 build backend for the ingest distributions, pinned so image
+# builds do not resolve unpinned tooling from the package index.
+SETUPTOOLS_PIN = "setuptools==80.9.0"
 
 
 def read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
+
+
+def read_ingest_project(directory: str) -> dict:
+    path = ROOT / "ingest" / directory / "pyproject.toml"
+    return tomllib.loads(read(path))["project"]
 
 
 class RuntimeBaseImageTests(unittest.TestCase):
@@ -44,6 +57,8 @@ class RuntimeBaseImageTests(unittest.TestCase):
             with self.subTest(dockerfile=str(path.relative_to(ROOT))):
                 for line in read(path).splitlines():
                     if not line.startswith("FROM ") or DIGEST_RE.fullmatch(line):
+                        continue
+                    if INTERNAL_STAGE_RE.fullmatch(line):
                         continue
                     self.assertIn("${", line, f"unpinned base image: {line}")
 
@@ -71,6 +86,47 @@ class OpenCodeDownloadTests(unittest.TestCase):
         self.assertIn("download linux-arm64", workflow)
         self.assertIn("sha512sum", workflow)
         self.assertIn("OPENCODE_VERSION", workflow)
+
+
+class IngestPackageTests(unittest.TestCase):
+    """Metadata checks for the split ingest distributions (#24)."""
+
+    def test_ingest_distributions_are_pinned_in_lockstep(self):
+        versions = {}
+        for directory in ("core", "webdav", "paperless"):
+            with self.subTest(package=directory):
+                project = read_ingest_project(directory)
+                expected_name = (
+                    "karpathy-wiki-ingest"
+                    if directory == "core"
+                    else f"karpathy-wiki-ingest-{directory}"
+                )
+                self.assertEqual(project["name"], expected_name)
+                versions[directory] = project["version"]
+        self.assertEqual(len(set(versions.values())), 1, "ingest distributions ship in lockstep")
+
+    def test_plugins_depend_on_the_core_version(self):
+        version = read_ingest_project("core")["version"]
+        for directory in ("webdav", "paperless"):
+            with self.subTest(package=directory):
+                self.assertIn(
+                    f"karpathy-wiki-ingest=={version}",
+                    read_ingest_project(directory)["dependencies"],
+                )
+
+    def test_build_backends_are_pinned(self):
+        for directory in ("core", "webdav", "paperless"):
+            with self.subTest(package=directory):
+                data = tomllib.loads(read(ROOT / "ingest" / directory / "pyproject.toml"))
+                self.assertIn(SETUPTOOLS_PIN, data["build-system"]["requires"])
+
+    def test_bake_and_compose_target_the_split_ingest_images(self):
+        bake = read(BAKE_FILE)
+        for target in ("ingest", "ingest-webdav", "ingest-paperless"):
+            self.assertIn(f'target "{target}"', bake)
+        compose = read(ROOT / "compose.yaml")
+        for image in ("karpathy-wiki-ingest-webdav", "karpathy-wiki-ingest-paperless"):
+            self.assertIn(f"ghcr.io/mstroppel/{image}", compose)
 
 
 class RcloneVersionTests(unittest.TestCase):
