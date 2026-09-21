@@ -126,7 +126,10 @@ class PaperlessClient:
             results = payload.get("results")
             if not isinstance(results, list):
                 raise ValueError("Paperless document list has no results array")
-            document_ids.update(int(item["id"]) for item in results)
+            try:
+                document_ids.update(int(item["id"]) for item in results)
+            except (KeyError, TypeError, ValueError) as error:
+                raise ValueError("Paperless document list has malformed entries") from error
             if not payload.get("next"):
                 break
             page += 1

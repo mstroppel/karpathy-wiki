@@ -318,6 +318,24 @@ class ClientAndShutdownTests(unittest.TestCase):
         self.assertIn("tags__id__all=5", get_json.call_args_list[0].args[0])
         self.assertIn("page=2", get_json.call_args_list[1].args[0])
 
+    def test_client_rejects_malformed_document_entries(self):
+        client = PaperlessClient("http://paperless:8000", "token", 5)
+        malformed_results: tuple[Any, ...] = (
+            ["3"],
+            [{}],
+            [{"name": "no ID"}],
+            [{"id": None}],
+            [{"id": {"nested": True}}],
+            [{"id": "not-a-number"}],
+        )
+        for results in malformed_results:
+            with self.subTest(results=results):
+                with mock.patch.object(
+                    client, "_get_json", return_value={"results": results, "next": None}
+                ):
+                    with self.assertRaisesRegex(ValueError, "malformed"):
+                        client.selected_document_ids()
+
     def test_stop_event_interrupts_interval_wait(self):
         ingestor = mock.Mock()
         settings = mock.Mock(interval_seconds=900, redactions_path=Path("redactions"))

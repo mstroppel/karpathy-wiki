@@ -186,11 +186,16 @@ class RunLoopTests(unittest.TestCase):
             root = Path(directory)
             self.anonymizer_configuration(root)
             stop_event = threading.Event()
+            attempts = []
 
-            def failing_cycle(*_args):
-                # Simulate one failed cycle followed by shutdown before sleep.
+            def first_failure_then_success(*_args):
+                attempts.append(True)
+                if len(attempts) == 1:
+                    # The first cycle fails; the daemon must retry on the
+                    # next interval instead of stopping.
+                    raise subprocess.CalledProcessError(5, "rclone")
+                # The retry succeeded; shut the daemon down afterwards.
                 stop_event.set()
-                raise subprocess.CalledProcessError(5, "rclone")
 
             with (
                 mock.patch.dict(os.environ, self.settings(root), clear=True),
@@ -200,14 +205,18 @@ class RunLoopTests(unittest.TestCase):
                 ),
                 mock.patch(
                     "karpathy_wiki_ingest.plugins.webdav.synchronize",
-                    side_effect=failing_cycle,
+                    side_effect=first_failure_then_success,
                 ),
-                mock.patch("karpathy_wiki_ingest.plugins.webdav.sanitize_once") as sanitize,
+                mock.patch(
+                    "karpathy_wiki_ingest.plugins.webdav.sanitize_once",
+                    return_value=(0, 0),
+                ) as sanitize,
             ):
                 run(once=False)
-            sanitize.assert_not_called()
+            self.assertEqual(len(attempts), 2)
+            sanitize.assert_called_once()
             health = json.loads((root / "health.json").read_text())
-            self.assertEqual(health["failed"], 1)
+            self.assertEqual(health["failed"], 0)
 
     def test_stop_event_interrupts_interval_wait(self):
         with tempfile.TemporaryDirectory() as directory:

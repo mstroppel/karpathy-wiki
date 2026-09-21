@@ -138,7 +138,7 @@ Run the same checks CI runs:
 
 ```bash
 python3 -m pip install -r requirements-dev.txt
-npm install
+npm ci
 scripts/lint.sh
 python3 -m unittest discover -s tests -v
 node --test tests/test_wiki_ingest_status.mjs
@@ -157,8 +157,9 @@ workflows, and Compose files.
 
 Third-party tool versions are centralized in `docker-bake.hcl` (rclone) and
 the Dockerfiles (OpenCode, whose npm tarball download is verified against
-pinned sha512 checksums); dependency metadata is validated by
-`tests/test_dependencies.py`.
+pinned sha512 checksums and whose version is bumped automatically by a
+scheduled workflow when a new OpenCode release is published); dependency
+metadata is validated by `tests/test_dependencies.py`.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow.
 

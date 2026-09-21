@@ -13,6 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 OPENCODE_DOCKERFILE = ROOT / "opencode" / "Dockerfile"
 INGEST_DOCKERFILE = ROOT / "ingest" / "Dockerfile"
+OPENCODE_UPDATE_WORKFLOW = ROOT / ".github" / "workflows" / "opencode-update.yml"
 BAKE_FILE = ROOT / "docker-bake.hcl"
 ENV_EXAMPLE = ROOT / ".env.example"
 DEPENDABOT = ROOT / ".github" / "dependabot.yml"
@@ -22,9 +23,7 @@ PACKAGE_LOCK = ROOT / "package-lock.json"
 # Runtime base images must be pinned by digest; the rclone stage is a
 # build-time binary source pinned by tag and digest via the RCLONE_VERSION
 # build argument (docker-bake.hcl).
-RUNTIME_BASE_RE = re.compile(r"^FROM (?P<image>\S+)$", re.MULTILINE)
 DIGEST_RE = re.compile(r"^FROM \S+@sha256:[0-9a-f]{64}$")
-SHA512_RE = re.compile(r"^[0-9a-f]{128}$")
 
 
 def read(path: Path) -> str:
@@ -35,19 +34,16 @@ class RuntimeBaseImageTests(unittest.TestCase):
     def test_runtime_base_images_are_pinned_by_digest(self):
         for path in (OPENCODE_DOCKERFILE, INGEST_DOCKERFILE):
             with self.subTest(dockerfile=str(path.relative_to(ROOT))):
-                content = read(path)
-                pinned = [
-                    line
-                    for line in content.splitlines()
-                    if line.startswith("FROM ") and "@sha256:" in line
-                ]
-                self.assertGreaterEqual(len(pinned), 1)
+                self.assertTrue(
+                    any(DIGEST_RE.fullmatch(line) for line in read(path).splitlines()),
+                    msg=f"no digest-pinned FROM line in {path.relative_to(ROOT)}",
+                )
 
     def test_every_unpinned_from_is_a_build_arg_reference(self):
         for path in (OPENCODE_DOCKERFILE, INGEST_DOCKERFILE):
             with self.subTest(dockerfile=str(path.relative_to(ROOT))):
                 for line in read(path).splitlines():
-                    if not line.startswith("FROM ") or "@sha256:" in line:
+                    if not line.startswith("FROM ") or DIGEST_RE.fullmatch(line):
                         continue
                     self.assertIn("${", line, f"unpinned base image: {line}")
 
@@ -65,6 +61,16 @@ class OpenCodeDownloadTests(unittest.TestCase):
         content = read(OPENCODE_DOCKERFILE)
         self.assertIn("sha512sum --check", content)
         self.assertNotIn("sha512sum -c -", content)  # spelling: --check
+
+    def test_update_automation_bumps_version_and_checksums(self):
+        workflow = read(OPENCODE_UPDATE_WORKFLOW)
+        self.assertIn("schedule:", workflow)
+        self.assertIn("registry.npmjs.org/@opencode/cli-linux-x64/latest", workflow)
+        self.assertIn("@opencode/cli-$1/-/cli-$1-", workflow)
+        self.assertIn("download linux-x64", workflow)
+        self.assertIn("download linux-arm64", workflow)
+        self.assertIn("sha512sum", workflow)
+        self.assertIn("OPENCODE_VERSION", workflow)
 
 
 class RcloneVersionTests(unittest.TestCase):

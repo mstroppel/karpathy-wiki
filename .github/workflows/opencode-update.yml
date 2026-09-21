@@ -1,0 +1,80 @@
+name: OpenCode update
+
+# The OpenCode CLI version and its npm tarball checksums are pinned in
+# opencode/Dockerfile; Dependabot cannot see them there, so this scheduled
+# workflow bumps the pins by opening a pull request when the npm registry
+# publishes a new OpenCode release.
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: opencode-update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    name: Check OpenCode release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Bump OPENCODE_VERSION when a new release is available
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          current=$(sed -n 's/^ARG OPENCODE_VERSION=\(.*\)$/\1/p' opencode/Dockerfile)
+          if [ -z "$current" ]; then
+            printf 'cannot read OPENCODE_VERSION from opencode/Dockerfile\n' >&2
+            exit 1
+          fi
+          # dist-tags.latest resolves to the latest stable release only, so
+          # this tracks the stable channel.
+          latest=$(curl --fail --location --retry 3 \
+            "https://registry.npmjs.org/@opencode/cli-linux-x64/latest" \
+            | jq -r '.version')
+          if [ -z "$latest" ]; then
+            printf 'cannot resolve the latest OpenCode version\n' >&2
+            exit 1
+          fi
+          if [ "$latest" = "$current" ]; then
+            printf 'OpenCode %s is up to date\n' "$current"
+            exit 0
+          fi
+          download() {
+            curl --fail --location --retry 3 \
+              "https://registry.npmjs.org/@opencode/cli-$1/-/cli-$1-${latest}.tgz" \
+              --output "$2"
+          }
+          download linux-x64 /tmp/opencode-x64.tgz
+          download linux-arm64 /tmp/opencode-arm64.tgz
+          x64_digest=$(sha512sum /tmp/opencode-x64.tgz | cut -d' ' -f1)
+          arm64_digest=$(sha512sum /tmp/opencode-arm64.tgz | cut -d' ' -f1)
+          sed -i \
+            -e "s/^ARG OPENCODE_VERSION=.*/ARG OPENCODE_VERSION=${latest}/" \
+            -e "s/^ARG OPENCODE_SHA512_LINUX_X64=.*/ARG OPENCODE_SHA512_LINUX_X64=${x64_digest}/" \
+            -e "s/^ARG OPENCODE_SHA512_LINUX_ARM64=.*/ARG OPENCODE_SHA512_LINUX_ARM64=${arm64_digest}/" \
+            opencode/Dockerfile
+          if ! grep -q "^ARG OPENCODE_VERSION=${latest}\$" opencode/Dockerfile; then
+            printf 'failed to update OPENCODE_VERSION in opencode/Dockerfile\n' >&2
+            exit 1
+          fi
+          printf 'Bumping OpenCode from %s to %s\n' "$current" "$latest"
+          git config user.name "${GITHUB_ACTOR}"
+          git config user.email "${GITHUB_ACTOR}@users.noreply.github.com"
+          git checkout -B opencode-update
+          git commit -am "chore(deps): bump opencode to ${latest}"
+          git push --force origin opencode-update
+          if ! gh pr list --head opencode-update --state open \
+            --repo "$GITHUB_REPOSITORY" --json number --jq 'length' | grep -q '^1$'; then
+            gh pr create \
+              --head opencode-update \
+              --title "chore(deps): bump opencode to ${latest}" \
+              --body "Bumps the pinned OpenCode version and the sha512 checksums of its npm tarballs from ${current} to ${latest}. Verified automatically by the digest and checksum tests; the images job builds the image before merge."
+          fi
