@@ -76,7 +76,7 @@ function validatePendingItems(result, sourceRoot, wikiSourceRoot) {
       try {
         validateJsonValue(item.frontmatter)
       } catch (error) {
-        throw new Error(`${item.source_key}: frontmatter ${errorMessage(error)}`)
+        throw new Error(`${item.source_key}: frontmatter ${errorMessage(error)}`, { cause: error })
       }
       if (item.frontmatter.source_revision !== item.source_revision) {
         throw new Error(`${item.source_key}: Frontmatter-Revision weicht ab`)
@@ -90,7 +90,7 @@ function finalize(result, sourceRoot, wikiSourceRoot) {
   try {
     validateJsonValue(result)
   } catch (error) {
-    throw new Error(`Adapterergebnis ${errorMessage(error)}`)
+    throw new Error(`Adapterergebnis ${errorMessage(error)}`, { cause: error })
   }
   const normalized = {}
   for (const name of RESULT_NAMES) {
