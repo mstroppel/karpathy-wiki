@@ -65,9 +65,11 @@ class IntervalTests(unittest.TestCase):
         self.assertEqual(interval_seconds("45s"), 45)
         self.assertEqual(interval_seconds("15m"), 900)
         self.assertEqual(interval_seconds("1h"), 3600)
+        self.assertEqual(interval_seconds("1.5m"), 90)
+        self.assertEqual(interval_seconds("0.5h"), 1800)
 
     def test_rejects_non_positive_and_unparseable_values(self):
-        for value in ("0", "-5m", "0s", "", "abc", "15x"):
+        for value in ("0", "-5m", "0s", "", "abc", "15x", "0.5", "0.5s", "90.5", "1.5s"):
             with self.subTest(value=value):
                 with self.assertRaises(ValueError):
                     interval_seconds(value)

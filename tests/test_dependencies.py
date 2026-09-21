@@ -20,7 +20,8 @@ PACKAGE_JSON = ROOT / "package.json"
 PACKAGE_LOCK = ROOT / "package-lock.json"
 
 # Runtime base images must be pinned by digest; the rclone stage is a
-# build-time binary source whose version is centralized in docker-bake.hcl.
+# build-time binary source pinned by tag and digest via the RCLONE_VERSION
+# build argument (docker-bake.hcl).
 RUNTIME_BASE_RE = re.compile(r"^FROM (?P<image>\S+)$", re.MULTILINE)
 DIGEST_RE = re.compile(r"^FROM \S+@sha256:[0-9a-f]{64}$")
 SHA512_RE = re.compile(r"^[0-9a-f]{128}$")
@@ -67,18 +68,25 @@ class OpenCodeDownloadTests(unittest.TestCase):
 
 
 class RcloneVersionTests(unittest.TestCase):
-    def test_bake_file_and_env_example_agree_on_rclone_version(self):
+    def test_bake_file_and_ingest_dockerfile_agree_on_pinned_rclone_digest(self):
         bake = read(BAKE_FILE)
-        env = read(ENV_EXAMPLE)
         match = re.search(
             r'variable\s+"RCLONE_VERSION"\s*\{[^}]*?default\s*=\s*"([^"]+)"',
             bake,
             re.DOTALL,
         )
         bake_version = match.group(1) if match else ""
-        self.assertTrue(bake_version, "docker-bake.hcl RCLONE_VERSION default")
-        self.assertIn(f"rclone/rclone:{bake_version}", env)
-        self.assertIn("RCLONE_VERSION", bake)
+        # Tag and digest must be pinned together so a registry retag cannot
+        # swap the rclone binary that the ingest stage copies.
+        self.assertRegex(
+            bake_version,
+            r"^1\.\d+\.\d+@sha256:[0-9a-f]{64}$",
+            msg="docker-bake.hcl RCLONE_VERSION default",
+        )
+        self.assertIn(f"ARG RCLONE_VERSION={bake_version}", read(INGEST_DOCKERFILE))
+
+    def test_env_example_obscures_with_latest_rclone(self):
+        self.assertIn("docker run --rm rclone/rclone:latest obscure", read(ENV_EXAMPLE))
 
 
 class PackageLockTests(unittest.TestCase):

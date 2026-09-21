@@ -28,16 +28,19 @@ def required_env(name: str) -> str:
 
 
 def interval_seconds(value: str) -> int:
-    """Parse a duration such as ``90``, ``90s``, ``15m``, or ``1h``."""
+    """Parse a whole-second duration such as ``90``, ``90s``, ``15m``, or ``1h``."""
     units = {"s": 1, "m": 60, "h": 3600}
     try:
         amount, unit = float(value[:-1]), value[-1].lower()
         seconds = amount * units[unit]
     except (KeyError, ValueError, IndexError):
         seconds = float(value)
-    if seconds <= 0:
-        raise ValueError("interval must be greater than zero")
-    return int(seconds)
+    whole = int(seconds)
+    # Reject fractions so no interval can silently truncate to zero and turn
+    # the daemon wait into a busy loop.
+    if seconds != whole or whole <= 0:
+        raise ValueError("interval must be a whole number of seconds greater than zero")
+    return whole
 
 
 def write_health(path: Path, failed: int) -> None:

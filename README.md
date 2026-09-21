@@ -147,12 +147,13 @@ tests/integration/run.sh  # requires Docker; disposable Compose stack test
 ```
 
 `scripts/lint.sh` performs the formatting, linting, and type checks: ruff
-(format, lint) and mypy for Python, Prettier and ESLint for the repository
+(format, lint) and mypy for Python, oxfmt and ESLint for the repository
 JavaScript, ShellCheck plus `sh -n` for shell scripts, and `node --check` for
 the shipped JavaScript. Tool versions are pinned: Python tooling in
-`requirements-dev.txt`, JavaScript tooling in `package-lock.json`, ShellCheck
-`0.11.0` (the version CI installs). Formatting intentionally excludes
-Markdown, YAML workflows, and Compose files.
+`requirements-dev.txt`, JavaScript tooling in `package-lock.json`; CI runs
+the ShellCheck version preinstalled on the runner image. Formatting applies
+to JavaScript, JSON, and TOML, and intentionally excludes Markdown, YAML
+workflows, and Compose files.
 
 Third-party tool versions are centralized in `docker-bake.hcl` (rclone) and
 the Dockerfiles (OpenCode, whose npm tarball download is verified against

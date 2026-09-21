@@ -74,11 +74,11 @@ executed.
 ## Secrets
 
 WebDAV uses rclone's obscured password format. Obscuring is not encryption;
-protect the environment file as a credential. The rclone version is pinned in
-`docker-bake.hcl` (`RCLONE_VERSION`, currently `1.75.1`):
+protect the environment file as a credential. Any rclone release produces a
+compatible obscured value:
 
 ```bash
-docker run --rm rclone/rclone:1.75.1 obscure 'WEBDAV_PASSWORD'
+docker run --rm rclone/rclone:latest obscure 'WEBDAV_PASSWORD'
 ```
 
 Set `WEBDAV_URL`, `WEBDAV_VENDOR`, `WEBDAV_USERNAME`,

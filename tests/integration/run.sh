@@ -20,7 +20,7 @@ cd "$repository_root"
 teardown() {
   status=$?
   set +e
-  docker compose --env-file "$env_file" -f compose.yaml \
+  docker compose --env-file "${env_file:-}" -f compose.yaml \
     -f tests/integration/compose.integration.yaml \
     down -v --remove-orphans --timeout 30 >/dev/null 2>&1
   docker network rm "$network_name" >/dev/null 2>&1
@@ -64,7 +64,11 @@ COMPOSE_PROFILES=webdav,paperless
 PAPERLESS_TOKEN_FILE=$scratch_dir/secrets/paperless-token
 REDACTIONS_FILE=$scratch_dir/secrets/redactions.json
 PAPERLESS_SOURCE_TAG_ID=5
-# Unreachable, fast-failing HTTPS endpoint for the failure test.
+# Unreachable, fast-failing local endpoints for the failure test: the WebDAV
+# and Paperless URLs point at the refused TCP discard port instead of an
+# external hostname whose DNS behavior would make the assertions slow or
+# nondeterministic.
+WEBDAV_URL=https://127.0.0.1:9/
 PAPERLESS_PUBLIC_URL=https://127.0.0.1:9
 EOF
 

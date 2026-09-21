@@ -1,6 +1,7 @@
-# The rclone version is centralized in docker-bake.hcl (RCLONE_VERSION) and
-# passed as a build argument; the default keeps standalone builds working.
-ARG RCLONE_VERSION=1.75.1
+# The rclone build stage is pinned by tag and digest so a registry retag
+# cannot swap the copied binary. The default keeps standalone builds working;
+# docker-bake.hcl passes the same value (validated by tests/test_dependencies.py).
+ARG RCLONE_VERSION=1.75.1@sha256:45401ad7410db1d67ffdb58e19059ad20b0d8e0285a60e38bbec55cc1019c7a5
 
 FROM rclone/rclone:${RCLONE_VERSION} AS rclone
 

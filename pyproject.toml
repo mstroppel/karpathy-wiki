@@ -11,11 +11,11 @@ extend-exclude = ["temp"]
 
 [tool.ruff.lint]
 select = [
-  "E",  # pycodestyle errors
-  "W",  # pycodestyle warnings
-  "F",  # pyflakes
-  "I",  # isort
-  "B",  # flake8-bugbear
+  "E", # pycodestyle errors
+  "W", # pycodestyle warnings
+  "F", # pyflakes
+  "I", # isort
+  "B", # flake8-bugbear
   "UP", # pyupgrade
 ]
 
@@ -23,11 +23,7 @@ select = [
 known-first-party = ["karpathy_wiki_ingest"]
 
 [tool.mypy]
-files = [
-  "ingest/karpathy_wiki_ingest",
-  "ingest/tests",
-  "tests",
-]
+files = ["ingest/karpathy_wiki_ingest", "ingest/tests", "tests"]
 python_version = "3.14"
 # The codebase uses gradual typing; enable definition-site checks without
 # requiring annotations on every test helper.

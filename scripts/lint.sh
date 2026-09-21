@@ -28,8 +28,18 @@ npm run lint
 npm run format:check
 
 # Shell scripts: syntax and ShellCheck (configuration in .shellcheckrc).
-sh -n config/init.sh install.sh karpathy-wiki.sh
-shellcheck install.sh karpathy-wiki.sh config/init.sh opencode/entrypoint.sh
+# The gate covers every shell script in the checkout, including this script
+# and the Compose integration runner.
+find . \
+  -path ./.git -prune -o \
+  -path ./node_modules -prune -o \
+  -path ./data -prune -o \
+  -path ./secrets -prune -o \
+  -path ./temp -prune -o \
+  -type f -name '*.sh' -print | sort | while IFS= read -r script; do
+  sh -n "$script"
+  shellcheck "$script"
+done
 
 # Shipped JavaScript and the full Compose configuration.
 node --check config/plugins/wiki-ingest-status.js

@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - A shared quality gate (`scripts/lint.sh`) with pinned tool versions:
-  ruff formatting, linting, and mypy typing for Python, Prettier and ESLint
+  ruff formatting, linting, and mypy typing for Python, oxfmt and ESLint
   for repository JavaScript, and ShellCheck for all shell scripts. CI runs
   the same script; `tests/test_dependencies.py` validates dependency
   metadata.
@@ -31,8 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - The OpenCode image download is now verified against pinned sha512
-  checksums, and the base images are pinned by digest; the rclone version is
-  centralized in `docker-bake.hcl`.
+  checksums, and the base images are pinned by digest; the rclone build
+  stage is pinned by tag and digest via `docker-bake.hcl`.
 - Remove all migration code and documentation from pre-1.0.0 releases; data
   migrations will be introduced with the first major release 1.0.0.
 - Migrate OpenCode, its configuration and custom ingest-status tool to v2.
