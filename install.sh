@@ -24,6 +24,7 @@ if [ ! -d "$install_dir" ]; then
   exit 1
 fi
 
+# shellcheck disable=SC1007 # CDPATH is intentionally cleared for this command only
 install_dir=$(CDPATH= cd -- "$install_dir" && pwd)
 wiki_id=$(basename "$install_dir")
 case "$wiki_id" in

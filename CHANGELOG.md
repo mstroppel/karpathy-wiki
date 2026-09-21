@@ -9,8 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A shared quality gate (`scripts/lint.sh`) with pinned tool versions:
+  ruff formatting, linting, and mypy typing for Python, oxfmt and ESLint
+  for repository JavaScript, and ShellCheck for all shell scripts. CI runs
+  the same script; `tests/test_dependencies.py` validates dependency
+  metadata.
+- A repository-managed JavaScript manifest (`package.json`) and lockfile,
+  covered by Dependabot, and a disposable Compose integration test
+  (`tests/integration/run.sh`) that checks stack startup, restart, daemon
+  health behavior, and one-shot failure exits in CI.
+- The WebDAV ingest daemon handles termination signals, retries failed
+  rclone synchronizations on the next interval instead of crashing, and
+  writes the shared health record consumed by a new Compose healthcheck.
 - Automatic pre-releases on every merge to `main` and a `pre` install/update
   channel to opt in to them.
+- A scheduled workflow that opens a pull request bumping the pinned OpenCode
+  version and its sha512 download checksums when the npm registry publishes
+  a new OpenCode release.
 - The installer creates a `.gitignore` that ignores the `.cache` directory.
 - The `/analyse-save` command and `wiki-analysis-save` skill store a finished
   analysis as a wiki page under `analyses/` with a print-optimized HTML view
@@ -18,6 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The OpenCode image download is now verified against pinned sha512
+  checksums, and the base images are pinned by digest; the rclone build
+  stage is pinned by tag and digest via `docker-bake.hcl`.
 - Remove all migration code and documentation from pre-1.0.0 releases; data
   migrations will be introduced with the first major release 1.0.0.
 - Migrate OpenCode, its configuration and custom ingest-status tool to v2.

@@ -1,0 +1,34 @@
+# Shared Python tool configuration for the ingest package, the repository
+# test suites, and future Python packages in this repository.
+#
+# Formatter and linter: ruff; type checker: mypy. Pinned tool versions live
+# in requirements-dev.txt so local checks match CI exactly.
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["temp"]
+
+[tool.ruff.lint]
+select = [
+  "E", # pycodestyle errors
+  "W", # pycodestyle warnings
+  "F", # pyflakes
+  "I", # isort
+  "B", # flake8-bugbear
+  "UP", # pyupgrade
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["karpathy_wiki_ingest"]
+
+[tool.mypy]
+files = ["ingest/karpathy_wiki_ingest", "ingest/tests", "tests"]
+python_version = "3.14"
+# The codebase uses gradual typing; enable definition-site checks without
+# requiring annotations on every test helper.
+check_untyped_defs = true
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+no_implicit_optional = true

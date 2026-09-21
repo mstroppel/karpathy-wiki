@@ -21,9 +21,10 @@ class DispatchTests(unittest.TestCase):
         self.assertTrue(output.write.called)
 
     def test_default_is_paperless(self):
-        with mock.patch(
-            "sys.argv", ["karpathy_wiki_ingest", "--once"]
-        ), mock.patch("karpathy_wiki_ingest.plugins.paperless.main") as plugin:
+        with (
+            mock.patch("sys.argv", ["karpathy_wiki_ingest", "--once"]),
+            mock.patch("karpathy_wiki_ingest.plugins.paperless.main") as plugin,
+        ):
             self.assertEqual(dispatcher.main(), 0)
             plugin.assert_called_once()
             self.assertEqual(sys.argv, ["karpathy_wiki_ingest", "--once"])

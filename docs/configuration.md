@@ -74,10 +74,11 @@ executed.
 ## Secrets
 
 WebDAV uses rclone's obscured password format. Obscuring is not encryption;
-protect the environment file as a credential:
+protect the environment file as a credential. Any rclone release produces a
+compatible obscured value:
 
 ```bash
-docker run --rm rclone/rclone:1.75.1 obscure 'WEBDAV_PASSWORD'
+docker run --rm rclone/rclone:latest obscure 'WEBDAV_PASSWORD'
 ```
 
 Set `WEBDAV_URL`, `WEBDAV_VENDOR`, `WEBDAV_USERNAME`,
@@ -88,7 +89,9 @@ other WebDAV implementations.
 WebDAV files are synchronized into a private staging directory first. The
 `webdav-ingest` service applies `REDACTIONS_FILE` locally and publishes only
 UTF-8 text files to `sources/webdav`; files that cannot be read as text are
-kept out of the source tree and written to `quarantine/webdav`.
+kept out of the source tree and written to `quarantine/webdav`. A failed
+upstream synchronization is retried on the next `WEBDAV_SYNC_INTERVAL` and
+surfaced through the Compose healthcheck instead of restarting the daemon.
 
 Paperless credentials use files rather than environment values. Set an absolute
 path when possible:

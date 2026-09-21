@@ -134,18 +134,32 @@ Report vulnerabilities according to [SECURITY.md](SECURITY.md).
 
 ## Development
 
-Run the local checks:
+Run the same checks CI runs:
 
 ```bash
+python3 -m pip install -r requirements-dev.txt
+npm ci
+scripts/lint.sh
 python3 -m unittest discover -s tests -v
 node --test tests/test_wiki_ingest_status.mjs
 (cd ingest && python3 -m unittest discover -s tests -v)
-sh -n config/init.sh && sh -n install.sh && sh -n karpathy-wiki.sh
-node --check config/plugins/wiki-ingest-status.js
-node --check config/tools/wiki_ingest_status_core.mjs
-for adapter in config/ingest-adapters/*/status.mjs; do node --check "$adapter"; done
-docker compose --env-file .env.example config --quiet
+tests/integration/run.sh  # requires Docker; disposable Compose stack test
 ```
+
+`scripts/lint.sh` performs the formatting, linting, and type checks: ruff
+(format, lint) and mypy for Python, oxfmt and ESLint for the repository
+JavaScript, ShellCheck plus `sh -n` for shell scripts, and `node --check` for
+the shipped JavaScript. Tool versions are pinned: Python tooling in
+`requirements-dev.txt`, JavaScript tooling in `package-lock.json`; CI runs
+the ShellCheck version preinstalled on the runner image. Formatting applies
+to JavaScript, JSON, and TOML, and intentionally excludes Markdown, YAML
+workflows, and Compose files.
+
+Third-party tool versions are centralized in `docker-bake.hcl` (rclone) and
+the Dockerfiles (OpenCode, whose npm tarball download is verified against
+pinned sha512 checksums and whose version is bumped automatically by a
+scheduled workflow when a new OpenCode release is published); dependency
+metadata is validated by `tests/test_dependencies.py`.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow.
 

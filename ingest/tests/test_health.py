@@ -12,9 +12,12 @@ class HealthTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "health.json"
             path.write_text(json.dumps({"checked_at": 1000, "failed": 0}))
-            with mock.patch.dict(
-                "os.environ", {"HEALTH_PATH": str(path), "SYNC_INTERVAL_SECONDS": "60"}
-            ), mock.patch("karpathy_wiki_ingest.health.time.time", return_value=1100):
+            with (
+                mock.patch.dict(
+                    "os.environ", {"HEALTH_PATH": str(path), "SYNC_INTERVAL_SECONDS": "60"}
+                ),
+                mock.patch("karpathy_wiki_ingest.health.time.time", return_value=1100),
+            ):
                 main()
 
     def test_failure_is_unhealthy(self):

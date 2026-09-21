@@ -6,14 +6,13 @@ import json
 import os
 import re
 import tempfile
+import time
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-PHONE_CANDIDATE_RE = re.compile(
-    r"(?<!\w)(?:\+|00)?\d(?:[\s()./-]*\d){5,}(?!\w)"
-)
+PHONE_CANDIDATE_RE = re.compile(r"(?<!\w)(?:\+|00)?\d(?:[\s()./-]*\d){5,}(?!\w)")
 PLACEHOLDER_RE = re.compile(r"^\[[A-Z][A-Z0-9_]*\]$")
 
 
@@ -26,6 +25,27 @@ def required_env(name: str) -> str:
     if not value:
         raise ValueError(f"{name} is required")
     return value
+
+
+def interval_seconds(value: str) -> int:
+    """Parse a whole-second duration such as ``90``, ``90s``, ``15m``, or ``1h``."""
+    units = {"s": 1, "m": 60, "h": 3600}
+    try:
+        amount, unit = float(value[:-1]), value[-1].lower()
+        seconds = amount * units[unit]
+    except (KeyError, ValueError, IndexError):
+        seconds = float(value)
+    whole = int(seconds)
+    # Reject fractions so no interval can silently truncate to zero and turn
+    # the daemon wait into a busy loop.
+    if seconds != whole or whole <= 0:
+        raise ValueError("interval must be a whole number of seconds greater than zero")
+    return whole
+
+
+def write_health(path: Path, failed: int) -> None:
+    """Write the shared health record consumed by the healthcheck module."""
+    atomic_write(path, json.dumps({"checked_at": int(time.time()), "failed": failed}) + "\n")
 
 
 @dataclass(frozen=True)
@@ -57,7 +77,7 @@ class TargetedAnonymizer:
         self.fingerprint = fingerprint
 
     @classmethod
-    def from_file(cls, path: Path) -> "TargetedAnonymizer":
+    def from_file(cls, path: Path) -> TargetedAnonymizer:
         try:
             configuration = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as error:
@@ -65,7 +85,7 @@ class TargetedAnonymizer:
         return cls.from_config(configuration)
 
     @classmethod
-    def from_config(cls, configuration: Any) -> "TargetedAnonymizer":
+    def from_config(cls, configuration: Any) -> TargetedAnonymizer:
         if not isinstance(configuration, dict):
             raise ValueError("redaction configuration must be a JSON object")
         unknown = set(configuration) - set(cls.CATEGORIES)
@@ -94,12 +114,8 @@ class TargetedAnonymizer:
                 if not isinstance(entry, dict):
                     raise ValueError(f"entries in {section} must be JSON objects")
                 replacement = entry.get("replacement")
-                if not isinstance(replacement, str) or not PLACEHOLDER_RE.fullmatch(
-                    replacement
-                ):
-                    raise ValueError(
-                        f"replacement in {section} must look like [PERSON_1]"
-                    )
+                if not isinstance(replacement, str) or not PLACEHOLDER_RE.fullmatch(replacement):
+                    raise ValueError(f"replacement in {section} must look like [PERSON_1]")
                 values = entry.get("values", [])
                 aliases = entry.get("aliases", [])
                 if not isinstance(values, list) or not isinstance(aliases, list):
@@ -143,9 +159,7 @@ class TargetedAnonymizer:
                     last_name = required_entry_text(entry, "last_name", section)
                     last_names = [last_name]
                     if "previous_last_name" in entry:
-                        last_names.append(
-                            required_entry_text(entry, "previous_last_name", section)
-                        )
+                        last_names.append(required_entry_text(entry, "previous_last_name", section))
                     person_names.update((first_name, *last_names, *middle_names))
                     for configured_last_name in last_names:
                         for variant in name_variants(
@@ -154,8 +168,7 @@ class TargetedAnonymizer:
                             add_literal(category, replacement, variant)
                     has_structured_fields = True
                 elif section == "addresses" and any(
-                    key in entry
-                    for key in ("street", "house_number", "postal_code", "city")
+                    key in entry for key in ("street", "house_number", "postal_code", "city")
                 ):
                     street = required_entry_text(entry, "street", section)
                     house_number = required_entry_text(entry, "house_number", section)
@@ -163,9 +176,7 @@ class TargetedAnonymizer:
                     cities = required_entry_texts(entry, "city", section)
                     if not re.fullmatch(r"\d{5}", postal_code):
                         raise ValueError("postal_code in addresses must contain five digits")
-                    for variant in address_variants(
-                        street, house_number, postal_code, cities
-                    ):
+                    for variant in address_variants(street, house_number, postal_code, cities):
                         add_literal(category, replacement, variant)
                     has_structured_fields = True
                 elif section == "birth_dates" and "date" in entry:
@@ -174,9 +185,7 @@ class TargetedAnonymizer:
                         add_literal(category, replacement, variant)
                     has_structured_fields = True
                 if section != "phones" and not values and not has_structured_fields:
-                    raise ValueError(
-                        f"entries in {section} require structured fields or values"
-                    )
+                    raise ValueError(f"entries in {section} require structured fields or values")
 
         if not literals and not phone_replacements:
             raise ValueError("at least one redaction value must be configured")
@@ -190,8 +199,7 @@ class TargetedAnonymizer:
             configuration, ensure_ascii=False, sort_keys=True, separators=(",", ":")
         ).encode("utf-8")
         person_name_patterns = [
-            literal_pattern(value)
-            for value in sorted(person_names, key=len, reverse=True)
+            literal_pattern(value) for value in sorted(person_names, key=len, reverse=True)
         ]
         return cls(
             literal_rules,
@@ -232,7 +240,7 @@ class TargetedAnonymizer:
 def literal_pattern(value: str) -> re.Pattern[str]:
     parts = value.split()
     pattern = re.escape(parts[0])
-    for previous, part in zip(parts, parts[1:]):
+    for previous, part in zip(parts, parts[1:], strict=False):
         separator = r"\s*" if previous.endswith(",") else r"\s+"
         pattern += separator + re.escape(part)
     return re.compile(r"(?<!\w)" + pattern + r"(?!\w)", re.IGNORECASE)
@@ -245,9 +253,7 @@ def required_entry_text(entry: dict[str, Any], key: str, section: str) -> str:
     return " ".join(value.split())
 
 
-def optional_entry_texts(
-    entry: dict[str, Any], key: str, section: str
-) -> list[str]:
+def optional_entry_texts(entry: dict[str, Any], key: str, section: str) -> list[str]:
     values = entry.get(key, [])
     if not isinstance(values, list) or any(
         not isinstance(value, str) or not value.strip() for value in values
@@ -263,9 +269,7 @@ def required_entry_texts(entry: dict[str, Any], key: str, section: str) -> list[
     return values
 
 
-def name_variants(
-    first_name: str, middle_names: list[str], last_name: str
-) -> set[str]:
+def name_variants(first_name: str, middle_names: list[str], last_name: str) -> set[str]:
     given_name_variants = {first_name, *middle_names}
     if middle_names:
         given_name_variants.add(" ".join((first_name, *middle_names)))
