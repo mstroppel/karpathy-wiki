@@ -70,7 +70,7 @@ karpathy-wiki-opencode:4096     # OPENCODE_PUBLIC_URL
 ```
 
 Sign in to `OPENCODE_PUBLIC_URL`, connect a model provider, and
-ask OpenCode to ingest a source. For a first test without an adapter:
+ask OpenCode to ingest a source. For a first test without a provider:
 
 ```bash
 cp /path/to/document.pdf ./data/sources/webdav/

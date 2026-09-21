@@ -52,7 +52,7 @@
     "valueKinds": ["plain", "single-quoted", "json"]
   },
   "statusResult": {
-    "description": "The wiki_ingest_status tool returns one object per source adapter with exactly the statusValues keys, each holding an array. Pending entries (new, outdated, current) carry source_key, source_path, source_revision, wiki_path, and frontmatter; frontmatter.source_revision must equal source_revision, source_path must lie inside the adapter source root, and wiki_path must lie inside the wiki source root. wiki_path may be claimed by at most one pending entry across all adapters.",
+    "description": "The wiki_ingest_status tool returns one object per source directory with exactly the statusValues keys, each holding an array. The comparison is driven entirely by the provider manifest (see contracts/provider-manifest/): manifest items without a claiming wiki page are new, pages with a stale revision are outdated, pages with the current revision are current. Pending entries (new, outdated, current) carry source_key, source_path, source_revision, wiki_path, and frontmatter; frontmatter.source_revision must equal source_revision. A wiki_path may be claimed by at most one pending entry across all sources.",
     "pendingFields": ["source_key", "source_path", "source_revision", "wiki_path", "frontmatter"]
   }
 }

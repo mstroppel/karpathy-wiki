@@ -1,76 +1,15 @@
 # GitHub Issue Implementation Plan
 
-This plan covers all issues currently tracked in the repository: **21 issues in total, 14 open and 7 closed**.
-
-## Completed issues
-
-No implementation work is planned for these issues unless a regression is found:
-
-- [#14](https://github.com/mstroppel/karpathy-wiki/issues/14) — renamed the Nextcloud integration to WebDAV and added ingest tracking.
-- [#17](https://github.com/mstroppel/karpathy-wiki/issues/17) — saves analyses as wiki pages with printable PDF views.
-- [#20](https://github.com/mstroppel/karpathy-wiki/issues/20) — anonymizes WebDAV input.
-- [#23](https://github.com/mstroppel/karpathy-wiki/issues/23) — provides the version-aware installer and update launcher.
-- [#47](https://github.com/mstroppel/karpathy-wiki/issues/47) — migrated the stack to OpenCode v2.
-- [#53](https://github.com/mstroppel/karpathy-wiki/issues/53) — removed migration code before version 1.0.
-- [#56](https://github.com/mstroppel/karpathy-wiki/issues/56) — removed the session exporter; sharing by wiki link and printable PDF view already covers its use cases, and analysis runs directly in OpenCode.
+This plan covers the remaining open issues of the repository. Phase 0 (safety
+and engineering baseline: #26, #28, #29) and Phase 1 (shared ingest contracts:
+#24, #25, #42) are implemented and are no longer tracked here; see the
+changelog for their delivery.
 
 ## Current findings
 
 - Paperless already writes `paperless_url` and a visible Paperless link into sanitized source documents. [#50](https://github.com/mstroppel/karpathy-wiki/issues/50) should first verify that the link is preserved in generated wiki pages.
 - WebDAV still publishes files one at a time and loads the redaction file only once per process. [#43](https://github.com/mstroppel/karpathy-wiki/issues/43) therefore requires a real generation-based publication design.
 - OpenCode writes directly to the wiki and the SilverBullet mount is writable. These are central constraints addressed by [#44](https://github.com/mstroppel/karpathy-wiki/issues/44).
-
-## Phase 0 — Safety and engineering baseline
-
-### [#26](https://github.com/mstroppel/karpathy-wiki/issues/26): Expand integration coverage and daemon hardening — P0
-
-- Test WebDAV configuration, rclone failures, retries, shutdown, and health.
-- Test malformed Paperless responses and persistence failures.
-- Add behavior tests for the installer, not only syntax checks.
-- Add disposable Compose integration tests for startup, restart, and failure.
-- Make daemon lifecycle and health behavior explicit in CI.
-
-### [#28](https://github.com/mstroppel/karpathy-wiki/issues/28): Add consistent quality checks
-
-- Add a shared Python configuration, formatter, linter, and type checker.
-- Add JavaScript formatting/linting and ShellCheck configuration.
-- Run all checks in CI with pinned tool versions.
-- Document intentional exclusions and align README commands with CI.
-
-### [#29](https://github.com/mstroppel/karpathy-wiki/issues/29): Close supply-chain gaps
-
-- Cover every Dockerfile and package source with Dependabot.
-- Add a repository-managed JavaScript manifest and lockfile.
-- Centralize repeated versions, especially rclone.
-- Verify OpenCode downloads with checksums or signatures.
-- Pin critical base images by digest and validate dependency metadata in CI.
-
-## Phase 1 — Shared ingest contracts
-
-### [#24](https://github.com/mstroppel/karpathy-wiki/issues/24): Make WebDAV self-contained
-
-1. Create an explicit Python package and `pyproject.toml`.
-2. Put shared functionality in a documented core package.
-3. Build the WebDAV image without implicitly copying Paperless sources.
-4. Remove import-path workarounds from tests.
-5. Test the package independently from the main repository image.
-
-### [#25](https://github.com/mstroppel/karpathy-wiki/issues/25): Define one status contract
-
-- Define a versioned contract for revisions, `revoked.md`, ID ranges, filenames, intervals, and status values.
-- Store shared JSON conformance fixtures for Python and JavaScript.
-- Test valid, invalid, and boundary cases in both runtimes.
-
-### [#42](https://github.com/mstroppel/karpathy-wiki/issues/42): Define one end-to-end plugin contract
-
-After #24 and #25:
-
-1. Define a versioned provider manifest containing source keys, revisions, destination paths, frontmatter, revocations, and validation errors.
-2. Make the generic status scanner consume the manifest directly.
-3. Remove provider-specific JavaScript adapters from the OpenCode image.
-4. Move WebDAV and Paperless to the same contract.
-5. Add a third-party plugin example that does not require rebuilding the core OpenCode image.
-6. Add compatibility tests and document contract deprecation rules.
 
 ## Phase 2 — Coherent source publication
 
@@ -155,11 +94,10 @@ No pre-1.0 migration code, legacy aliases, or automatic data-layout moves should
 
 ## Suggested priority
 
-1. **Immediate:** #26 and #43.
-2. **Foundation:** #24, #25, #42, #28, #29, #27.
+1. **Next:** #43 and #27.
+2. **Small independent improvements:** #50 and #40.
 3. **Transactional architecture:** #44, delivered incrementally.
-4. **Small independent improvements:** #40 and #50.
-5. **Future capabilities:** #18 and #15.
-6. **After 1.0:** #46.
+4. **Future capabilities:** #18 and #15.
+5. **After 1.0:** #46.
 
 Every implementation PR should use a focused Conventional Commit and document behavior changes, security implications, data-layout/migration impact, and test evidence.

@@ -43,7 +43,6 @@ COPY config/routing.md /etc/opencode/routing.md
 COPY config/skills /etc/opencode/skills
 COPY config/plugins /etc/opencode/plugins
 COPY config/tools /etc/opencode/tools
-COPY config/ingest-adapters /etc/opencode/ingest-adapters
 COPY opencode/entrypoint.sh /usr/local/bin/karpathy-wiki-entrypoint
 RUN chmod 0755 /etc/opencode/init.sh /usr/local/bin/karpathy-wiki-entrypoint
 

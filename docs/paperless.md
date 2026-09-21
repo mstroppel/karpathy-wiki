@@ -49,6 +49,10 @@ Removing the source tag deletes the sanitized source and records the ID in
 `revoked.md`. Existing derived wiki knowledge is reported but not automatically
 deleted because it may be supported by additional sources.
 
+After every cycle the plugin writes the provider manifest
+`sources/paperless/manifest.json` describing the published documents, their
+revisions, their wiki destinations, and any content-free errors.
+
 Use `/ingest-new` in OpenCode to compare source revisions with existing wiki
 pages and process new or changed documents sequentially.
 

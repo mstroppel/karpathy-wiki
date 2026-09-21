@@ -20,7 +20,8 @@ ${DATA_ROOT}/
 
 Source directories are read-only inside OpenCode. Generated knowledge is written
 only to `wiki/`; successful changes create focused Conventional Commits in that
-independent repository. Source adapters track normalized paths and SHA-256
+independent repository. Source providers write a manifest per cycle that tracks
+normalized paths and SHA-256
 revisions so changed sources can be ingested without silently deleting knowledge
 when a source is removed.
 

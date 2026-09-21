@@ -44,10 +44,6 @@ done
 # Shipped JavaScript and the full Compose configuration.
 node --check config/plugins/wiki-ingest-status.js
 node --check config/tools/wiki_ingest_status_core.mjs
-node --check config/ingest-adapters/shared.mjs
-for adapter in config/ingest-adapters/*/status.mjs; do
-  node --check "$adapter"
-done
 docker compose --env-file .env.example config --quiet
 
 printf 'lint: OK\n'

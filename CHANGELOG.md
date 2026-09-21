@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A versioned provider manifest (`contracts/provider-manifest/v1/contract.json`):
+  every ingest cycle writes a `manifest.json` into its sanitized source root
+  describing source keys, revisions, wiki destinations, frontmatter, claims,
+  revocations, and content-free errors. The generic `wiki_ingest_status` tool
+  consumes only the manifest and the wiki pages; all provider-specific
+  JavaScript adapters were removed from the OpenCode image, so adding a
+  provider never requires rebuilding it. Manifest validation is covered by
+  shared conformance fixtures for Python and JavaScript, and the contract
+  deprecation rules are documented.
 - Ingest is split into installable distributions: the plugin-free core
   `karpathy-wiki-ingest` plus the plugin distributions
   `karpathy-wiki-ingest-webdav` and `karpathy-wiki-ingest-paperless`, each

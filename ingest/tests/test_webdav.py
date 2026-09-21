@@ -16,6 +16,7 @@ from karpathy_wiki_ingest_webdav import (
     sanitize_once,
     settings,
     synchronize,
+    write_source_manifest,
 )
 
 
@@ -47,7 +48,9 @@ class WebdavTests(unittest.TestCase):
             incoming.mkdir()
             (incoming / "keep.txt").write_text("Hallo Max Mustermann", encoding="utf-8")
             sanitized.mkdir()
+            quarantine.mkdir()
             (sanitized / "gone.txt").write_text("veraltet", encoding="utf-8")
+            (quarantine / "gone.txt.error").write_text("path=gone.txt\nerror_type=UnicodeError\n")
             anonymizer = TargetedAnonymizer.from_config(
                 {"people": [{"replacement": "[ICH]", "values": ["Max Mustermann"]}]}
             )
@@ -57,6 +60,73 @@ class WebdavTests(unittest.TestCase):
             self.assertEqual((changed, failed), (1, 0))
             self.assertTrue((sanitized / "keep.txt").is_file())
             self.assertFalse((sanitized / "gone.txt").exists())
+            # The stale quarantine report disappears with its source file.
+            self.assertFalse((quarantine / "gone.txt.error").exists())
+
+    def test_reserved_manifest_name_is_quarantined(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            incoming = root / "incoming"
+            sanitized = root / "sanitized"
+            quarantine = root / "quarantine"
+            incoming.mkdir()
+            (incoming / "manifest.json").write_text("upstream content", encoding="utf-8")
+            anonymizer = TargetedAnonymizer.from_config(
+                {"people": [{"replacement": "[ICH]", "values": ["Max Mustermann"]}]}
+            )
+
+            self.assertEqual(sanitize_once(incoming, sanitized, quarantine, anonymizer), (0, 1))
+            self.assertFalse((sanitized / "manifest.json").exists())
+            report = (quarantine / "manifest.json.error").read_text()
+            self.assertIn("path=manifest.json", report)
+            self.assertIn("error_type=ReservedManifestName", report)
+
+    def test_manifest_is_written_after_sanitization(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            incoming = root / "incoming"
+            sanitized = root / "sanitized"
+            quarantine = root / "quarantine"
+            (incoming / "nested").mkdir(parents=True)
+            (incoming / "nested/source.txt").write_text("Hallo Max Mustermann", encoding="utf-8")
+            (incoming / "private.pdf").write_bytes(b"%PDF\xff")
+            anonymizer = TargetedAnonymizer.from_config(
+                {"people": [{"replacement": "[ICH]", "values": ["Max Mustermann"]}]}
+            )
+
+            sanitize_once(incoming, sanitized, quarantine, anonymizer)
+            write_source_manifest(sanitized, quarantine)
+
+            manifest = json.loads((sanitized / "manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["contract"], "karpathy-wiki-provider-manifest")
+            self.assertEqual(manifest["version"], 1)
+            self.assertEqual(manifest["source"], "webdav")
+            self.assertEqual(len(manifest["items"]), 1)
+            item = manifest["items"][0]
+            self.assertEqual(item["source_key"], "nested/source.txt")
+            self.assertEqual(item["source_path"], "nested/source.txt")
+            self.assertEqual(item["wiki_path"], "webdav/nested/source.txt/index.md")
+            self.assertEqual(item["claim"], {"source_path": "nested/source.txt"})
+            self.assertEqual(
+                item["frontmatter"],
+                {
+                    "source_adapter": "webdav",
+                    "source_path": "nested/source.txt",
+                    "source_revision": item["source_revision"],
+                },
+            )
+            # The quarantined binary file appears as a content-free error.
+            self.assertEqual(
+                manifest["errors"],
+                [{"path": "private.pdf", "error": "UnicodeDecodeError"}],
+            )
+            # The manifest itself is not listed as an item and is stable
+            # across cycles.
+            write_source_manifest(sanitized, quarantine)
+            self.assertEqual(
+                json.loads((sanitized / "manifest.json").read_text(encoding="utf-8"))["items"],
+                manifest["items"],
+            )
 
 
 class IntervalTests(unittest.TestCase):
