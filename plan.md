@@ -1,9 +1,24 @@
 # GitHub Issue Implementation Plan
 
-This plan covers the remaining open issues of the repository. Phase 0 (safety
-and engineering baseline: #26, #28, #29) and Phase 1 (shared ingest contracts:
-#24, #25, #42) are implemented and are no longer tracked here; see the
-changelog for their delivery.
+This plan covers all issues currently tracked in the repository: **22 issues in total, 10 open and 12 closed**.
+
+## Completed issues
+
+No implementation work is planned for these issues unless a regression is found:
+
+- [#14](https://github.com/mstroppel/karpathy-wiki/issues/14) — renamed the Nextcloud integration to WebDAV and added ingest tracking.
+- [#17](https://github.com/mstroppel/karpathy-wiki/issues/17) — saves analyses as wiki pages with printable PDF views.
+- [#20](https://github.com/mstroppel/karpathy-wiki/issues/20) — anonymizes WebDAV input.
+- [#23](https://github.com/mstroppel/karpathy-wiki/issues/23) — provides the version-aware installer and update launcher.
+- [#24](https://github.com/mstroppel/karpathy-wiki/issues/24) — split ingest into core and plugin distributions (PR [#64](https://github.com/mstroppel/karpathy-wiki/pull/64)).
+- [#25](https://github.com/mstroppel/karpathy-wiki/issues/25) — defined the versioned ingest status contract with shared conformance fixtures (PR [#64](https://github.com/mstroppel/karpathy-wiki/pull/64)).
+- [#26](https://github.com/mstroppel/karpathy-wiki/issues/26) — integration coverage and daemon hardening.
+- [#28](https://github.com/mstroppel/karpathy-wiki/issues/28) — consistent quality checks.
+- [#29](https://github.com/mstroppel/karpathy-wiki/issues/29) — closed supply-chain gaps.
+- [#47](https://github.com/mstroppel/karpathy-wiki/issues/47) — migrated the stack to OpenCode v2.
+- [#53](https://github.com/mstroppel/karpathy-wiki/issues/53) — removed migration code before version 1.0.
+- [#56](https://github.com/mstroppel/karpathy-wiki/issues/56) — removed the session exporter; sharing by wiki link and printable PDF view already covers its use cases, and analysis runs directly in OpenCode.
+- [#42](https://github.com/mstroppel/karpathy-wiki/issues/42) — defined the provider manifest as the end-to-end plugin contract (PR [#65](https://github.com/mstroppel/karpathy-wiki/pull/65)).
 
 ## Current findings
 

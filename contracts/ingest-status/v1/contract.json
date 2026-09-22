@@ -22,8 +22,8 @@
     "sourceFilenameTemplate": "document-{id}.md",
     "wikiFilenameTemplate": "paperless-{id}.md",
     "idsPerDirectory": 1000,
-    "directoryPattern": "^[0-9]{4}-[0-9]{4}$",
-    "directoryDescription": "Documents are grouped into inclusive ID ranges of idsPerDirectory entries: [start, start + idsPerDirectory - 1], with start a multiple of idsPerDirectory and both bounds zero-padded to four digits.",
+    "directoryPattern": "^[0-9]{4,}-[0-9]{4,}$",
+    "directoryDescription": "Documents are grouped into inclusive ID ranges of idsPerDirectory entries: [start, start + idsPerDirectory - 1], with start a multiple of idsPerDirectory and both bounds zero-padded to at least four digits (padding is a minimum width, so IDs beyond four digits produce wider, equal-width bounds).",
     "revoked": {
       "filename": "revoked.md",
       "title": "# Widerrufene Paperless-Dokumente",

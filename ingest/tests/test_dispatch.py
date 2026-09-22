@@ -17,11 +17,16 @@ def entry_point(name):
     return entry
 
 
+def no_plugins():
+    return set()
+
+
 class DispatchTests(unittest.TestCase):
     def test_unknown_plugin_exits_with_usage_error(self):
         with (
             mock.patch("sys.stderr"),
             mock.patch(f"{dispatcher.__name__}.metadata.entry_points", return_value=[]),
+            mock.patch(f"{dispatcher.__name__}.convention_plugins", new=no_plugins),
         ):
             with self.assertRaises(SystemExit) as raised:
                 dispatcher.main(["karpathy_wiki_ingest", "no-such-plugin"])
@@ -34,6 +39,7 @@ class DispatchTests(unittest.TestCase):
             mock.patch(
                 f"{dispatcher.__name__}.metadata.entry_points", return_value=plugins
             ) as entry_points,
+            mock.patch(f"{dispatcher.__name__}.convention_plugins", new=no_plugins),
         ):
             self.assertEqual(dispatcher.main(["karpathy_wiki_ingest", "--help"]), 0)
         entry_points.assert_called_with(group=ENTRY_POINT_GROUP)
@@ -54,6 +60,7 @@ class DispatchTests(unittest.TestCase):
         with (
             mock.patch("sys.argv", ["karpathy_wiki_ingest", "--once"]),
             mock.patch(f"{dispatcher.__name__}.metadata.entry_points", return_value=[plugin]),
+            mock.patch(f"{dispatcher.__name__}.convention_plugins", new=no_plugins),
         ):
             self.assertEqual(dispatcher.main(), 0)
             plugin.load.return_value.assert_called_once()
@@ -65,6 +72,7 @@ class DispatchTests(unittest.TestCase):
             mock.patch("sys.stderr"),
             mock.patch("sys.argv", ["karpathy_wiki_ingest", "--once"]),
             mock.patch(f"{dispatcher.__name__}.metadata.entry_points", return_value=plugins),
+            mock.patch(f"{dispatcher.__name__}.convention_plugins", new=no_plugins),
         ):
             with self.assertRaises(SystemExit) as raised:
                 dispatcher.main()
@@ -86,3 +94,34 @@ class DispatchTests(unittest.TestCase):
             finally:
                 sys.path.remove(directory)
                 importlib.invalidate_caches()
+
+    def test_defaults_to_the_sole_convention_plugin(self):
+        # Implicit single-plugin dispatch also works for convention packages
+        # that register no entry point. The convention set is pinned so the
+        # development environment's own installed plugins cannot make the run
+        # ambiguous; the tempdir package supplies the load path.
+        with tempfile.TemporaryDirectory() as directory:
+            Path(directory, "karpathy_wiki_ingest_solo").mkdir()
+            Path(directory, "karpathy_wiki_ingest_solo/__init__.py").write_text(
+                "def main():\n    return 'ok'\n"
+            )
+            sys.path.insert(0, directory)
+            try:
+                importlib.invalidate_caches()
+                with (
+                    mock.patch("sys.argv", ["karpathy_wiki_ingest", "--once"]),
+                    mock.patch(f"{dispatcher.__name__}.metadata.entry_points", return_value=[]),
+                    mock.patch(f"{dispatcher.__name__}.convention_plugins", return_value={"solo"}),
+                ):
+                    self.assertEqual(dispatcher.main(), 0)
+                    self.assertEqual(sys.argv, ["karpathy_wiki_ingest", "--once"])
+            finally:
+                sys.path.remove(directory)
+                importlib.invalidate_caches()
+
+    def test_convention_and_entry_point_plugins_are_listed_together(self):
+        with (
+            mock.patch(f"{dispatcher.__name__}.entry_point_plugins", return_value={"paperless"}),
+            mock.patch(f"{dispatcher.__name__}.convention_plugins", return_value={"solo"}),
+        ):
+            self.assertEqual(dispatcher.installed_plugins(), ["paperless", "solo"])

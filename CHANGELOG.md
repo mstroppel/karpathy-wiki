@@ -58,6 +58,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plugins installed, a plugin name is required.
 - The ingest images no longer contain the test suite; tests run in CI from
   the repository checkout against installed packages.
+- Ingest wheel builds preinstall the hash-pinned setuptools build backend and
+  run with `--no-build-isolation`; no index-resolved code is executed during
+  the build, and each final image stage copies only its own plugin wheel so
+  no image layer contains another plugin's wheel.
+- Adapter status results are now validated strictly: unknown adapter result
+  keys are rejected instead of silently discarded.
 - The OpenCode image download is now verified against pinned sha512
   checksums, and the base images are pinned by digest; the rclone build
   stage is pinned by tag and digest via `docker-bake.hcl`.

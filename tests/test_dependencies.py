@@ -129,6 +129,71 @@ class IngestPackageTests(unittest.TestCase):
             self.assertIn(f"ghcr.io/mstroppel/{image}", compose)
 
 
+class IngestBuildIsolationTests(unittest.TestCase):
+    """The ingest wheel build must not execute index-resolved tooling."""
+
+    def test_build_backend_is_hash_pinned_and_preinstalled(self):
+        content = read(INGEST_DOCKERFILE)
+        self.assertIn("--no-build-isolation", content)
+        self.assertIn("--require-hashes", content)
+        requirements = read(ROOT / "ingest" / "build-requirements.txt")
+        self.assertIn(SETUPTOOLS_PIN, requirements)
+        self.assertRegex(requirements, r"--hash=sha256:[0-9a-f]{64}")
+
+    def test_wheel_builds_use_no_deps_against_repository_sources(self):
+        content = read(INGEST_DOCKERFILE)
+        wheel_lines = [line for line in content.splitlines() if "pip wheel" in line]
+        self.assertTrue(wheel_lines, "no pip wheel build step")
+        for line in wheel_lines:
+            self.assertIn("--no-deps", line)
+            self.assertIn("--no-build-isolation", line)
+
+    def test_runtime_installs_resolve_from_built_wheels_only(self):
+        content = read(INGEST_DOCKERFILE)
+        install_lines = [line for line in content.splitlines() if "pip install" in line]
+        self.assertTrue(install_lines, "no pip install step")
+        for line in install_lines:
+            if "build-requirements.txt" in line:
+                # The hash-pinned build backend preinstall is the only index
+                # access; wheel builds and image installs never resolve there.
+                self.assertIn("--require-hashes", line)
+                self.assertIn("--no-deps", line)
+            else:
+                self.assertIn("--no-index", line)
+
+
+class IngestImageIsolationTests(unittest.TestCase):
+    """No final stage may contain another plugin's wheel in any layer."""
+
+    PLUGIN_WHEEL_DIRS = ("webdav", "paperless")
+
+    def ingest_stage(self, stage: str) -> list[str]:
+        lines = read(INGEST_DOCKERFILE).splitlines()
+        start = next(
+            index for index, line in enumerate(lines) if re.fullmatch(rf"FROM \S+ AS {stage}", line)
+        )
+        end = next(
+            (index for index in range(start + 1, len(lines)) if lines[index].startswith("FROM ")),
+            len(lines),
+        )
+        return lines[start:end]
+
+    def test_each_final_stage_copies_only_its_own_plugin_wheel(self):
+        for stage, plugin in (("core", None), ("webdav", "webdav"), ("paperless", "paperless")):
+            with self.subTest(stage=stage):
+                block = "\n".join(self.ingest_stage(stage))
+                if plugin:
+                    self.assertIn(f"/wheels/{plugin}", block)
+                for other in self.PLUGIN_WHEEL_DIRS:
+                    if other != plugin:
+                        self.assertNotIn(
+                            f"/wheels/{other}",
+                            block,
+                            msg=f"{stage} stage ships another plugin's wheel",
+                        )
+                self.assertNotIn("COPY --from=build /wheels /wheels", block)
+
+
 class RcloneVersionTests(unittest.TestCase):
     def test_bake_file_and_ingest_dockerfile_agree_on_pinned_rclone_digest(self):
         bake = read(BAKE_FILE)

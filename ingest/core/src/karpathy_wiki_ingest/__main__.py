@@ -3,28 +3,47 @@
 The core distribution ships no plugins of its own. Plugins are separate
 distributions that either register an entry point named after the plugin in
 the group ``karpathy_wiki_ingest.plugins`` or expose a package named
-``karpathy_wiki_ingest_<plugin>`` with a callable ``main()``.
+``karpathy_wiki_ingest_<plugin>`` with a callable ``main()``. Both discovery
+paths feed implicit single-plugin dispatch, so a plugin only needs an entry
+point when its name differs from its package convention.
 """
 
 from __future__ import annotations
 
 import importlib
 import importlib.util
+import pkgutil
 import re
 import sys
 from importlib import metadata
 
 ENTRY_POINT_GROUP = "karpathy_wiki_ingest.plugins"
+CONVENTION_PREFIX = "karpathy_wiki_ingest_"
 PLUGIN_NAME = re.compile(r"[a-z0-9_-]+")
 
 USAGE = "usage: karpathy_wiki_ingest PLUGIN [PLUGIN_OPTIONS]"
 
 
+def entry_point_plugins() -> set[str]:
+    """Names registered in the ``karpathy_wiki_ingest.plugins`` group."""
+    return {entry_point.name for entry_point in metadata.entry_points(group=ENTRY_POINT_GROUP)}
+
+
+def convention_plugins() -> set[str]:
+    """Names of importable packages following the ``karpathy_wiki_ingest_<name>``
+    convention."""
+    return {
+        module.name[len(CONVENTION_PREFIX) :]
+        for module in pkgutil.iter_modules()
+        if module.ispkg
+        and module.name.startswith(CONVENTION_PREFIX)
+        and len(module.name) > len(CONVENTION_PREFIX)
+    }
+
+
 def installed_plugins() -> list[str]:
-    """Names of all plugins registered through entry points."""
-    return sorted(
-        {entry_point.name for entry_point in metadata.entry_points(group=ENTRY_POINT_GROUP)}
-    )
+    """Names of all installed plugins: entry points and convention packages."""
+    return sorted(entry_point_plugins() | convention_plugins())
 
 
 def usage_error(plugin: str):
