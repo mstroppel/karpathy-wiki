@@ -40,36 +40,35 @@ Select optional services with a comma-separated value:
 COMPOSE_PROFILES=webdav,paperless,raw-files
 ```
 
-An installation can run without source adapters and receive files through a
+An installation can run without source providers and receive files through a
 separate trusted process. When the `paperless` profile is active, initialization
 automatically installs the corresponding wiki rules and directories.
 
-Ingest tracking discovers adapters from directories below
-`/knowledge/sources`. A directory is handled only when the trusted OpenCode image
-contains a matching `/etc/opencode/ingest-adapters/<directory>/status.mjs`;
-otherwise it is reported as invalid. Adding another source type therefore
-requires only its source directory, status module, and source-specific ingest
-validation, not a change to `/ingest-new`, its skill, or the generic status tool.
+Ingest tracking discovers sources from directories below `/knowledge/sources`.
+A directory is compared against its provider manifest (`manifest.json`), which
+every ingest cycle writes into the sanitized source tree; directories without a
+valid, supported manifest are reported as invalid. Adding another source type
+therefore requires only its source directory, its manifest-producing ingest
+module, and source-specific ingest validation — not a change to `/ingest-new`,
+its skill, the generic status tool, or the OpenCode image.
 
-Each status module exports one asynchronous default function. It receives
-`sourceRoot` and `wikiSourceRoot` and returns the arrays `new`, `outdated`,
-`current`, `conflict`, `revoked`, `orphaned`, and `invalid`. Pending and current
-items share these required fields:
+The manifest lists each published source with these fields (see
+[`contracts/provider-manifest`](../contracts/provider-manifest/v1/contract.json)):
 
 | Field | Purpose |
 | --- | --- |
-| `source_key` | Stable identity and deterministic adapter-local order |
-| `source_path` | Absolute file path below the adapter's source directory |
+| `source_key` | Stable identity within the provider |
+| `source_path` | Sanitized source file, relative to the source directory |
 | `source_revision` | Lowercase SHA-256 revision |
-| `wiki_path` | Absolute target below the wiki source directory |
-| `frontmatter` | Trusted adapter metadata including the same `source_revision` |
+| `wiki_path` | Target page, relative to the wiki source directory |
+| `frontmatter` | Trusted metadata including the same `source_revision` |
+| `claim` | Frontmatter values identifying the source on its wiki page |
 
 The generic tool validates this contract and converts load, execution, and
 contract errors into `invalid` results. `frontmatter` must contain only
 JSON-compatible values, and `wiki_path` must be unique across every discovered
-adapter; collisions are reported as `conflict`. Adapter modules are loaded only
-from the read-only OpenCode image; code found in source directories is never
-executed.
+source; collisions are reported as `conflict`. Provider manifests are data:
+nothing in a source directory is ever executed.
 
 ## Secrets
 
@@ -83,7 +82,7 @@ docker run --rm rclone/rclone:latest obscure 'WEBDAV_PASSWORD'
 
 Set `WEBDAV_URL`, `WEBDAV_VENDOR`, `WEBDAV_USERNAME`,
 `WEBDAV_PASSWORD_OBSCURED`, `WEBDAV_PATH`, and `WEBDAV_SYNC_INTERVAL` for the
-source adapter. `WEBDAV_VENDOR` defaults to `nextcloud`; rclone also supports
+source provider. `WEBDAV_VENDOR` defaults to `nextcloud`; rclone also supports
 other WebDAV implementations.
 
 WebDAV files are synchronized into a private staging directory first. The
@@ -92,6 +91,8 @@ UTF-8 text files to `sources/webdav`; files that cannot be read as text are
 kept out of the source tree and written to `quarantine/webdav`. A failed
 upstream synchronization is retried on the next `WEBDAV_SYNC_INTERVAL` and
 surfaced through the Compose healthcheck instead of restarting the daemon.
+After every successful cycle the provider manifest `sources/webdav/manifest.json`
+is refreshed; the name is reserved there.
 
 Paperless credentials use files rather than environment values. Set an absolute
 path when possible:
@@ -100,7 +101,7 @@ path when possible:
 PAPERLESS_TOKEN_FILE=/private/personal-wiki/paperless-token
 ```
 
-`REDACTIONS_FILE` is shared by all ingestion adapters and should also use an
+`REDACTIONS_FILE` is shared by all ingestion providers and should also use an
 absolute path, for example `/private/personal-wiki/redactions.json`. Apply mode
 `0600` to both files. Never place real values below the repository's `secrets/`
 directory in a commit.

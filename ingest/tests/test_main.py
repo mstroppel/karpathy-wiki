@@ -1,6 +1,7 @@
 import dataclasses
 import http.server
 import json
+import re
 import tempfile
 import threading
 import unittest
@@ -254,6 +255,59 @@ class IngestTests(unittest.TestCase):
             ingestor.run_once()
             self.assertFalse(self.source_path(root).exists())
             self.assertIn("- 3246", (root / "sanitized" / "revoked.md").read_text())
+
+    def test_manifest_is_written_after_each_cycle(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            ingestor = Ingestor(self.settings(root), FakeAnonymizer())
+            ingestor.client = FakeClient({"id": 3246, "title": "Test", "content": "Inhalt"})
+            ingestor.run_once()
+            manifest = json.loads(
+                (root / "sanitized" / "manifest.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(manifest["contract"], "karpathy-wiki-provider-manifest")
+            self.assertEqual(manifest["version"], 1)
+            self.assertEqual(manifest["source"], "paperless")
+            self.assertEqual(len(manifest["items"]), 1)
+            item = manifest["items"][0]
+            self.assertEqual(item["source_key"], "3246")
+            self.assertEqual(item["source_path"], "3000-3999/document-3246.md")
+            self.assertEqual(item["wiki_path"], "3000-3999/paperless-3246.md")
+            self.assertEqual(item["claim"], {"paperless_id": "3246"})
+            self.assertEqual(item["frontmatter"]["source_revision"], item["source_revision"])
+            self.assertTrue(
+                re.fullmatch(r"[0-9a-f]{64}", item["source_revision"]), item["source_revision"]
+            )
+
+    def test_manifest_reports_revocations_and_errors(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            ingestor = Ingestor(self.settings(root), FakeAnonymizer())
+            document = {"id": 3246, "title": "Test", "content": "Inhalt"}
+            ingestor.client = FakeClient(document)
+            ingestor.run_once()
+            ingestor.client.selected = []
+            ingestor.run_once()
+            manifest = json.loads(
+                (root / "sanitized" / "manifest.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                manifest["revoked"],
+                [{"source_key": "3246", "claim": {"paperless_id": "3246"}}],
+            )
+            self.assertEqual(manifest["items"], [])
+
+            ingestor.client = FakeClient(
+                {"id": 3247, "title": "Test", "content": ""}, selected=[3247]
+            )
+            ingestor.run_once()
+            manifest = json.loads(
+                (root / "sanitized" / "manifest.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(len(manifest["errors"]), 1)
+            self.assertEqual(manifest["errors"][0]["source_key"], "3247")
+            self.assertIn("privacy-validation", manifest["errors"][0]["error"])
+            self.assertNotIn("Paperless document has no OCR text", manifest["errors"][0]["error"])
 
     def test_privacy_failure_revokes_previous_source(self):
         with tempfile.TemporaryDirectory() as directory:

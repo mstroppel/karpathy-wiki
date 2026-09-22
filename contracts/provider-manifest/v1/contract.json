@@ -1,0 +1,42 @@
+{
+  "contract": "karpathy-wiki-provider-manifest",
+  "version": 1,
+  "description": "Versioned provider manifest written by every ingest cycle into the sanitized source root as manifest.json. The generic JavaScript status scanner consumes only this manifest and the wiki pages; it contains no provider-specific code. Bump the version on any breaking change; conformance fixtures in the same directory keep the Python and JavaScript validators in agreement.",
+  "file": "manifest.json",
+  "fields": {
+    "contract": "the literal string karpathy-wiki-provider-manifest",
+    "version": "manifest contract version (integer); the scanner rejects versions it does not support",
+    "source": "provider key, matching the sanitized source directory name (lowercase letters, digits, underscore, hyphen)",
+    "generated_at": "Unix timestamp in whole seconds of the producing cycle",
+    "items": "one entry per published source; sources that failed validation are listed under errors instead",
+    "revoked": "one entry per revoked source_key; revoked sources have no item",
+    "errors": "content-free error reports for sources that could not be published"
+  },
+  "itemFields": {
+    "source_key": "stable identity of the source within the provider",
+    "source_path": "normalized relative POSIX path of the sanitized source file inside the source root",
+    "wiki_path": "normalized relative POSIX path of the wiki source page inside the wiki source root",
+    "source_revision": "matches the ingest status contract revision pattern (lowercase SHA-256 hex)",
+    "frontmatter": "object with the exact frontmatter the wiki page must carry; frontmatter.source_revision must equal source_revision",
+    "claim": "non-empty object mapping frontmatter field names to string values that identify this source on its wiki page"
+  },
+  "revokedFields": {
+    "source_key": "the revoked source key",
+    "claim": "the same identity the source's wiki page carries"
+  },
+  "errorFields": {
+    "source_key": "optional source key",
+    "path": "optional normalized relative path inside the source root",
+    "error": "required, content-free error description; never source content"
+  },
+  "reservedNames": {
+    "manifest.json": "reserved at the root of every source directory; source files with this name are quarantined and never published"
+  },
+  "wikiRoots": {
+    "description": "Each manifest declares wiki_root: the provider's wiki page subtree relative to the wiki source root ('.' for providers that own the whole tree). A page is attributed to the manifest with the longest matching wiki_root; wiki_roots must be unique across sources."
+  },
+  "compatibility": {
+    "scannerSupport": "The scanner supports manifest version 1 and reports every other version as an invalid source instead of guessing.",
+    "deprecation": "Breaking changes bump the version. A new version is only introduced together with scanner support, and the previous version stays readable for one release cycle before removal. Unknown contracts and versions are never silently ignored."
+  }
+}
