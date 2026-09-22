@@ -69,15 +69,16 @@ karpathy-wiki-silverbullet:3000  # WIKI_PUBLIC_URL
 karpathy-wiki-opencode:4096     # OPENCODE_PUBLIC_URL
 ```
 
-Sign in to `OPENCODE_PUBLIC_URL`, connect a model provider, and
-ask OpenCode to ingest a source. For a first test without an adapter:
-
-```bash
-cp /path/to/document.pdf ./data/sources/webdav/
-```
-
-Then ask OpenCode to import `/knowledge/sources/webdav/document.pdf`. Generated
-pages are written to `wiki/` and can be read at `WIKI_PUBLIC_URL`.
+ask OpenCode to ingest a source. For a first test with the `webdav`
+provider: enable the `webdav` profile (`COMPOSE_PROFILES=webdav` in `.env`,
+then `./karpathy-wiki.sh up -d`), configure WebDAV access and redactions (see
+[configuration](docs/configuration.md#secrets)), and create a `notes.txt` file
+(UTF-8 text) inside the WebDAV folder configured via `WEBDAV_PATH`.
+The `webdav-ingest` service stages the file through the provider flow; never
+place files directly into `data/sources/webdav/`, which only carries the
+provider's `manifest.json` and its published sanitized copies. Then ask
+OpenCode to import `/knowledge/sources/webdav`. Generated pages are written to
+`wiki/` and can be read at `WIKI_PUBLIC_URL`.
 
 ## Analyses
 

@@ -53,6 +53,15 @@
       }
     },
     {
+      "name": "field named like an object prototype member parses",
+      "valid": true,
+      "input": "---\nconstructor: \"test\"\nmin_size: 3\n---\n",
+      "expected": {
+        "constructor": "test",
+        "min_size": "3"
+      }
+    },
+    {
       "name": "missing opening delimiter is invalid",
       "valid": false,
       "input": "source_adapter: webdav\n---\n"

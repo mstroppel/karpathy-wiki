@@ -1,13 +1,21 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import logging
 import os
+import posixpath
 import signal
 import subprocess
 import threading
 from pathlib import Path
 
+from karpathy_wiki_ingest.manifest import (
+    MANIFEST_FILENAME,
+    ManifestItem,
+    build_manifest,
+    write_manifest,
+)
 from karpathy_wiki_ingest.shared import (
     TargetedAnonymizer,
     atomic_write,
@@ -17,6 +25,9 @@ from karpathy_wiki_ingest.shared import (
 )
 
 LOG = logging.getLogger("karpathy-wiki-webdav")
+
+SOURCE_NAME = "webdav"
+WIKI_ROOT = "webdav"
 
 
 def settings() -> tuple[Path, Path, Path, int, Path, Path]:
@@ -41,6 +52,19 @@ def sanitize_once(
     for relative in sorted(incoming_files):
         source = incoming / relative
         target = sanitized / relative
+        if relative == Path(MANIFEST_FILENAME):
+            # The manifest name is reserved at the source root; never publish
+            # upstream content under it.
+            failed += 1
+            target.unlink(missing_ok=True)
+            atomic_write(
+                quarantine / f"{MANIFEST_FILENAME}.error",
+                f"path={MANIFEST_FILENAME}\nerror_type=ReservedManifestName\n",
+            )
+            LOG.error(
+                "WebDAV file %s uses the reserved manifest name and was quarantined", relative
+            )
+            continue
         try:
             content = source.read_text(encoding="utf-8")
             output, _ = anonymizer.anonymize(content)
@@ -53,13 +77,75 @@ def sanitize_once(
             target.unlink(missing_ok=True)
             atomic_write(
                 quarantine / f"{relative}.error",
-                f"path={relative}\nerror_type={type(error).__name__}\n",
+                f"path={relative.as_posix()}\nerror_type={type(error).__name__}\n",
             )
             LOG.error("WebDAV file %s was quarantined", relative)
     for path in sorted((path for path in sanitized.rglob("*") if path.is_file()), reverse=True):
-        if path.relative_to(sanitized) not in incoming_files:
+        relative = path.relative_to(sanitized)
+        if relative == Path(MANIFEST_FILENAME):
+            continue
+        if relative not in incoming_files:
             path.unlink()
+            (quarantine / f"{relative}.error").unlink(missing_ok=True)
+    # Reports for sources that no longer exist upstream must not keep failing
+    # the manifest: drop reports whose relative source is not synchronized. A
+    # reserved-name report is recreated by the sanitize loop on each cycle
+    # while the upstream file is present.
+    for report in sorted(quarantine.rglob("*.error")):
+        source_relative = report.relative_to(quarantine)
+        if source_relative.with_suffix("") not in incoming_files:
+            report.unlink(missing_ok=True)
     return changed, failed
+
+
+def build_manifest_items(sanitized: Path) -> list[ManifestItem]:
+    items = []
+    for path in sorted(path for path in sanitized.rglob("*") if path.is_file()):
+        relative = path.relative_to(sanitized).as_posix()
+        if relative == MANIFEST_FILENAME:
+            continue
+        content = path.read_text(encoding="utf-8")
+        revision = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        items.append(
+            ManifestItem(
+                source_key=relative,
+                source_path=relative,
+                wiki_path=posixpath.join(WIKI_ROOT, relative, "index.md"),
+                source_revision=revision,
+                frontmatter={
+                    "source_adapter": SOURCE_NAME,
+                    "source_path": relative,
+                    "source_revision": revision,
+                },
+                claim={"source_path": relative},
+            )
+        )
+    return items
+
+
+def collect_quarantine_errors(quarantine: Path) -> list[dict[str, str]]:
+    errors = []
+    for report in sorted(path for path in quarantine.rglob("*.error") if path.is_file()):
+        fields = {}
+        for line in report.read_text(encoding="utf-8").splitlines():
+            key, separator, value = line.partition("=")
+            if separator:
+                fields[key] = value
+        error = {"error": fields.get("error_type", "Error")}
+        if fields.get("path"):
+            error["path"] = fields["path"]
+        errors.append(error)
+    return errors
+
+
+def write_source_manifest(sanitized: Path, quarantine: Path) -> None:
+    manifest = build_manifest(
+        SOURCE_NAME,
+        build_manifest_items(sanitized),
+        errors=collect_quarantine_errors(quarantine),
+        wiki_root=WIKI_ROOT,
+    )
+    write_manifest(sanitized / MANIFEST_FILENAME, manifest)
 
 
 def synchronize(incoming: Path, path: str) -> None:
@@ -102,6 +188,7 @@ def run(once: bool) -> None:
         try:
             synchronize(incoming, os.environ["WEBDAV_PATH"])
             changed, failed = sanitize_once(incoming, sanitized, quarantine, anonymizer)
+            write_source_manifest(sanitized, quarantine)
             LOG.info("WebDAV synchronization complete: %s changed, %s quarantined", changed, failed)
         except KeyError as error:
             failed = 1
