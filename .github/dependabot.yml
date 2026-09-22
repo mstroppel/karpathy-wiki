@@ -33,6 +33,20 @@ updates:
       ingest-image:
         update-types: [minor, patch]
 
+  # Setuptools is pinned in lockstep (ingest/build-requirements.txt plus the
+  # pyproject.toml files under ingest/) and validated by
+  # tests/test_dependencies.py, which derives the version from
+  # build-requirements.txt. This entry must cover every pin site so the
+  # wheels keep building against the pinned backend; without it Dependabot
+  # emits partial updates that fail the lockstep check.
+  - package-ecosystem: pip
+    directory: /ingest
+    schedule:
+      interval: weekly
+    groups:
+      ingest-build-tooling:
+        patterns: ["*"]
+
   - package-ecosystem: github-actions
     directory: /
     schedule:

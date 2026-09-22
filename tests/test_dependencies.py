@@ -20,6 +20,7 @@ ENV_EXAMPLE = ROOT / ".env.example"
 DEPENDABOT = ROOT / ".github" / "dependabot.yml"
 PACKAGE_JSON = ROOT / "package.json"
 PACKAGE_LOCK = ROOT / "package-lock.json"
+BUILD_REQUIREMENTS = ROOT / "ingest" / "build-requirements.txt"
 
 # Runtime base images must be pinned by digest; the rclone stage is a
 # build-time binary source pinned by tag and digest via the RCLONE_VERSION
@@ -29,9 +30,19 @@ DIGEST_RE = re.compile(r"^FROM \S+@sha256:[0-9a-f]{64}(?: AS \S+)?$")
 INTERNAL_STAGE_RE = re.compile(r"^FROM core(?: AS \S+)?$")
 
 
-# The PEP 517 build backend for the ingest distributions, pinned so image
-# builds do not resolve unpinned tooling from the package index.
-SETUPTOOLS_PIN = "setuptools==80.9.0"
+# The PEP 517 build backend for the ingest distributions. The version is
+# pinned in exactly one place: ingest/build-requirements.txt (hash-pinned so
+# image builds never resolve unpinned tooling from the package index). Every
+# pyproject.toml must agree with that pin (IngestPackageTests); the tests
+# derive the version from the file so a bump stays a single-manifest change.
+SETUPTOOLS_REQUIREMENT = r"(?m)^setuptools==(\d[\w.]*)\s*\\?$"
+
+
+def ingest_setuptools_version() -> str:
+    content = read(BUILD_REQUIREMENTS)
+    match = re.search(SETUPTOOLS_REQUIREMENT, content, re.MULTILINE)
+    assert match is not None, "no pinned setuptools in ingest/build-requirements.txt"
+    return match.group(1)
 
 
 def read(path: Path) -> str:
@@ -115,10 +126,11 @@ class IngestPackageTests(unittest.TestCase):
                 )
 
     def test_build_backends_are_pinned(self):
+        requires_pin = f"setuptools=={ingest_setuptools_version()}"
         for directory in ("core", "webdav", "paperless"):
             with self.subTest(package=directory):
                 data = tomllib.loads(read(ROOT / "ingest" / directory / "pyproject.toml"))
-                self.assertIn(SETUPTOOLS_PIN, data["build-system"]["requires"])
+                self.assertIn(requires_pin, data["build-system"]["requires"])
 
     def test_bake_and_compose_target_the_split_ingest_images(self):
         bake = read(BAKE_FILE)
@@ -136,8 +148,8 @@ class IngestBuildIsolationTests(unittest.TestCase):
         content = read(INGEST_DOCKERFILE)
         self.assertIn("--no-build-isolation", content)
         self.assertIn("--require-hashes", content)
-        requirements = read(ROOT / "ingest" / "build-requirements.txt")
-        self.assertIn(SETUPTOOLS_PIN, requirements)
+        requirements = read(BUILD_REQUIREMENTS)
+        self.assertRegex(requirements, SETUPTOOLS_REQUIREMENT)
         self.assertRegex(requirements, r"--hash=sha256:[0-9a-f]{64}")
 
     def test_wheel_builds_use_no_deps_against_repository_sources(self):
@@ -234,6 +246,7 @@ class DependabotCoverageTests(unittest.TestCase):
         config = read(DEPENDABOT)
         for ecosystem, directory in (
             ("npm", "directory: /"),
+            ("pip", "directory: /ingest"),
             ("docker", "directory: /opencode"),
             ("docker", "directory: /ingest"),
             ("docker-compose", "directory: /"),
