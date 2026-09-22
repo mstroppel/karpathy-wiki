@@ -51,6 +51,16 @@ nur von der alten Revision abhängige Aussagen. Brich ohne Änderungen ab, wenn
 das Dateiformat nicht zuverlässig gelesen werden kann. Erhalte anonymisierte
 Platzhalter und versuche nie, sie auf reale Identitäten zurückzuführen.
 
+## Herkunftsnachweis und Paperless-Links
+
+Der Herkunftsnachweis bleibt auf der Quellenseite sichtbar: nenne den exakten
+`source_path` und verlinke die Quelle im Fließtext. Enthält das gelieferte
+Frontmatter ein `paperless_url`-Feld, übernimm dieses Feld unverändert, prüfe,
+dass es ein HTTPS-Link ist, und rendere ihn als sichtbaren Link auf die
+Paperless-Quelle, zum Beispiel als `[Im Paperless-Original öffnen](paperless_url)`.
+Lösche oder verändere das Feld niemals; fehlt es auf einer bestehenden
+Paperless-Quellenseite, ergänze es bei der nächsten Aktualisierung.
+
 ## Stapelverarbeitung
 
 Für alle neuen oder geänderten Quellen rufe zuerst `wiki_ingest_status` auf.

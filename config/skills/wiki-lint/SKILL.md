@@ -11,7 +11,10 @@ sichere, belegtreue Korrekturen an. Arbeite und berichte auf Deutsch.
 Prüfe defekte Wikilinks, Indexabweichungen, verwaiste Seiten, Duplikate,
 ungültige Dateinamen, fehlende Herkunftsnachweise, unaufgelöste Widersprüche,
 veraltete Synthesen und Abweichungen zwischen Überblick, Themen- und
-Quellenseiten. Rufe `wiki_ingest_status` auf und prüfe alle entdeckten Adapter
+Quellenseiten. Prüfe außerdem Paperless-Quellenseiten: Seiten mit
+`paperless_id` im Frontmatter müssen ein HTTPS-`paperless_url`-Feld tragen und
+diesen Paperless-Link sichtbar im Seitentext nennen. Rufe
+`wiki_ingest_status` auf und prüfe alle entdeckten Adapter
 auf ungültige, widersprüchliche, veraltete, verwaiste oder widerrufene
 Revisionen; bereinige Widerrufe nie ohne ausdrücklichen Auftrag.
 
