@@ -323,6 +323,18 @@
         "items": [],
         "errors": [{ "source_key": "a.md" }]
       }
+    },
+    {
+      "name": "error entry with a non-string source_key is invalid",
+      "valid": false,
+      "manifest": {
+        "contract": "karpathy-wiki-provider-manifest",
+        "version": 1,
+        "source": "notes",
+        "generated_at": 1760000000,
+        "items": [],
+        "errors": [{ "source_key": 1, "error": "boom" }]
+      }
     }
   ]
 }

@@ -45,6 +45,12 @@ the JavaScript scanner tests execute. Sources without a readable, valid
 manifest of a supported version are reported as `invalid`; unknown versions
 are never silently ignored.
 
+A manifest declares its `wiki_root`: the wiki subtree the provider owns
+relative to the wiki source root (`.` for providers that own the whole tree).
+Pages are attributed to the manifest with the longest matching `wiki_root`,
+so every provider declares its own subtree and `wiki_root` values must be
+unique across sources; colliding manifests are reported as `invalid`.
+
 ## Adding a module without touching this repository
 
 A module is any Python package that exposes a callable `main()`. It can live
@@ -125,7 +131,7 @@ def main() -> None:
                 claim={"source_path": relative},
             )
         )
-    write_manifest(sanitized / "manifest.json", build_manifest("notes", items))
+    write_manifest(sanitized / "manifest.json", build_manifest("notes", items, wiki_root="notes"))
 ```
 
 ## Contract versions and deprecation

@@ -148,6 +148,10 @@ def validate_manifest(value: Any, expected_source: str | None = None) -> dict[st
             raise ManifestError("error entry must be an object")
         if not isinstance(error.get("error"), str) or not error["error"]:
             raise ManifestError("error entry must carry an error string")
+        if "source_key" in error:
+            error_source_key = error["source_key"]
+            if not isinstance(error_source_key, str) or not error_source_key:
+                raise ManifestError("error source_key must be a non-empty string")
         if "path" in error:
             check_relative_path(error["path"], "error path")
 

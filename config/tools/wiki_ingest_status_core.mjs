@@ -301,11 +301,33 @@ export async function scanIngestStatus({ sourceRoot, wikiSourceRoot, includeCurr
   }
 
   const owned = Object.entries(adapters).filter(([, adapter]) => adapter.manifest)
+  // The contract requires wiki_roots to be unique across sources; duplicate
+  // roots would make page attribution depend on directory iteration order, so
+  // colliding manifests are reported invalid.
+  const ownerByRoot = new Map()
+  for (const [sourceName, adapter] of owned) {
+    const root = adapter.manifest.wiki_root
+    const previous = ownerByRoot.get(root)
+    if (previous === undefined) {
+      ownerByRoot.set(root, sourceName)
+      continue
+    }
+    const message = `wiki_root wird von mehreren Quellen genutzt: ${root}`
+    for (const name of [previous, sourceName]) {
+      const colliding = adapters[name]
+      if (colliding?.manifest) {
+        colliding.failure = colliding.failure ?? message
+        delete colliding.manifest
+      }
+    }
+  }
+
+  const owners = Object.entries(adapters).filter(([, adapter]) => adapter.manifest)
   for (const pagePath of await collectPages(wikiSourceRoot)) {
     const relative = path.relative(wikiSourceRoot, pagePath)
     let owner = null
     let bestLength = -1
-    for (const [, adapter] of owned) {
+    for (const [, adapter] of owners) {
       const root = adapter.manifest.wiki_root
       const matched = root === '.' || relative === root || relative.startsWith(`${root}/`)
       const length = root === '.' ? 0 : root.length
@@ -350,8 +372,22 @@ export async function scanIngestStatus({ sourceRoot, wikiSourceRoot, includeCurr
       continue
     }
     const item = match.item
+    // The manifest declares the exact frontmatter the page must carry; only
+    // source_revision is allowed to drift (that is what makes a page
+    // outdated). A page that drops another declared field, or changed its
+    // value, is invalid instead of current.
     if (typeof fields.source_revision !== 'string' || !REVISION_RE.test(fields.source_revision)) {
       owner.state.invalid.push({ path: pagePath, error: 'source_revision ist ungültig' })
+      continue
+    }
+    const mismatch = Object.entries(item.frontmatter).find(
+      ([name, value]) => name !== 'source_revision' && String(fields[name]) !== String(value),
+    )
+    if (mismatch) {
+      owner.state.invalid.push({
+        path: pagePath,
+        error: `Frontmatter-Feld ${mismatch[0]} weicht ab`,
+      })
       continue
     }
     const pending = owner.state.pending.get(item.source_key) ?? []

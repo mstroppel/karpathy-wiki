@@ -49,7 +49,6 @@ function paperlessItem(id, sourceRevision = REVISION) {
     source_revision: sourceRevision,
     frontmatter: {
       paperless_id: id,
-      paperless_url: `https://paperless.example/documents/${id}`,
       source_revision: sourceRevision,
     },
     claim: { paperless_id: String(id) },
@@ -315,6 +314,51 @@ test('reports wiki path collisions across sources', async () => {
     assert.equal(status.adapters.alpha.summary.conflict, 1)
     assert.equal(status.adapters.beta.summary.conflict, 1)
     assert.equal(status.summary.conflict, 2)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('rejects duplicate wiki_root values across sources', async () => {
+  const { root, sourceRoot, wikiSourceRoot } = await fixture()
+  try {
+    await writeManifest(sourceRoot, 'alpha', {
+      items: [item('one', 'one.txt', 'notes/one.md')],
+    })
+    await writeManifest(sourceRoot, 'beta', {
+      items: [item('two', 'two.txt', 'notes/two.md')],
+    })
+
+    const status = await scanIngestStatus({ sourceRoot, wikiSourceRoot })
+
+    assert.match(status.adapters.alpha.invalid[0].error, /wiki_root wird von mehreren/)
+    assert.match(status.adapters.beta.invalid[0].error, /wiki_root wird von mehreren/)
+    assert.equal(status.summary.new, 0)
+    assert.equal(status.summary.invalid, 2)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('rejects pages that do not carry the declared frontmatter', async () => {
+  const { root, sourceRoot, wikiSourceRoot } = await fixture()
+  try {
+    await writeManifest(sourceRoot, 'webdav', {
+      wiki_root: 'webdav',
+      items: [webdavItem('doc.txt')],
+    })
+    // the claim matches, but the page drops the declared `source_adapter`
+    await writePage(wikiSourceRoot, 'webdav/doc.txt/index.md', [
+      'source_path: "doc.txt"',
+      `source_revision: ${REVISION}`,
+    ])
+
+    const status = await scanIngestStatus({ sourceRoot, wikiSourceRoot, includeCurrent: true })
+
+    assert.equal(status.adapters.webdav.summary.current, 0)
+    assert.equal(status.adapters.webdav.summary.new, 1)
+    assert.equal(status.adapters.webdav.summary.invalid, 1)
+    assert.match(status.adapters.webdav.invalid[0].error, /source_adapter weicht ab/)
   } finally {
     await rm(root, { recursive: true, force: true })
   }
