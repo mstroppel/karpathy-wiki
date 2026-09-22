@@ -59,6 +59,31 @@
       }
     },
     {
+      "name": "manifest with wiki_root is valid",
+      "valid": true,
+      "manifest": {
+        "contract": "karpathy-wiki-provider-manifest",
+        "version": 1,
+        "source": "webdav",
+        "generated_at": 1760000000,
+        "wiki_root": "webdav",
+        "items": [
+          {
+            "source_key": "meeting.md",
+            "source_path": "meeting.md",
+            "wiki_path": "webdav/meeting/index.md",
+            "source_revision": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "frontmatter": {
+              "source_revision": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+            },
+            "claim": { "source_path": "meeting.md" }
+          }
+        ],
+        "revoked": [],
+        "errors": []
+      }
+    },
+    {
       "name": "wrong contract is invalid",
       "valid": false,
       "manifest": {
@@ -273,6 +298,18 @@
           }
         ],
         "revoked": [{ "source_key": "a.md", "claim": { "source_path": "a.md" } }]
+      }
+    },
+    {
+      "name": "escaping wiki_root is invalid",
+      "valid": false,
+      "manifest": {
+        "contract": "karpathy-wiki-provider-manifest",
+        "version": 1,
+        "source": "notes",
+        "generated_at": 1760000000,
+        "wiki_root": "../outside",
+        "items": []
       }
     },
     {

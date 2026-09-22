@@ -70,13 +70,15 @@ function frontmatterLines(text) {
 // Contract: contracts/ingest-status/v1/contract.json (frontmatterFields).
 // Mirrors karpathy_wiki_ingest.contract.parse_frontmatter_fields.
 export function parseFrontmatterFields(text) {
-  const fields = {}
+  // A null prototype keeps frontmatter field names like `constructor` or
+  // `toString` from colliding with inherited Object members.
+  const fields = Object.create(null)
   const pattern = /^([A-Za-z_][A-Za-z0-9_]*):\s*(.*?)\s*$/
   for (const line of frontmatterLines(text)) {
     const match = line.match(pattern)
     if (!match) throw new Error('ungültige Frontmatter-Zeile')
     const name = match[1]
-    if (name in fields) throw new Error(`${name} ist mehrfach vorhanden`)
+    if (Object.hasOwn(fields, name)) throw new Error(`${name} ist mehrfach vorhanden`)
     const value = match[2]
     if (value.startsWith('"')) {
       try {

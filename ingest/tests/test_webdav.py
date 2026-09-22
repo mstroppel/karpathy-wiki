@@ -63,6 +63,25 @@ class WebdavTests(unittest.TestCase):
             # The stale quarantine report disappears with its source file.
             self.assertFalse((quarantine / "gone.txt.error").exists())
 
+    def test_reports_of_never_published_sources_expire_with_their_upstream_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            incoming = root / "incoming"
+            sanitized = root / "sanitized"
+            quarantine = root / "quarantine"
+            sanitized.mkdir()
+            quarantine.mkdir()
+            # A binary file failed before it was ever published; the upstream
+            # file is now deleted and the report must not outlive it.
+            report = quarantine / "gone.pdf.error"
+            report.write_text("path=gone.pdf\nerror_type=UnicodeDecodeError\n")
+            anonymizer = TargetedAnonymizer.from_config(
+                {"people": [{"replacement": "[ICH]", "values": ["Max Mustermann"]}]}
+            )
+
+            self.assertEqual(sanitize_once(incoming, sanitized, quarantine, anonymizer), (0, 0))
+            self.assertFalse(report.exists())
+
     def test_reserved_manifest_name_is_quarantined(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -101,6 +120,7 @@ class WebdavTests(unittest.TestCase):
             self.assertEqual(manifest["contract"], "karpathy-wiki-provider-manifest")
             self.assertEqual(manifest["version"], 1)
             self.assertEqual(manifest["source"], "webdav")
+            self.assertEqual(manifest["wiki_root"], "webdav")
             self.assertEqual(len(manifest["items"]), 1)
             item = manifest["items"][0]
             self.assertEqual(item["source_key"], "nested/source.txt")

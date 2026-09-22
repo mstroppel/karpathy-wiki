@@ -89,6 +89,9 @@ def validate_manifest(value: Any, expected_source: str | None = None) -> dict[st
     generated_at = value.get("generated_at")
     if not isinstance(generated_at, int) or isinstance(generated_at, bool) or generated_at <= 0:
         raise ManifestError("manifest generated_at is invalid")
+    wiki_root = value.get("wiki_root", ".")
+    if wiki_root != ".":
+        check_relative_path(wiki_root, "manifest wiki_root")
 
     items = value.get("items")
     if not isinstance(items, list):
@@ -157,12 +160,14 @@ def build_manifest(
     revoked: list[dict[str, Any]] | None = None,
     errors: list[dict[str, Any]] | None = None,
     generated_at: int | None = None,
+    wiki_root: str = ".",
 ) -> dict[str, Any]:
     manifest = {
         "contract": MANIFEST_CONTRACT,
         "version": MANIFEST_VERSION,
         "source": source,
         "generated_at": int(time.time() if generated_at is None else generated_at),
+        "wiki_root": wiki_root,
         "items": [item.to_dict() for item in items],
         "revoked": list(revoked or []),
         "errors": list(errors or []),

@@ -8,6 +8,7 @@
     "version": "manifest contract version (integer); the scanner rejects versions it does not support",
     "source": "provider key, matching the sanitized source directory name (lowercase letters, digits, underscore, hyphen)",
     "generated_at": "Unix timestamp in whole seconds of the producing cycle",
+    "wiki_root": "optional; Wiki subtree of this provider relative to the wiki source root, either '.' or a normalized relative POSIX path; pages are attributed to the manifest with the longest matching wiki_root",
     "items": "one entry per published source; sources that failed validation are listed under errors instead",
     "revoked": "one entry per revoked source_key; revoked sources have no item",
     "errors": "content-free error reports for sources that could not be published"

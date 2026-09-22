@@ -87,6 +87,14 @@ def sanitize_once(
         if relative not in incoming_files:
             path.unlink()
             (quarantine / f"{relative}.error").unlink(missing_ok=True)
+    # Reports for sources that no longer exist upstream must not keep failing
+    # the manifest: drop reports whose relative source is not synchronized. A
+    # reserved-name report is recreated by the sanitize loop on each cycle
+    # while the upstream file is present.
+    for report in sorted(quarantine.rglob("*.error")):
+        source_relative = report.relative_to(quarantine)
+        if source_relative.with_suffix("") not in incoming_files:
+            report.unlink(missing_ok=True)
     return changed, failed
 
 
@@ -135,6 +143,7 @@ def write_source_manifest(sanitized: Path, quarantine: Path) -> None:
         SOURCE_NAME,
         build_manifest_items(sanitized),
         errors=collect_quarantine_errors(quarantine),
+        wiki_root=WIKI_ROOT,
     )
     write_manifest(sanitized / MANIFEST_FILENAME, manifest)
 
