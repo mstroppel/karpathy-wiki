@@ -50,8 +50,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The `/analyse-save` command and `wiki-analysis-save` skill store a finished
   analysis as a wiki page under `analyses/` with a print-optimized HTML view
   under `assets/analyses/` that the browser can print or save as a PDF.
+- The WebDAV ingest publishes each synchronization as a coherent sanitized
+  generation: every cycle builds the complete tree in a private staging
+  directory, validates every file with a freshly loaded redaction
+  configuration, and only then switches the `current` symlink atomically and
+  rewrites the provider manifest. A failed rclone, decoding, redaction,
+  validation, or publication step keeps the last successful generation active,
+  removed upstream files disappear only with the published replacement
+  generation, and each generation records its upstream inventory hashes and
+  redaction fingerprint in `.generation.json`. Retention keeps only the
+  active generation; abandoned staging directories are discarded at the start
+  of the next cycle, and recovery is documented.
 
 ### Changed
+
+- The Paperless ingest plugin is split along responsibility boundaries into
+  `config`, `client`, `documents`, `storage`, `ingestor`, and `cli` modules
+  with the same public API, CLI behavior, and environment semantics; tests
+  cover the extracted modules directly.
+- The `wiki-ingest` skill preserves the validated HTTPS `paperless_url`
+  frontmatter and renders it as a visible Paperless link on every Paperless
+  source page; `wiki-lint` reports Paperless pages that lose it.
 
 - `python -m karpathy_wiki_ingest` without a plugin name now runs the sole
   installed plugin instead of defaulting to Paperless; with zero or multiple
