@@ -77,8 +77,10 @@ docker network create "$network_name" >/dev/null || fail "cannot create test net
 # ------------------------------------------------------------------ build
 docker build -q -t kw-opencode:integration -f opencode/Dockerfile . \
   || fail "cannot build the opencode image"
-docker build -q -t kw-ingest:integration ingest/ \
-  || fail "cannot build the ingest image"
+docker build -q -t kw-ingest-webdav:integration --target webdav ingest/ \
+  || fail "cannot build the webdav ingest image"
+docker build -q -t kw-ingest-paperless:integration --target paperless ingest/ \
+  || fail "cannot build the paperless ingest image"
 
 # ---------------------------------------------------------------- startup
 printf 'compose-integration: starting the stack\n'

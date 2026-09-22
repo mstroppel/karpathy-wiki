@@ -1,0 +1,3 @@
+# Keep the build context to the package sources; tests run in CI from the
+# checkout, not inside the images.
+tests

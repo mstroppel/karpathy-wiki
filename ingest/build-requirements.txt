@@ -1,0 +1,7 @@
+# PEP 517 build backend for the ingest wheel builds. The version must match
+# the ``build-system.requires`` pin in every pyproject.toml (validated by
+# tests/test_dependencies.py). The wheel is hash-pinned and preinstalled so
+# the wheel build itself can run with --no-build-isolation and never executes
+# index-resolved tooling; this file is the only place the index is consulted.
+setuptools==80.9.0 \
+    --hash=sha256:062d34222ad13e0cc312a4c02d73f059e86a4acbfbdea8f8f76b28c99f306922

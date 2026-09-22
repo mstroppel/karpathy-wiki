@@ -138,10 +138,11 @@ Run the same checks CI runs:
 
 ```bash
 python3 -m pip install -r requirements-dev.txt
+python3 -m pip install -e ingest/core -e ingest/webdav -e ingest/paperless
 npm ci
 scripts/lint.sh
 python3 -m unittest discover -s tests -v
-node --test tests/test_wiki_ingest_status.mjs
+node --test tests/test_wiki_ingest_status.mjs tests/test_contract_fixtures.mjs
 (cd ingest && python3 -m unittest discover -s tests -v)
 tests/integration/run.sh  # requires Docker; disposable Compose stack test
 ```

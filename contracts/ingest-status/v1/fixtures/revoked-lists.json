@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "topic": "revoked-lists",
+  "description": "Parsing and writing of the Paperless revocation list. Consumed by the Python Paperless package and the JavaScript Paperless adapter.",
+  "cases": [
+    {
+      "name": "valid list with ids",
+      "valid": true,
+      "input": "# Widerrufene Paperless-Dokumente\n\n- 7\n- 42\n",
+      "ids": [7, 42]
+    },
+    {
+      "name": "valid list without ids",
+      "valid": true,
+      "input": "# Widerrufene Paperless-Dokumente\n\n",
+      "ids": []
+    },
+    {
+      "name": "duplicates collapse to a set",
+      "valid": true,
+      "input": "# Widerrufene Paperless-Dokumente\n\n- 42\n- 42\n- 7\n",
+      "ids": [7, 42]
+    },
+    {
+      "name": "CRLF line endings are tolerated",
+      "valid": true,
+      "input": "# Widerrufene Paperless-Dokumente\r\n\r\n- 42\r\n",
+      "ids": [42]
+    },
+    {
+      "name": "wrong title is invalid",
+      "valid": false,
+      "input": "# Widerrufene Dokumente\n- 42\n"
+    },
+    {
+      "name": "missing title is invalid",
+      "valid": false,
+      "input": "- 42\n"
+    },
+    {
+      "name": "empty file is invalid",
+      "valid": false,
+      "input": ""
+    },
+    {
+      "name": "entry without dash prefix is invalid",
+      "valid": false,
+      "input": "# Widerrufene Paperless-Dokumente\n\n42\n"
+    },
+    {
+      "name": "non numeric entry is invalid",
+      "valid": false,
+      "input": "# Widerrufene Paperless-Dokumente\n\n- abc\n"
+    },
+    {
+      "name": "entry with trailing text is invalid",
+      "valid": false,
+      "input": "# Widerrufene Paperless-Dokumente\n\n- 42 (customer)\n"
+    },
+    {
+      "name": "decimal entry is invalid",
+      "valid": false,
+      "input": "# Widerrufene Paperless-Dokumente\n\n- 4.2\n"
+    }
+  ]
+}

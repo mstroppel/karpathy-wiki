@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "topic": "id-ranges",
+  "description": "Paperless document IDs map to zero-padded inclusive range directories of idsPerDirectory entries. Consumed by the Python Paperless package and the JavaScript Paperless adapter.",
+  "cases": [
+    { "name": "id 0 starts the first range", "id": 0, "directory": "0000-0999" },
+    { "name": "id 1 stays in the first range", "id": 1, "directory": "0000-0999" },
+    { "name": "last id of the first range", "id": 999, "directory": "0000-0999" },
+    { "name": "first id of the second range", "id": 1000, "directory": "1000-1999" },
+    { "name": "last id of the second range", "id": 1999, "directory": "1000-1999" },
+    { "name": "mid range", "id": 12345, "directory": "12000-12999" },
+    { "name": "seven digit ids are not truncated", "id": 1000000, "directory": "1000000-1000999" }
+  ]
+}

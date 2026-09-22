@@ -9,7 +9,7 @@
     "lint": "eslint .",
     "format:check": "oxfmt --check .",
     "format": "oxfmt .",
-    "test": "node --test tests/test_wiki_ingest_status.mjs"
+    "test": "node --test tests/test_wiki_ingest_status.mjs tests/test_contract_fixtures.mjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

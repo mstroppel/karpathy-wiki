@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "topic": "intervals",
+  "description": "Duration strings parsed to whole seconds. Only the Python ingest packages parse intervals; the JavaScript scanner has no interval logic.",
+  "cases": [
+    { "name": "bare number is seconds", "input": "90", "valid": true, "seconds": 90 },
+    { "name": "seconds suffix", "input": "90s", "valid": true, "seconds": 90 },
+    { "name": "minutes suffix", "input": "15m", "valid": true, "seconds": 900 },
+    { "name": "hours suffix", "input": "1h", "valid": true, "seconds": 3600 },
+    { "name": "combined large value", "input": "24h", "valid": true, "seconds": 86400 },
+    { "name": "zero is rejected", "input": "0", "valid": false },
+    { "name": "negative is rejected", "input": "-5", "valid": false },
+    { "name": "fractional seconds are rejected", "input": "0.5s", "valid": false },
+    { "name": "fractional bare number is rejected", "input": "1.5", "valid": false },
+    { "name": "unknown suffix is rejected", "input": "90x", "valid": false },
+    { "name": "empty string is rejected", "input": "", "valid": false },
+    { "name": "plain text is rejected", "input": "quarter", "valid": false }
+  ]
+}

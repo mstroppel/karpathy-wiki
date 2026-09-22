@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools==80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "karpathy-wiki-ingest-paperless"
+version = "0.1.0"
+description = "Paperless-ngx ingest plugin for Karpathy Wiki: tagged document ingestion and anonymization"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+dependencies = ["karpathy-wiki-ingest==0.1.0"]
+classifiers = ["Programming Language :: Python :: 3", "Typing :: Typed"]
+
+[project.urls]
+Source = "https://github.com/mstroppel/karpathy-wiki"
+
+[project.entry-points."karpathy_wiki_ingest.plugins"]
+paperless = "karpathy_wiki_ingest_paperless:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"*" = ["py.typed"]

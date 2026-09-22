@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "topic": "revisions",
+  "description": "Revision strings that are valid or invalid per the contract revision pattern. Consumed by the Python ingest packages and the JavaScript status scanner.",
+  "cases": [
+    {
+      "name": "all zeros is valid",
+      "input": "0000000000000000000000000000000000000000000000000000000000000000",
+      "valid": true
+    },
+    {
+      "name": "64 lowercase hex characters",
+      "input": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "valid": true
+    },
+    {
+      "name": "63 characters are too short",
+      "input": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde",
+      "valid": false
+    },
+    {
+      "name": "65 characters are too long",
+      "input": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0",
+      "valid": false
+    },
+    {
+      "name": "uppercase hex is rejected",
+      "input": "0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF",
+      "valid": false
+    },
+    {
+      "name": "non-hex characters are rejected",
+      "input": "0123456789ghijkl0123456789ghijkl0123456789ghijkl0123456789ghijkl",
+      "valid": false
+    },
+    { "name": "empty string is rejected", "input": "", "valid": false },
+    {
+      "name": "surrounding whitespace is rejected",
+      "input": " 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde ",
+      "valid": false
+    }
+  ]
+}

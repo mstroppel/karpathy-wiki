@@ -1,7 +1,15 @@
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 
-import { emptyResult, field, files, frontmatter, revisionField } from '../shared.mjs'
+import {
+  emptyResult,
+  field,
+  files,
+  frontmatter,
+  parseRevokedList,
+  rangeFor,
+  revisionField,
+} from '../shared.mjs'
 
 const RANGE_RE = /^\d+-\d+$/
 
@@ -21,11 +29,6 @@ function metadata(text, source) {
   return { id: Number(idText), revision, paperlessUrl }
 }
 
-function rangeFor(id) {
-  const start = Math.floor(id / 1000) * 1000
-  return `${String(start).padStart(4, '0')}-${String(start + 999).padStart(4, '0')}`
-}
-
 async function revokedIds(sourceRoot) {
   const revokedPath = path.join(sourceRoot, 'revoked.md')
   let text
@@ -35,18 +38,11 @@ async function revokedIds(sourceRoot) {
     if (error?.code === 'ENOENT') return new Set()
     throw error
   }
-  const lines = text.replaceAll('\r\n', '\n').split('\n')
-  if (lines[0] !== '# Widerrufene Paperless-Dokumente') {
-    throw new Error(`Ungültige Widerrufsliste: ${revokedPath}`)
+  try {
+    return new Set(parseRevokedList(text))
+  } catch (error) {
+    throw new Error(`Ungültige Widerrufsliste: ${revokedPath}`, { cause: error })
   }
-  const ids = new Set()
-  for (const line of lines.slice(1)) {
-    if (!line) continue
-    const match = line.match(/^- (\d+)$/)
-    if (!match) throw new Error(`Ungültige Widerrufsliste: ${revokedPath}`)
-    ids.add(Number(match[1]))
-  }
-  return ids
 }
 
 export default async function scanPaperless({ sourceRoot, wikiSourceRoot }) {

@@ -1,0 +1,58 @@
+{
+  "contract": "karpathy-wiki-ingest-status",
+  "version": 1,
+  "description": "Versioned ingest status contract shared by the Python ingest packages and the JavaScript status scanner. Bump the version on any breaking change; conformance fixtures in the same directory keep both runtimes in agreement.",
+  "revisions": {
+    "description": "A source revision identifies the exact sanitized content of a source. It is a lowercase SHA-256 hex digest of 64 characters.",
+    "pattern": "^[0-9a-f]{64}$"
+  },
+  "statusValues": ["new", "outdated", "current", "conflict", "revoked", "orphaned", "invalid"],
+  "intervals": {
+    "description": "Synchronization intervals are whole seconds greater than zero. Duration strings may carry one of the listed unit suffixes; a bare number is seconds. Fractional values are rejected so an interval can never truncate to zero.",
+    "unitSuffixes": {
+      "s": 1,
+      "m": 60,
+      "h": 3600
+    },
+    "minimum": 1,
+    "wholeNumberOnly": true
+  },
+  "paperless": {
+    "sourceFormatVersion": 2,
+    "sourceFilenameTemplate": "document-{id}.md",
+    "wikiFilenameTemplate": "paperless-{id}.md",
+    "idsPerDirectory": 1000,
+    "directoryPattern": "^[0-9]{4,}-[0-9]{4,}$",
+    "directoryDescription": "Documents are grouped into inclusive ID ranges of idsPerDirectory entries: [start, start + idsPerDirectory - 1], with start a multiple of idsPerDirectory and both bounds zero-padded to at least four digits (padding is a minimum width, so IDs beyond four digits produce wider, equal-width bounds).",
+    "revoked": {
+      "filename": "revoked.md",
+      "title": "# Widerrufene Paperless-Dokumente",
+      "entryPattern": "^- ([0-9]+)$",
+      "description": "The revocation list starts with the title line, followed by one list entry per revoked document ID; blank lines are ignored and IDs are stored as a sorted set."
+    },
+    "sourceFrontmatter": {
+      "required": ["paperless_id", "paperless_url", "source_revision", "anonymized"],
+      "fieldRules": {
+        "paperless_id": "positive integer",
+        "paperless_url": "HTTPS URL of the Paperless document",
+        "source_revision": "matches revisions.pattern",
+        "anonymized": "the literal string true"
+      }
+    },
+    "wikiFrontmatter": {
+      "required": ["paperless_id", "source_revision"],
+      "fieldRules": {
+        "paperless_id": "positive integer matching the source page",
+        "source_revision": "matches revisions.pattern"
+      }
+    }
+  },
+  "frontmatterFields": {
+    "description": "Frontmatter is a --- delimited YAML-like block of name: value lines. A field name may appear at most once. Values are plain text, single-quoted text, or a JSON-encoded value (the value begins with a double quote and is parsed as JSON).",
+    "valueKinds": ["plain", "single-quoted", "json"]
+  },
+  "statusResult": {
+    "description": "An adapter's scan result is an object with exactly the statusValues keys, each holding an array; unknown keys are rejected and missing keys are an error. Pending entries (new, outdated, current) carry source_key, source_path, source_revision, wiki_path, and frontmatter; frontmatter.source_revision must equal source_revision, source_path must lie inside the adapter source root, and wiki_path must lie inside the wiki source root. wiki_path may be claimed by at most one pending entry across all adapters. The wiki_ingest_status tool returns { summary, adapters }, where each adapters entry carries the status keys plus a summary object holding one entry count per status.",
+    "pendingFields": ["source_key", "source_path", "source_revision", "wiki_path", "frontmatter"]
+  }
+}

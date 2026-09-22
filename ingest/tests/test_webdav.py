@@ -8,7 +8,8 @@ from pathlib import Path
 from unittest import mock
 
 from karpathy_wiki_ingest import health as healthcheck
-from karpathy_wiki_ingest.plugins.webdav import (
+from karpathy_wiki_ingest.shared import TargetedAnonymizer
+from karpathy_wiki_ingest_webdav import (
     install_stop_handler,
     interval_seconds,
     run,
@@ -16,7 +17,6 @@ from karpathy_wiki_ingest.plugins.webdav import (
     settings,
     synchronize,
 )
-from karpathy_wiki_ingest.shared import TargetedAnonymizer
 
 
 class WebdavTests(unittest.TestCase):
@@ -113,7 +113,7 @@ class SettingsTests(unittest.TestCase):
 
 class SynchronizeTests(unittest.TestCase):
     def test_rclone_command_contains_retries(self):
-        with mock.patch("karpathy_wiki_ingest.plugins.webdav.subprocess.run") as run_mock:
+        with mock.patch("karpathy_wiki_ingest_webdav.subprocess.run") as run_mock:
             synchronize(Path("/incoming"), "Wiki Sources")
         command = run_mock.call_args.args[0]
         self.assertEqual(command[0], "rclone")
@@ -125,7 +125,7 @@ class SynchronizeTests(unittest.TestCase):
 
     def test_rclone_failure_raises(self):
         with mock.patch(
-            "karpathy_wiki_ingest.plugins.webdav.subprocess.run",
+            "karpathy_wiki_ingest_webdav.subprocess.run",
             side_effect=subprocess.CalledProcessError(5, "rclone"),
         ):
             with self.assertRaises(subprocess.CalledProcessError):
@@ -157,7 +157,7 @@ class RunLoopTests(unittest.TestCase):
             self.anonymizer_configuration(root)
             with (
                 mock.patch.dict(os.environ, self.settings(root), clear=True),
-                mock.patch("karpathy_wiki_ingest.plugins.webdav.synchronize"),
+                mock.patch("karpathy_wiki_ingest_webdav.synchronize"),
             ):
                 run(once=True)
             health = json.loads((root / "health.json").read_text())
@@ -171,7 +171,7 @@ class RunLoopTests(unittest.TestCase):
             with (
                 mock.patch.dict(os.environ, self.settings(root), clear=True),
                 mock.patch(
-                    "karpathy_wiki_ingest.plugins.webdav.synchronize",
+                    "karpathy_wiki_ingest_webdav.synchronize",
                     side_effect=error,
                 ),
             ):
@@ -200,15 +200,15 @@ class RunLoopTests(unittest.TestCase):
             with (
                 mock.patch.dict(os.environ, self.settings(root), clear=True),
                 mock.patch(
-                    "karpathy_wiki_ingest.plugins.webdav.install_stop_handler",
+                    "karpathy_wiki_ingest_webdav.install_stop_handler",
                     return_value=stop_event,
                 ),
                 mock.patch(
-                    "karpathy_wiki_ingest.plugins.webdav.synchronize",
+                    "karpathy_wiki_ingest_webdav.synchronize",
                     side_effect=first_failure_then_success,
                 ),
                 mock.patch(
-                    "karpathy_wiki_ingest.plugins.webdav.sanitize_once",
+                    "karpathy_wiki_ingest_webdav.sanitize_once",
                     return_value=(0, 0),
                 ) as sanitize,
             ):
@@ -230,11 +230,11 @@ class RunLoopTests(unittest.TestCase):
             with (
                 mock.patch.dict(os.environ, self.settings(root), clear=True),
                 mock.patch(
-                    "karpathy_wiki_ingest.plugins.webdav.install_stop_handler",
+                    "karpathy_wiki_ingest_webdav.install_stop_handler",
                     return_value=stop_event,
                 ),
                 mock.patch(
-                    "karpathy_wiki_ingest.plugins.webdav.synchronize",
+                    "karpathy_wiki_ingest_webdav.synchronize",
                     side_effect=one_successful_cycle,
                 ) as synchronize_mock,
             ):

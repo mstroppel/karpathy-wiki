@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
-from ..shared import (
+from karpathy_wiki_ingest.shared import (
     PrivacyValidationError,
     TargetedAnonymizer,
     atomic_write,
@@ -418,16 +418,24 @@ def read_revoked_ids(path: Path) -> set[int]:
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError:
         return set()
+    try:
+        return parse_revoked_ids(text)
+    except ValueError as error:
+        raise ValueError(f"Invalid revoked document list: {path}") from error
+
+
+def parse_revoked_ids(text: str) -> set[int]:
+    """Parse revocation list content per the shared ingest status contract."""
     lines = text.splitlines()
     if not lines or lines[0] != REVOKED_TITLE:
-        raise ValueError(f"Invalid revoked document list: {path}")
+        raise ValueError("Invalid revoked document list")
     ids = set()
     for line in lines[1:]:
         if not line:
             continue
         match = REVOKED_ID_RE.fullmatch(line)
         if not match:
-            raise ValueError(f"Invalid revoked document list: {path}")
+            raise ValueError("Invalid revoked document list")
         ids.add(int(match.group(1)))
     return ids
 

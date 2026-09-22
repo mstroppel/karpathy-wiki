@@ -2,8 +2,9 @@
 
 The core services are `init`, `opencode`, and `silverbullet`. Optional source
 and export services are enabled with Compose profiles. The `webdav-ingest` and
-`paperless-ingest` services share the `karpathy-wiki-ingest` image and select
-their behavior with a command argument (`webdav` or `paperless`). Ingest is
+`paperless-ingest` services use dedicated images (`karpathy-wiki-ingest-webdav`
+and `karpathy-wiki-ingest-paperless`) that contain only the shared ingest core
+and their own plugin. Ingest is
 plugin-based; additional modules can live in separate repositories (see
 `ingest-modules.md`).
 

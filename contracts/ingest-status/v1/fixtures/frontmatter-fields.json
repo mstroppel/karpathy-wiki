@@ -1,0 +1,76 @@
+{
+  "version": 1,
+  "topic": "frontmatter-fields",
+  "description": "Frontmatter field parsing per the contract: names are unique, values are plain text, single-quoted text, or JSON-encoded (double quote prefix). Consumed by the Python ingest packages and the JavaScript status adapters. Parse failures (unclosed block, duplicate field, invalid JSON value) are invalid.",
+  "cases": [
+    {
+      "name": "paperless source frontmatter",
+      "valid": true,
+      "input": "---\ntitle: \"Rechnung 42\"\npaperless_id: 42\npaperless_url: \"https://paperless.example/documents/42\"\nsource_revision: \"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"\nissued_date: \"2026-01-31\"\ndocument_type: null\nanonymized: true\n---\n\n# Rechnung 42\n",
+      "expected": {
+        "title": "Rechnung 42",
+        "paperless_id": "42",
+        "paperless_url": "https://paperless.example/documents/42",
+        "source_revision": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "issued_date": "2026-01-31",
+        "anonymized": "true"
+      }
+    },
+    {
+      "name": "json encoded values are parsed, raw arrays stay raw",
+      "valid": true,
+      "input": "---\ntags: [\"Rechnung\"]\ntitle: \"Rechnung \\\"42\\\"\"\n---\n",
+      "expected": {
+        "tags": "[\"Rechnung\"]",
+        "title": "Rechnung \"42\""
+      }
+    },
+    {
+      "name": "single quoted values lose their quotes",
+      "valid": true,
+      "input": "---\ntitle: 'Rechnung 42'\n---\n",
+      "expected": {
+        "title": "Rechnung 42"
+      }
+    },
+    {
+      "name": "webdav wiki page frontmatter",
+      "valid": true,
+      "input": "---\nsource_adapter: webdav\nsource_path: \"Vertraulich/bericht.txt\"\nsource_revision: \"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"\n---\n\n# Quelle\n",
+      "expected": {
+        "source_adapter": "webdav",
+        "source_path": "Vertraulich/bericht.txt",
+        "source_revision": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+      }
+    },
+    {
+      "name": "CRLF line endings are tolerated",
+      "valid": true,
+      "input": "---\r\nsource_adapter: webdav\r\nsource_path: \"a.txt\"\r\n---\r\n",
+      "expected": {
+        "source_adapter": "webdav",
+        "source_path": "a.txt"
+      }
+    },
+    {
+      "name": "missing opening delimiter is invalid",
+      "valid": false,
+      "input": "source_adapter: webdav\n---\n"
+    },
+    {
+      "name": "unclosed frontmatter is invalid",
+      "valid": false,
+      "input": "---\nsource_adapter: webdav\n"
+    },
+    {
+      "name": "duplicate field is invalid",
+      "valid": false,
+      "input": "---\nsource_revision: \"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"\nsource_revision: \"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"\n---\n"
+    },
+    {
+      "name": "invalid JSON string value is invalid",
+      "valid": false,
+      "input": "---\ntitle: \"unterminated\n---\n"
+    }
+  ]
+}
