@@ -1,6 +1,7 @@
 import dataclasses
 import http.server
 import json
+import os
 import re
 import tempfile
 import threading
@@ -212,6 +213,44 @@ class IngestTests(unittest.TestCase):
         self.assertIn('tags: ["Versicherung"]', result)
         self.assertIn("anonymized: true", result)
 
+    def test_rendered_source_keeps_the_paperless_frontmatter_and_link(self):
+        """Regression: the Paperless link must survive source-to-wiki rendering.
+
+        The sanitized source carries the validated HTTPS ``paperless_url`` in
+        its frontmatter and a visible link; the provider manifest repeats the
+        URL as trusted page frontmatter so every wiki summary page can render
+        it.
+        """
+        source_url = "https://paperless.example.com/documents/3246"
+        result = render_document(
+            3246,
+            "Test",
+            "Inhalt",
+            "https://paperless.example.com",
+            Counter(),
+            None,
+            None,
+            [],
+            0,
+            "a" * 64,
+        )
+        self.assertIn(f"paperless_url: {json.dumps(source_url)}", result)
+        self.assertIn(f"]({source_url})", result)
+
+    def test_settings_reject_non_https_public_urls(self):
+        with mock.patch.dict(
+            os.environ,
+            {
+                "PAPERLESS_TOKEN": "token",
+                "PAPERLESS_SOURCE_TAG_ID": "5",
+                "REDACTIONS_FILE": "/redactions.json",
+                "PAPERLESS_PUBLIC_URL": "http://paperless.example.com",
+            },
+            clear=True,
+        ):
+            with self.assertRaisesRegex(ValueError, "PAPERLESS_PUBLIC_URL must use HTTPS"):
+                Settings.from_env()
+
     def test_ingest_anonymizes_metadata_and_is_idempotent(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -275,6 +314,12 @@ class IngestTests(unittest.TestCase):
             self.assertEqual(item["wiki_path"], "3000-3999/paperless-3246.md")
             self.assertEqual(item["claim"], {"paperless_id": "3246"})
             self.assertEqual(item["frontmatter"]["source_revision"], item["source_revision"])
+            # The manifest frontmatter carries the validated HTTPS Paperless
+            # link so every generated wiki page can render it.
+            self.assertEqual(
+                item["frontmatter"]["paperless_url"],
+                "https://paperless.example.com/documents/3246",
+            )
             self.assertTrue(
                 re.fullmatch(r"[0-9a-f]{64}", item["source_revision"]), item["source_revision"]
             )
@@ -521,7 +566,7 @@ class PersistenceFailureTests(unittest.TestCase):
 
         document["content"] = "changed"
         with mock.patch(
-            "karpathy_wiki_ingest_paperless.atomic_write",
+            "karpathy_wiki_ingest_paperless.ingestor.atomic_write",
             side_effect=failing_for_sources,
         ):
             changed, failed = ingestor.run_once()
