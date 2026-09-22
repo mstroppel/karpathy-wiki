@@ -10,7 +10,8 @@ plugin-based; additional modules can live in separate repositories (see
 
 ```text
 WebDAV ------- rclone -> local redaction -> sources/webdav/ ------+
-                                                                  |
+                          (coherent generations,                  |
+                           atomic current switch)                 |
 Paperless ---- local redaction (optional) -> sources/paperless/ --+--> OpenCode
                                                                         |
                                                                         v

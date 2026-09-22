@@ -6,11 +6,11 @@ contains the launcher, `.env`, optional secrets, and local Compose adoptions.
 ```text
 ${DATA_ROOT}/
 ├── sources/
-│   ├── webdav/             # Sanitized WebDAV source files
+│   ├── webdav/             # Published WebDAV generations (current + generations/)
 │   └── paperless/          # Sanitized Paperless source files
 ├── wiki/                   # SilverBullet space and independent Git repository
 ├── quarantine/
-│   ├── webdav/             # WebDAV files that could not be processed
+│   ├── webdav/             # Content-free WebDAV error reports
 │   └── paperless/          # Content-free Paperless error reports
 └── opencode/
     ├── config/             # OpenCode configuration and generated policy
@@ -35,6 +35,17 @@ DATA_ROOT=/srv/karpathy-wiki/personal
 Secret files can live outside `DATA_ROOT` through `PAPERLESS_TOKEN_FILE` and
 `REDACTIONS_FILE`. Do not store credentials, source material, wiki content, or
 sessions in this repository.
+
+## WebDAV source generations
+
+WebDAV publishes each synchronization as a coherent generation below
+`sources/webdav`: sanitized files live in `generations/<id>/`, the `current`
+symlink points at the active generation, and `manifest.json` describes it.
+The generation is exposed only after the complete sanitized tree exists, so
+readers never observe a partially published cycle and the last successful
+generation stays active after any failure. See
+[configuration](configuration.md#source-generations) for the publication
+model, retention, and recovery.
 
 ## Removed data directories
 
