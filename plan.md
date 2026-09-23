@@ -48,11 +48,14 @@ the publisher and worker boundaries are introduced.
 Pin and validate the ShellCheck version used in CI so the documented local
 lint gate and CI run the same version.
 
-### [#68](https://github.com/mstroppel/karpathy-wiki/issues/68): Specify OpenCode update policy
+### [#68](https://github.com/mstroppel/karpathy-wiki/issues/68): Automate non-major OpenCode updates
 
-Clarify what “minor and build version updates” means for the pinned OpenCode
-release, compare it with the existing scheduled update workflow, and implement
-only the missing update behavior and verification.
+Extend the scheduled OpenCode updater so compatible minor, patch and build
+updates are validated by CI and merged automatically, including the pinned
+download checksums. Require manual approval for major version changes. Test the
+version classification, auto-merge conditions and failure behavior; document
+how installations receive the resulting release through the existing update
+mechanism.
 
 ## User-facing extensions
 
@@ -72,7 +75,25 @@ only the missing update behavior and verification.
 2. Use a replaceable transcription backend with optional speaker diarization;
    emit Markdown with timestamps, speaker labels and provenance.
 3. Anonymize transcripts before publication. Make external transcription
-   opt-in and explicitly configured.
+   opt-in and explicitly configured. Keep transcription reusable by other
+   providers, including email ingest.
+
+### [#78](https://github.com/mstroppel/karpathy-wiki/issues/78): Email ingest
+
+1. Configure a mailbox and one exact recipient address (including any `+tag`).
+   Process only messages demonstrably delivered to that address; do not treat
+   other aliases, recipients or header-only matches as authorization to ingest.
+2. Fetch new messages with least-privilege credentials, deduplicate and recover
+   across restarts without losing or republishing messages. Define how messages
+   addressed to multiple recipients and messages without trustworthy delivery
+   recipient metadata are handled.
+3. Convert the selected message body and supported attachments to sanitized
+   source entries with provenance and a versioned provider manifest. Apply
+   local redaction before wiki/model access, and use the shared transcription
+   provider for audio attachments when enabled.
+4. Cover exact-address filtering, malformed messages, attachment handling,
+   duplicates, failures and restarts with tests; document mailbox setup,
+   retention and deletion behavior.
 
 ## After the first stable 1.0 release
 
