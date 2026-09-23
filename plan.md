@@ -6,8 +6,9 @@ independently deployable PRs.
 ## Transactional ingestion and publishing — [#44](https://github.com/mstroppel/karpathy-wiki/issues/44)
 
 1. Extend durable job coordination to Paperless and future providers. Paperless
-   currently updates sanitized files in place; give it coherent, recoverable
-   generations before accepting jobs as durably publishable. The shared state
+   now publishes coherent source generations, but still needs accepted jobs,
+   lease fencing, restart recovery, and recorded generation identities in the
+   shared store. The shared state
    store already enforces an exclusive publisher-job lease and exposes queue
    depth, oldest pending age, last recorded source generation and committed
    publication, and failed/retried job counts through WebDAV health records.

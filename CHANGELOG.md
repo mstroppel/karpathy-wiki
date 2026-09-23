@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Paperless ingest now builds complete sanitized source generations and
+  publishes a manifest with immutable source paths only after the generation
+  is ready. Failed cycles leave the previous generation available, unchanged
+  cycles retain it, and interrupted staging is discarded on the next run.
+  Existing flat Paperless installations must manually reorganize their data
+  as described in the Paperless setup guide; job coordination is still planned.
 - Publisher jobs now have an exclusive live lease across distinct jobs in the
   ingest state store; expired holders cannot renew or finish work. The WebDAV
   health record also reports queue depth, failed/retried job counts, and the

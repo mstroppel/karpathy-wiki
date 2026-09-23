@@ -7,7 +7,7 @@ contains the launcher, `.env`, optional secrets, and local Compose adoptions.
 ${DATA_ROOT}/
 ├── sources/
 │   ├── webdav/             # Published WebDAV generations (current + generations/)
-│   └── paperless/          # Sanitized Paperless source files
+│   └── paperless/          # Published Paperless generations (current + generations/)
 ├── wiki/                   # SilverBullet space and independent Git repository
 ├── state/
 │   └── ingest.sqlite3      # Durable ingest jobs, leases, generations, publications
