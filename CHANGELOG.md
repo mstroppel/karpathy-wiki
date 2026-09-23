@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Publisher jobs now have an exclusive live lease across distinct jobs in the
+  ingest state store; expired holders cannot renew or finish work. The WebDAV
+  health record also reports queue depth, failed/retried job counts, and the
+  last recorded source generation and committed wiki publication. The
+  publisher service and Paperless generation coordination remain planned.
 - A durable, content-free SQLite state store for ingest (`karpathy_wiki_ingest.state`,
   mounted at `DATA_ROOT/state/ingest.sqlite3`): ingest jobs with state
   transitions, attempts, exponential backoff, and leases, the immutable source
