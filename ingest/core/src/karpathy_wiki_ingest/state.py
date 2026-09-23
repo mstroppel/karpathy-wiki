@@ -380,6 +380,17 @@ class StateStore:
             row = self._job_row_for_update(connection, job_id)
             if row["state"] != JOB_PENDING or row["next_attempt_at"] > moment:
                 return None
+            if row["job_type"] == "publish":
+                # BEGIN IMMEDIATE serializes contenders even when they claim
+                # different jobs. An expired holder has no authority, whether
+                # or not recovery has removed its old lease yet.
+                occupied = connection.execute(
+                    "SELECT 1 FROM leases AS l JOIN jobs AS j ON j.id = l.job_id"
+                    " WHERE j.job_type = 'publish' AND l.expires_at > ? LIMIT 1",
+                    (moment,),
+                ).fetchone()
+                if occupied is not None:
+                    return None
             lease_id = uuid.uuid4().hex
             self._set_job(
                 connection,
@@ -677,7 +688,7 @@ class StateStore:
     # -- observation --------------------------------------------------------
 
     def metrics(self, now: int | None = None) -> dict[str, Any]:
-        """Queue depth, oldest pending age, and durable entity counts."""
+        """Content-free queue, generation, publication and retry status."""
         moment = _now() if now is None else now
         jobs = {
             state: self._connection.execute(
@@ -689,8 +700,18 @@ class StateStore:
             "SELECT MIN(created_at) FROM jobs WHERE state = ?", (JOB_PENDING,)
         ).fetchone()
         oldest = row[0]
+        latest_generation = self._connection.execute(
+            "SELECT provider, generation_id, recorded_at FROM source_generations"
+            " ORDER BY recorded_at DESC, provider, generation_id DESC LIMIT 1"
+        ).fetchone()
+        latest_publication = self._connection.execute(
+            "SELECT provider, source_generation_id, commit_id, completed_at"
+            " FROM publications WHERE status = 'published' AND commit_id IS NOT NULL"
+            " ORDER BY completed_at DESC, idempotency_key DESC LIMIT 1"
+        ).fetchone()
         return {
             "jobs": jobs,
+            "queue_depth": jobs[JOB_PENDING],
             # The pending age is measured from acceptance, not from the
             # backoff-scheduled `next_attempt_at`, so an old retrying job
             # cannot appear freshly accepted.
@@ -701,4 +722,14 @@ class StateStore:
             "publications": self._connection.execute(
                 "SELECT COUNT(*) FROM publications"
             ).fetchone()[0],
+            "retried_jobs": self._connection.execute(
+                "SELECT COUNT(*) FROM jobs WHERE attempts > 1"
+            ).fetchone()[0],
+            "failed_jobs": self._connection.execute(
+                "SELECT COUNT(*) FROM jobs WHERE state = ?"
+                " OR (state = ? AND last_error IS NOT NULL)",
+                (JOB_DEAD, JOB_PENDING),
+            ).fetchone()[0],
+            "last_source_generation": dict(latest_generation) if latest_generation else None,
+            "last_publication": dict(latest_publication) if latest_publication else None,
         }

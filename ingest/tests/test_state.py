@@ -407,13 +407,19 @@ class MetricsTests(StoreTestCase):
                     JOB_SUPERSEDED: 0,
                 },
                 "oldest_pending_age": 0,
+                "queue_depth": 0,
                 "source_generations": 0,
                 "publications": 0,
+                "retried_jobs": 0,
+                "failed_jobs": 0,
+                "last_source_generation": None,
+                "last_publication": None,
             },
         )
         job, _ = self.store.enqueue("ingest", {}, now=1000)
         metrics = self.store.metrics(now=1100)
         self.assertEqual(metrics["jobs"][JOB_PENDING], 1)
+        self.assertEqual(metrics["queue_depth"], 1)
         self.assertEqual(metrics["oldest_pending_age"], 100)
 
         # The pending age is measured from acceptance: a job that is only
@@ -430,6 +436,85 @@ class MetricsTests(StoreTestCase):
         metrics = self.store.metrics(now=1100)
         self.assertEqual(metrics["source_generations"], 1)
         self.assertEqual(metrics["publications"], 1)
+        self.assertEqual(metrics["failed_jobs"], 1)
+        self.assertEqual(metrics["retried_jobs"], 0)
+        self.assertEqual(
+            metrics["last_source_generation"],
+            {"provider": "webdav", "generation_id": "gen", "recorded_at": 1100},
+        )
+        self.assertEqual(
+            metrics["last_publication"],
+            {
+                "provider": "webdav",
+                "source_generation_id": "gen",
+                "commit_id": "c" * 40,
+                "completed_at": 1100,
+            },
+        )
+
+    def test_retries_and_uncommitted_publications_are_not_reported_as_success(self):
+        job, _ = self.store.enqueue("ingest", {}, now=100)
+        first = self.store.claim(job.id, "worker", now=100)
+        assert first is not None
+        self.store.fail(first.id, "operational:OSError", base_backoff_seconds=1, now=100)
+        retry = self.store.claim(job.id, "worker", now=101)
+        assert retry is not None
+        self.store.complete(retry.id, now=102)
+        self.store.record_publication("uncommitted", "paperless", "gen", now=102)
+        metrics = self.store.metrics(now=103)
+        self.assertEqual(metrics["retried_jobs"], 1)
+        self.assertEqual(metrics["failed_jobs"], 0)
+        self.assertIsNone(metrics["last_publication"])
+
+
+class PublisherLeaseTests(StoreTestCase):
+    def test_only_one_publish_job_can_be_leased_and_recovery_fences_old_holder(self):
+        first = StateStore.open(self.path)
+        second = StateStore.open(self.path)
+        self.addCleanup(first.close)
+        self.addCleanup(second.close)
+        a, _ = first.enqueue("publish", {}, now=1000)
+        b, _ = second.enqueue("publish", {}, now=1000)
+        ingest, _ = first.enqueue("ingest", {}, now=1000)
+
+        original = first.claim(a.id, "a", lease_seconds=60, now=1000)
+        assert original is not None
+        self.assertIsNone(second.claim(b.id, "b", lease_seconds=60, now=1001))
+        self.assertIsNotNone(second.claim(ingest.id, "ingestor", now=1001))
+        first.heartbeat(original.id, lease_seconds=60, now=1050)
+        self.assertIsNone(second.claim(b.id, "b", lease_seconds=60, now=1060))
+
+        # The expired holder is fenced even if recovery has not run yet.
+        replacement = second.claim(b.id, "b", lease_seconds=60, now=1110)
+        assert replacement is not None
+        with self.assertRaises(StateError):
+            first.complete(original.id, now=1110)
+        self.assertEqual(first.expire_leases(now=1110), 1)
+        self.assertIsNone(first.claim(a.id, "a", now=1111))
+        second.complete(replacement.id, now=1111)
+        self.assertIsNotNone(first.claim(a.id, "a", now=1112))
+
+    def test_concurrent_publishers_contending_for_distinct_jobs(self):
+        setup = StateStore.open(self.path)
+        try:
+            jobs = [setup.enqueue("publish", {}, now=1000)[0] for _ in range(2)]
+        finally:
+            setup.close()
+        leases: list[Lease | None] = []
+
+        def claim(job_id: str) -> None:
+            store = StateStore.open(self.path)
+            try:
+                leases.append(store.claim(job_id, job_id, lease_seconds=60, now=1000))
+            finally:
+                store.close()
+
+        threads = [threading.Thread(target=claim, args=(job.id,)) for job in jobs]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual(sum(lease is not None for lease in leases), 1)
 
 
 class ConcurrentClaimTests(StoreTestCase):

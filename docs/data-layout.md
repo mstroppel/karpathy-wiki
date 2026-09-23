@@ -70,6 +70,16 @@ generation when the published one no longer matches the upstream content.
 Include the file in backups of
 `DATA_ROOT`; it is recreated automatically when missing.
 
+The state store's `metrics()` snapshot is also included in the WebDAV health
+record: pending queue depth and oldest age, failed and retried job counts, the
+last recorded source generation, and the last completed wiki publication (if
+any). A publication is counted as completed only when its Git commit is
+recorded. Publisher jobs have a database-enforced exclusive lease: two
+distinct publish jobs cannot hold live leases simultaneously, and an expired
+holder cannot renew or complete its job. The serialized publisher that will
+consume these leases is still planned; these metrics do not imply automatic
+wiki publication.
+
 ## Removed data directories
 
 The session PDF export was removed. Existing installations can manually delete
