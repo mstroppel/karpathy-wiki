@@ -1,25 +1,44 @@
 import json
 import os
+import shutil
+import sqlite3
 import subprocess
 import tempfile
 import threading
+import time
 import unittest
+from collections.abc import Callable
 from pathlib import Path
 from unittest import mock
 
 from karpathy_wiki_ingest import health as healthcheck
 from karpathy_wiki_ingest.shared import TargetedAnonymizer
+from karpathy_wiki_ingest.state import (
+    JOB_DEAD,
+    JOB_LEASED,
+    JOB_PENDING,
+    JOB_SUCCEEDED,
+    JOB_SUPERSEDED,
+    StateError,
+    StateStore,
+)
 from karpathy_wiki_ingest_webdav import (
     ACTIVE_SYMLINK,
     GENERATION_METADATA_FILENAME,
     GENERATIONS_DIRECTORY,
     Settings,
     active_generation,
+    cycle_idempotency_key,
     install_stop_handler,
     interval_seconds,
+    process_cycle,
     publish_generation,
+    publish_with_heartbeat,
+    published_matches,
+    record_generation,
     run,
     synchronize,
+    upstream_inventory,
 )
 
 ANONYMIZER_CONFIGURATION = {"people": [{"replacement": "[ICH]", "values": ["Max Mustermann"]}]}
@@ -427,6 +446,440 @@ class ConcurrentReadTests(unittest.TestCase):
             self.assertTrue(observed, "the reader must have observed publications")
 
 
+class DurableStateTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.root = Path(self.directory.name)
+        self.incoming = self.root / "incoming"
+        self.sanitized = self.root / "sanitized"
+        self.quarantine = self.root / "quarantine"
+        self.state_path = self.root / "ingest.sqlite3"
+        self.incoming.mkdir()
+
+    def store(self) -> StateStore:
+        return StateStore.open(self.state_path)
+
+    def cycle(
+        self, instance: TargetedAnonymizer, store: StateStore | None, now: int
+    ) -> tuple[int, int, bool]:
+        return process_cycle(
+            self.incoming, self.sanitized, self.quarantine, instance, store, interval=60, now=now
+        )
+
+    def test_cycle_key_is_stable_for_identical_content_and_redactions(self):
+        first = cycle_idempotency_key("fp", {"a.txt": "1" * 64})
+        second = cycle_idempotency_key("fp", {"a.txt": "1" * 64})
+        changed = cycle_idempotency_key("fp", {"a.txt": "2" * 64})
+        rotated = cycle_idempotency_key("other", {"a.txt": "1" * 64})
+        self.assertEqual(first, second)
+        self.assertNotEqual(first, changed)
+        self.assertNotEqual(first, rotated)
+        self.assertTrue(first.startswith("webdav-generation:"))
+
+    def test_published_matches_detects_the_published_cycle(self):
+        (self.incoming / "notes.txt").write_text("Hallo Max Mustermann", encoding="utf-8")
+        instance = anonymizer()
+        publish_generation(self.incoming, self.sanitized, self.quarantine, instance)
+        inventory = upstream_inventory(self.incoming)
+        self.assertTrue(published_matches(self.sanitized, instance, inventory))
+        self.assertFalse(published_matches(self.sanitized, instance, {"notes.txt": "1" * 64}))
+        rotated = TargetedAnonymizer.from_config(
+            {"people": [{"replacement": "[AUTOR]", "values": ["Max Mustermann"]}]}
+        )
+        self.assertFalse(published_matches(self.sanitized, rotated, inventory))
+        self.assertFalse(published_matches(self.root / "missing", instance, inventory))
+
+    def test_record_generation_records_manifest_identity_once(self):
+        (self.incoming / "notes.txt").write_text("Hallo Max Mustermann", encoding="utf-8")
+        instance = anonymizer()
+        publish_generation(self.incoming, self.sanitized, self.quarantine, instance)
+        generation = active_generation(self.sanitized)
+        assert generation is not None
+        store = self.store()
+        try:
+            record_generation(store, self.sanitized, generation, instance.fingerprint, now=100)
+            # Recording the same generation again is a no-op.
+            record_generation(store, self.sanitized, generation, instance.fingerprint, now=100)
+            metrics = store.metrics()
+        finally:
+            store.close()
+        self.assertEqual(metrics["source_generations"], 1)
+
+    def test_durable_cycle_skips_unchanged_upstream(self):
+        (self.incoming / "notes.txt").write_text("Hallo Max Mustermann", encoding="utf-8")
+        instance = anonymizer()
+        store = self.store()
+        try:
+            changed, failed, degraded = self.cycle(instance, store, now=1000)
+            self.assertEqual((changed, failed, degraded), (1, 0, False))
+            generation = active_generation(self.sanitized)
+            assert generation is not None
+            key = cycle_idempotency_key(instance.fingerprint, upstream_inventory(self.incoming))
+            job = store.job_by_idempotency_key(key)
+            assert job is not None
+            self.assertEqual(job.state, JOB_SUCCEEDED)
+            self.assertEqual(job.result, {"generation": generation.name, "changed": 1})
+
+            # An identical cycle re-submits the same accepted work and keeps
+            # the active generation instead of republishing it.
+            changed, failed, degraded = self.cycle(instance, store, now=1120)
+            self.assertEqual((changed, failed, degraded), (0, 0, False))
+            self.assertEqual(active_generation(self.sanitized), generation)
+        finally:
+            store.close()
+
+    def test_durable_cycle_records_retries_and_dead_jobs(self):
+        (self.incoming / "broken.txt").write_bytes(b"\xff")
+        instance = anonymizer()
+        store = self.store()
+        try:
+            # Every cycle fails identically; the job backs off and eventually
+            # becomes dead instead of retrying forever.
+            for attempt in range(5):
+                changed, failed, degraded = self.cycle(instance, store, now=1000 + attempt * 600)
+                self.assertEqual((changed, failed, degraded), (0, 1, False))
+            key = cycle_idempotency_key(instance.fingerprint, upstream_inventory(self.incoming))
+            job = store.job_by_idempotency_key(key)
+            assert job is not None
+            self.assertEqual(job.state, JOB_DEAD)
+            self.assertEqual(job.attempts, 5)
+            self.assertEqual(job.last_error, "quarantined:1")
+
+            # A dead job with unchanged content stays dead and keeps the
+            # failure visible through the returned failed count.
+            changed, failed, degraded = self.cycle(instance, store, now=100000)
+            self.assertEqual((changed, failed, degraded), (0, 1, False))
+            self.assertIsNone(active_generation(self.sanitized))
+        finally:
+            store.close()
+
+    def test_interrupted_cycle_is_recovered_without_republishing(self):
+        (self.incoming / "notes.txt").write_text("Hallo Max Mustermann", encoding="utf-8")
+        instance = anonymizer()
+        store = self.store()
+        try:
+            key = cycle_idempotency_key(instance.fingerprint, upstream_inventory(self.incoming))
+            # Simulate a crash after publication but before completion.
+            publish_generation(self.incoming, self.sanitized, self.quarantine, instance)
+            generation = active_generation(self.sanitized)
+            assert generation is not None
+            job, _ = store.enqueue("ingest", {"provider": "webdav"}, idempotency_key=key, now=1000)
+            lease = store.claim(job.id, "interrupted", lease_seconds=60, now=1000)
+            assert lease is not None
+
+            # The expired lease is recovered and the published generation is
+            # completed without a second publication.
+            changed, failed, degraded = self.cycle(instance, store, now=1100)
+            self.assertEqual((changed, failed, degraded), (0, 0, False))
+            self.assertEqual(active_generation(self.sanitized), generation)
+            recovered = store.job(job.id)
+            self.assertEqual(recovered.state, JOB_SUCCEEDED)
+            events = [event["to_state"] for event in store.job_events(job.id)]
+            self.assertEqual(
+                events,
+                [JOB_PENDING, JOB_LEASED, JOB_PENDING, JOB_LEASED, JOB_SUCCEEDED],
+            )
+        finally:
+            store.close()
+
+    def test_losing_the_published_generation_arms_the_job_again(self):
+        (self.incoming / "notes.txt").write_text("Hallo Max Mustermann", encoding="utf-8")
+        instance = anonymizer()
+        store = self.store()
+        try:
+            changed, failed, degraded = self.cycle(instance, store, now=1000)
+            self.assertEqual((changed, failed, degraded), (1, 0, False))
+            first = active_generation(self.sanitized)
+            assert first is not None
+
+            # The publication disappears, for example after a manual recovery:
+            # the succeeded job is rearmed and republished.
+            shutil.rmtree(self.sanitized)
+            changed, failed, degraded = self.cycle(instance, store, now=1200)
+            self.assertEqual((changed, failed, degraded), (1, 0, False))
+            self.assertIsNotNone(active_generation(self.sanitized))
+            self.assertNotEqual(active_generation(self.sanitized), first)
+        finally:
+            store.close()
+
+    def test_an_unavailable_store_degrades_to_stateless_publishing(self):
+        (self.incoming / "notes.txt").write_text("Hallo Max Mustermann", encoding="utf-8")
+        instance = anonymizer()
+        store = self.store()
+        with mock.patch.object(
+            store, "enqueue", side_effect=sqlite3.OperationalError("disk I/O error")
+        ):
+            changed, failed, degraded = self.cycle(instance, store, now=1000)
+        store.close()
+        self.assertEqual((changed, failed, degraded), (1, 0, True))
+        self.assertIsNotNone(active_generation(self.sanitized))
+
+    def test_publication_renews_the_lease_while_the_work_runs(self):
+        (self.incoming / "notes.txt").write_text("Hallo Max Mustermann", encoding="utf-8")
+        instance = anonymizer()
+        store = self.store()
+        try:
+            key = cycle_idempotency_key(instance.fingerprint, upstream_inventory(self.incoming))
+            job, _ = store.enqueue("ingest", {"provider": "webdav"}, idempotency_key=key, now=0)
+            lease = store.claim(job.id, "worker", lease_seconds=2, now=int(time.time()))
+            assert lease is not None
+
+            def slow_work(guard: Callable[[], None]) -> tuple[int, int]:
+                # Longer than the lease: without renewal the lease would expire
+                # in the middle of the work.
+                time.sleep(3)
+                return 1, 0
+
+            changed, failed = publish_with_heartbeat(slow_work, store, lease.id, 2)
+            self.assertEqual((changed, failed), (1, 0))
+            # The lease was renewed while the work ran and is still held.
+            renewed = store.lease(lease.id)
+            self.assertGreater(renewed.expires_at, lease.expires_at)
+        finally:
+            store.close()
+
+    def test_run_recovers_a_failed_state_store(self):
+        (self.incoming / "notes.txt").write_text("Hallo Max Mustermann", encoding="utf-8")
+        redactions = self.root / "redactions.json"
+        redactions.write_text(json.dumps(ANONYMIZER_CONFIGURATION), encoding="utf-8")
+        broken_path = self.root / "state-directory"
+        broken_path.mkdir()
+        base_environment = {
+            "WEBDAV_INCOMING_ROOT": str(self.incoming),
+            "WEBDAV_SANITIZED_ROOT": str(self.sanitized),
+            "WEBDAV_QUARANTINE_ROOT": str(self.quarantine),
+            "WEBDAV_SYNC_INTERVAL": "1s",
+            "WEBDAV_PATH": "Wiki Sources",
+            "REDACTIONS_FILE": str(redactions),
+            "HEALTH_PATH": str(self.root / "health.json"),
+        }
+        with (
+            mock.patch.dict(
+                os.environ, {**base_environment, "INGEST_STATE_PATH": str(broken_path)}, clear=True
+            ),
+            mock.patch("karpathy_wiki_ingest_webdav.synchronize"),
+        ):
+            # A state path that cannot be opened degrades the cycle and keeps
+            # the daemon unhealthy instead of reporting false success.
+            with self.assertRaises(SystemExit):
+                run(once=True)
+            first = json.loads((self.root / "health.json").read_text())
+            self.assertEqual(first["failed"], 1)
+            self.assertIsNotNone(active_generation(self.sanitized))
+
+            # Once the store is available again the daemon recovers and
+            # reports healthy coordinated work.
+            with mock.patch.dict(
+                os.environ,
+                {**base_environment, "INGEST_STATE_PATH": str(self.state_path)},
+                clear=True,
+            ):
+                run(once=True)
+        record = json.loads((self.root / "health.json").read_text())
+        self.assertEqual(record["failed"], 0)
+        self.assertEqual(record["metrics"]["jobs"][JOB_SUCCEEDED], 1)
+
+    def test_superseded_inputs_do_not_stay_pending_forever(self):
+        instance = anonymizer()
+        store = self.store()
+        try:
+            # An accepted job whose upstream inventory is later replaced by a
+            # new synchronization can never run again; it becomes superseded.
+            store.enqueue(
+                "ingest",
+                {"provider": "webdav", "upstream_files": 2},
+                idempotency_key="old",
+                now=100,
+            )
+            (self.incoming / "notes.txt").write_text("Hallo Max Mustermann", encoding="utf-8")
+            changed, failed, degraded = self.cycle(instance, store, now=1000)
+            self.assertEqual((changed, failed, degraded), (1, 0, False))
+            superseded = store.job_by_idempotency_key("old")
+            assert superseded is not None
+            self.assertEqual(superseded.state, JOB_SUPERSEDED)
+        finally:
+            store.close()
+
+    def test_a_stale_manifest_forces_republication(self):
+        (self.incoming / "notes.txt").write_text("Hallo Max Mustermann", encoding="utf-8")
+        instance = anonymizer()
+        store = self.store()
+        try:
+            changed, failed, degraded = self.cycle(instance, store, now=1000)
+            self.assertEqual((changed, failed, degraded), (1, 0, False))
+            generation = active_generation(self.sanitized)
+            assert generation is not None
+
+            # A crash between the pointer switch and the manifest write leaves
+            # a matching generation with a stale manifest: the cycle must not
+            # treat that state as published.
+            (self.sanitized / "manifest.json").write_text('{"contract": "bogus"}', encoding="utf-8")
+            changed, failed, degraded = self.cycle(instance, store, now=1100)
+            self.assertEqual((changed, failed, degraded), (1, 0, False))
+            self.assertNotEqual(active_generation(self.sanitized), generation)
+            republished = active_generation(self.sanitized)
+            assert republished is not None
+            manifest = json.loads((self.sanitized / "manifest.json").read_text(encoding="utf-8"))
+            self.assertIn(
+                f"{GENERATIONS_DIRECTORY}/{republished.name}/",
+                manifest["items"][0]["source_path"],
+            )
+        finally:
+            store.close()
+
+    def test_empty_old_manifest_does_not_complete_a_new_generation(self):
+        instance = anonymizer()
+        store = self.store()
+        try:
+            publish_generation(self.incoming, self.sanitized, self.quarantine, instance)
+            (self.incoming / "notes.txt").write_text("new", encoding="utf-8")
+            inventory = upstream_inventory(self.incoming)
+            key = cycle_idempotency_key(instance.fingerprint, inventory)
+            job, _ = store.enqueue("ingest", {"provider": "webdav"}, idempotency_key=key, now=1000)
+            lease = store.claim(job.id, "interrupted", lease_seconds=60, now=1000)
+            assert lease is not None
+            old_manifest = (self.sanitized / "manifest.json").read_bytes()
+            publish_generation(self.incoming, self.sanitized, self.quarantine, instance)
+            (self.sanitized / "manifest.json").write_bytes(old_manifest)
+            interrupted = active(self.sanitized)
+
+            self.assertFalse(published_matches(self.sanitized, instance, inventory))
+            self.assertEqual(self.cycle(instance, store, now=1100), (1, 0, False))
+            self.assertNotEqual(active(self.sanitized), interrupted)
+            manifest = json.loads((self.sanitized / "manifest.json").read_text())
+            self.assertEqual([item["source_key"] for item in manifest["items"]], ["notes.txt"])
+            self.assertEqual(store.job(job.id).state, JOB_SUCCEEDED)
+        finally:
+            store.close()
+
+    def test_publication_exceptions_are_recorded_and_bounded(self):
+        (self.incoming / "notes.txt").write_text("new", encoding="utf-8")
+        instance = anonymizer()
+        store = self.store()
+        try:
+            key = cycle_idempotency_key(instance.fingerprint, upstream_inventory(self.incoming))
+            with mock.patch(
+                "karpathy_wiki_ingest_webdav.write_manifest", side_effect=OSError("private data")
+            ):
+                for attempt in range(5):
+                    with self.assertRaises(OSError):
+                        self.cycle(instance, store, now=1000 + attempt * 600)
+                    job = store.job_by_idempotency_key(key)
+                    assert job is not None
+                    self.assertEqual(job.last_error, "publication:OSError")
+                    self.assertEqual(job.attempts, attempt + 1)
+                    self.assertEqual(job.state, JOB_DEAD if attempt == 4 else JOB_PENDING)
+                self.assertEqual(self.cycle(instance, store, now=5000), (0, 1, False))
+            self.assertIsNone(active_generation(self.sanitized))
+        finally:
+            store.close()
+
+    def test_removed_lease_fences_and_joins_publication_worker(self):
+        (self.incoming / "notes.txt").write_text("new", encoding="utf-8")
+        instance = anonymizer()
+        store = self.store()
+        try:
+            job, _ = store.enqueue("ingest", {"provider": "webdav"}, idempotency_key="lost")
+            lease = store.claim(job.id, "worker", lease_seconds=2)
+            assert lease is not None
+            started = threading.Event()
+            release = threading.Event()
+
+            def work(guard: Callable[[], None]) -> tuple[int, int]:
+                started.set()
+                release.wait(timeout=5)
+                return publish_generation(
+                    self.incoming, self.sanitized, self.quarantine, instance, commit_guard=guard
+                )
+
+            def recover() -> None:
+                other = self.store()
+                try:
+                    self.assertTrue(started.wait(timeout=5))
+                    other.expire_leases(now=lease.expires_at)
+                    # Let the renewal loop observe the missing lease and fence
+                    # the worker before it reaches the pointer switch.
+                    time.sleep(1.3)
+                finally:
+                    other.close()
+                    release.set()
+
+            recovery = threading.Thread(target=recover)
+            recovery.start()
+            try:
+                with self.assertRaises(StateError):
+                    publish_with_heartbeat(work, store, lease.id, 2)
+            finally:
+                release.set()
+                recovery.join(timeout=5)
+            self.assertIsNone(active_generation(self.sanitized))
+        finally:
+            store.close()
+
+    def test_a_lost_lease_fences_the_publication(self):
+        (self.incoming / "notes.txt").write_text("Hallo Max Mustermann", encoding="utf-8")
+        instance = anonymizer()
+        store = self.store()
+        try:
+            key = cycle_idempotency_key(instance.fingerprint, upstream_inventory(self.incoming))
+            job, _ = store.enqueue("ingest", {"provider": "webdav"}, idempotency_key=key, now=0)
+            lease = store.claim(job.id, "worker", lease_seconds=2, now=int(time.time()))
+            assert lease is not None
+
+            def fenced_work(guard: Callable[[], None]) -> tuple[int, int]:
+                # Renewal fails while the work runs; the commit guard must
+                # abort it before the pointer switch.
+                time.sleep(3)
+                return publish_generation(
+                    self.incoming,
+                    self.sanitized,
+                    self.quarantine,
+                    instance,
+                    commit_guard=guard,
+                )
+
+            with (
+                mock.patch.object(store, "heartbeat", side_effect=StateError("store gone")),
+                self.assertRaises(StateError),
+            ):
+                publish_with_heartbeat(fenced_work, store, lease.id, 2)
+            self.assertIsNone(active_generation(self.sanitized))
+        finally:
+            store.close()
+
+    def test_run_records_state_and_health_metrics(self):
+        (self.incoming / "notes.txt").write_text("Hallo Max Mustermann", encoding="utf-8")
+        redactions = self.root / "redactions.json"
+        redactions.write_text(json.dumps(ANONYMIZER_CONFIGURATION), encoding="utf-8")
+        environment_variables = {
+            "WEBDAV_INCOMING_ROOT": str(self.incoming),
+            "WEBDAV_SANITIZED_ROOT": str(self.sanitized),
+            "WEBDAV_QUARANTINE_ROOT": str(self.quarantine),
+            "WEBDAV_SYNC_INTERVAL": "1s",
+            "WEBDAV_PATH": "Wiki Sources",
+            "REDACTIONS_FILE": str(redactions),
+            "HEALTH_PATH": str(self.root / "health.json"),
+            "INGEST_STATE_PATH": str(self.state_path),
+        }
+        with (
+            mock.patch.dict(os.environ, environment_variables, clear=True),
+            mock.patch("karpathy_wiki_ingest_webdav.synchronize"),
+        ):
+            run(once=True)
+            run(once=True)
+        store = self.store()
+        try:
+            metrics = store.metrics()
+            self.assertEqual(metrics["jobs"][JOB_SUCCEEDED], 1)
+            self.assertEqual(metrics["source_generations"], 1)
+        finally:
+            store.close()
+        record = json.loads((self.root / "health.json").read_text())
+        self.assertEqual(record["failed"], 0)
+        self.assertEqual(record["metrics"]["jobs"][JOB_SUCCEEDED], 1)
+
+
 class IntervalTests(unittest.TestCase):
     def test_parses_plain_seconds_and_durations(self):
         self.assertEqual(interval_seconds("90"), 90)
@@ -453,6 +906,7 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(environment.interval, 900)
         self.assertEqual(environment.redactions, Path("/redactions.json"))
         self.assertEqual(environment.health_path, Path("/tmp/health.json"))
+        self.assertIsNone(environment.state_path)
 
     def test_environment_overrides(self):
         environment_variables = {
@@ -462,6 +916,7 @@ class SettingsTests(unittest.TestCase):
             "WEBDAV_SYNC_INTERVAL": "2m",
             "REDACTIONS_FILE": "/r.json",
             "HEALTH_PATH": "/h.json",
+            "INGEST_STATE_PATH": "/state/ingest.sqlite3",
         }
         with mock.patch.dict(os.environ, environment_variables, clear=True):
             environment = Settings.from_env()
@@ -474,6 +929,7 @@ class SettingsTests(unittest.TestCase):
                 interval=120,
                 redactions=Path("/r.json"),
                 health_path=Path("/h.json"),
+                state_path=Path("/state/ingest.sqlite3"),
             ),
         )
 

@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A durable, content-free SQLite state store for ingest (`karpathy_wiki_ingest.state`,
+  mounted at `DATA_ROOT/state/ingest.sqlite3`): ingest jobs with state
+  transitions, attempts, exponential backoff, and leases, the immutable source
+  generations they published, and wiki publications with idempotency keys.
+  WebDAV ingest cycles now run as accepted, idempotent jobs: unchanged
+  upstream content with unchanged redactions keeps the active generation, a
+  restart neither loses accepted work nor executes an accepted cycle twice,
+  interrupted cycles are recovered through lease expiry, and failed work backs
+  off instead of retrying every interval; accepted jobs whose upstream input
+  has been replaced are recorded as superseded. Queue depth, oldest pending
+  job age, and recorded generations are exposed through the health record.
+
 - A versioned provider manifest (`contracts/provider-manifest/v1/contract.json`):
   every ingest cycle writes a `manifest.json` into its sanitized source root
   describing source keys, revisions, wiki destinations, frontmatter, claims,
