@@ -39,7 +39,13 @@ provides unique aliases on the shared proxy network, allowing multiple
 installations to run independently with different environment files and data
 roots. Only trusted proxy infrastructure should join `WEBPROXY_NETWORK`.
 
-The experimental analysis UI is not part of this stack. It can be added later
+Ingest work is coordinated by a durable, content-free SQLite state store
+below `${DATA_ROOT}/state` (`state.py` in the ingest core): ingest jobs with
+state transitions, attempts, and leases, the immutable source generations,
+and wiki publications. Git remains the human-readable audit history, but no
+longer carries job state or concurrency control; a restart neither loses
+accepted ingest work nor executes an accepted publication twice. The
+experimental analysis UI is not part of this stack. It can be added later
 without changing the source and wiki contracts. Saved analyses and their
 printable HTML views live inside the wiki space (see
 [analysis export](analysis-export.md)), so SilverBullet alone serves and

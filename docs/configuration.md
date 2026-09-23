@@ -137,6 +137,32 @@ the previous contents of `sources/webdav` once; the next cycle republishes
 them as a generation. The names `manifest.json`, `current`, `generations`,
 and `.generation.json` are reserved inside `sources/webdav`.
 
+### Durable ingest state
+
+The `webdav-ingest` service records every cycle in a durable, content-free
+SQLite state store at `INGEST_STATE_PATH` (mounted at
+`/data/state/ingest.sqlite3`). Each cycle becomes an accepted job keyed by the
+upstream inventory hashes and the redaction configuration fingerprint, so:
+
+- unchanged upstream content with unchanged redactions keeps the active
+  generation instead of republishing it every interval;
+- a restart neither loses accepted work nor executes an accepted cycle twice;
+  leases of interrupted cycles expire and the cycle is recovered without a
+  second publication;
+- failed work backs off exponentially instead of retrying every interval; a
+  job whose rejected input is unchanged becomes dead after repeated attempts
+  and keeps the failure visible until the source content changes;
+- the queue depth, oldest pending job age, and recorded generations are
+  exposed through the Compose healthcheck's health record.
+
+The store records identifiers, revisions, counts, and content-free error
+strings only — never source content or credentials. When the store is
+unavailable, the daemon logs the failure and publishes without state instead
+of losing ingest availability; the health record then reports the failure.
+Deleting the database resets only the bookkeeping: the next cycle republishes
+a generation and records it again. See [data layout](data-layout.md) for the
+persistent location.
+
 Paperless credentials use files rather than environment values. Set an absolute
 path when possible:
 

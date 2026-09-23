@@ -43,9 +43,16 @@ def interval_seconds(value: str) -> int:
     return whole
 
 
-def write_health(path: Path, failed: int) -> None:
-    """Write the shared health record consumed by the healthcheck module."""
-    atomic_write(path, json.dumps({"checked_at": int(time.time()), "failed": failed}) + "\n")
+def write_health(path: Path, failed: int, metrics: dict[str, Any] | None = None) -> None:
+    """Write the shared health record consumed by the healthcheck module.
+
+    Optional ``metrics`` (for example durable queue depth and oldest job age)
+    are merged into the record; the healthcheck reads only the known fields.
+    """
+    record: dict[str, Any] = {"checked_at": int(time.time()), "failed": failed}
+    if metrics:
+        record["metrics"] = metrics
+    atomic_write(path, json.dumps(record) + "\n")
 
 
 @dataclass(frozen=True)

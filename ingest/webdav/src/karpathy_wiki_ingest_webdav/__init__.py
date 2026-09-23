@@ -17,6 +17,8 @@ import os
 import posixpath
 import shutil
 import signal
+import socket
+import sqlite3
 import subprocess
 import threading
 import time
@@ -36,6 +38,11 @@ from karpathy_wiki_ingest.shared import (
     interval_seconds,
     required_env,
     write_health,
+)
+from karpathy_wiki_ingest.state import (
+    JOB_DEAD,
+    JOB_SUCCEEDED,
+    StateStore,
 )
 
 LOG = logging.getLogger("karpathy-wiki-webdav")
@@ -64,9 +71,11 @@ class Settings:
     interval: int
     redactions: Path
     health_path: Path
+    state_path: Path | None = None
 
     @classmethod
     def from_env(cls) -> Settings:
+        state_path = os.getenv("INGEST_STATE_PATH", "").strip()
         return cls(
             incoming=Path(os.getenv("WEBDAV_INCOMING_ROOT", "/data/incoming/webdav")),
             sanitized=Path(os.getenv("WEBDAV_SANITIZED_ROOT", "/data/sanitized/webdav")),
@@ -74,6 +83,7 @@ class Settings:
             interval=interval_seconds(os.getenv("WEBDAV_SYNC_INTERVAL", "15m")),
             redactions=Path(required_env("REDACTIONS_FILE")),
             health_path=Path(os.getenv("HEALTH_PATH", "/tmp/health.json")),
+            state_path=Path(state_path) if state_path else None,
         )
 
 
@@ -292,6 +302,7 @@ def publish_generation(
     sanitized: Path,
     quarantine: Path,
     anonymizer: TargetedAnonymizer,
+    inventory: dict[str, str] | None = None,
 ) -> tuple[int, int]:
     """Build a complete generation and publish it in one atomic step.
 
@@ -299,6 +310,8 @@ def publish_generation(
     ``current`` is switched only after the full sanitized tree exists; the
     provider manifest is rewritten immediately afterwards. Any failure before
     or during publication keeps the previous successful generation active.
+    ``inventory`` may carry the upstream revision map computed earlier in the
+    cycle so it is only hashed once.
     """
     sanitized.mkdir(parents=True, exist_ok=True)
     quarantine.mkdir(parents=True, exist_ok=True)
@@ -308,7 +321,8 @@ def publish_generation(
     for report in sorted(quarantine.rglob("*.error")):
         report.unlink(missing_ok=True)
 
-    inventory = upstream_inventory(incoming)
+    if inventory is None:
+        inventory = upstream_inventory(incoming)
     staging = generations / f"{STAGING_PREFIX}{uuid.uuid4().hex}"
     generation = generations / new_generation_id()
     previous = active_generation(sanitized)
@@ -353,6 +367,155 @@ def publish_generation(
     return changed, failed
 
 
+def cycle_idempotency_key(fingerprint: str, inventory: dict[str, str]) -> str:
+    """Stable identity of an ingest cycle: upstream revisions plus redactions.
+
+    The identical upstream state with the identical redaction configuration is
+    the same accepted work, so re-submission cannot execute a second cycle.
+    """
+    encoded = json.dumps(
+        {"fingerprint": fingerprint, "inventory": inventory},
+        ensure_ascii=False,
+        sort_keys=True,
+    ).encode("utf-8")
+    return f"webdav-generation:{hashlib.sha256(encoded).hexdigest()}"
+
+
+def published_matches(
+    sanitized: Path, anonymizer: TargetedAnonymizer, inventory: dict[str, str]
+) -> bool:
+    """Whether the active generation already publishes this exact cycle.
+
+    Compares the generation's own metadata (upstream inventory hashes and
+    redaction fingerprint) with the current cycle, so a completed job whose
+    publication was later lost is detected instead of skipped.
+    """
+    generation = active_generation(sanitized)
+    if generation is None:
+        return False
+    try:
+        metadata = json.loads(
+            (generation / GENERATION_METADATA_FILENAME).read_text(encoding="utf-8")
+        )
+    except (OSError, ValueError):
+        return False
+    return (
+        metadata.get("redaction_fingerprint") == anonymizer.fingerprint
+        and metadata.get("upstream_inventory") == inventory
+    )
+
+
+def record_generation(
+    store: StateStore, sanitized: Path, generation: Path, fingerprint: str, *, now: int
+) -> None:
+    """Record the published generation in the durable state store."""
+    payload = json.loads((sanitized / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    items = payload.get("items") if isinstance(payload, dict) else None
+    item_count = len(items) if isinstance(items, list) else 0
+    manifest_revision = hashlib.sha256((sanitized / MANIFEST_FILENAME).read_bytes()).hexdigest()
+    store.record_source_generation(
+        SOURCE_NAME,
+        generation.name,
+        manifest_revision=manifest_revision,
+        item_count=item_count,
+        redaction_fingerprint=fingerprint,
+        now=now,
+    )
+
+
+def process_cycle(
+    incoming: Path,
+    sanitized: Path,
+    quarantine: Path,
+    anonymizer: TargetedAnonymizer,
+    store: StateStore | None,
+    *,
+    interval: int,
+    now: int | None = None,
+) -> tuple[int, int]:
+    """Run one ingest cycle as a durable, idempotent job.
+
+    Without a state store the cycle behaves exactly as before. With one, the
+    cycle is an accepted job keyed by the upstream inventory and redaction
+    fingerprint: identical accepted work is never executed twice, unchanged
+    upstream content keeps the active generation, failures back off instead of
+    hammering every interval, and expired leases from interrupted cycles are
+    recovered. A failing state store degrades to the stateless publication
+    instead of losing ingest availability.
+    """
+    moment = int(time.time() if now is None else now)
+    inventory = upstream_inventory(incoming)
+    if store is None:
+        return publish_generation(incoming, sanitized, quarantine, anonymizer, inventory=inventory)
+    key = cycle_idempotency_key(anonymizer.fingerprint, inventory)
+    lease_seconds = max(interval * 2, 300)
+    published: tuple[int, int] | None = None
+    try:
+        store.expire_leases(now=moment)
+        job, _ = store.enqueue(
+            "ingest",
+            {"provider": SOURCE_NAME, "upstream_files": len(inventory)},
+            idempotency_key=key,
+            now=moment,
+        )
+        if job.state == JOB_SUCCEEDED and published_matches(sanitized, anonymizer, inventory):
+            LOG.info(
+                "Upstream and redactions unchanged; keeping generation %s",
+                (job.result or {}).get("generation"),
+            )
+            return 0, 0
+        if job.state in (JOB_DEAD, JOB_SUCCEEDED):
+            # A dead job with unchanged content stays dead: the input is
+            # deterministic and will fail again. A succeeded job whose
+            # publication is no longer active is rearmed to restore it.
+            if job.state == JOB_DEAD:
+                LOG.error(
+                    "Ingest job %s is dead after repeated failures;"
+                    " fix the rejected source content",
+                    job.id,
+                )
+                return 0, 1
+            store.rearm(job.id, now=moment)
+        lease = store.claim(
+            job.id,
+            holder=f"{socket.gethostname()}:{os.getpid()}",
+            lease_seconds=lease_seconds,
+            now=moment,
+        )
+        if lease is None:
+            LOG.info("Ingest job %s is not claimable yet; keeping the active generation", job.id)
+            return 0, 1
+        if published_matches(sanitized, anonymizer, inventory):
+            # A previous cycle published the generation but died before
+            # completing the job; record and complete without republishing.
+            generation = active_generation(sanitized)
+            assert generation is not None
+            record_generation(store, sanitized, generation, anonymizer.fingerprint, now=moment)
+            store.complete(
+                lease.id, result={"generation": generation.name, "changed": 0}, now=moment
+            )
+            return 0, 0
+        changed, failed = publish_generation(
+            incoming, sanitized, quarantine, anonymizer, inventory=inventory
+        )
+        published = (changed, failed)
+        if failed:
+            store.fail(lease.id, error=f"quarantined:{failed}", now=moment)
+            return changed, failed
+        generation = active_generation(sanitized)
+        assert generation is not None
+        record_generation(store, sanitized, generation, anonymizer.fingerprint, now=moment)
+        store.complete(
+            lease.id, result={"generation": generation.name, "changed": changed}, now=moment
+        )
+        return changed, failed
+    except (sqlite3.Error, OSError, ValueError):
+        LOG.exception("Durable ingest state is unavailable; publishing without state")
+        if published is not None:
+            return published
+        return publish_generation(incoming, sanitized, quarantine, anonymizer, inventory=inventory)
+
+
 def synchronize(incoming: Path, path: str) -> None:
     subprocess.run(
         [
@@ -385,43 +548,64 @@ def install_stop_handler() -> threading.Event:
 
 def run(once: bool) -> None:
     environment = Settings.from_env()
-    incoming, sanitized, quarantine, interval, redactions, health_path = (
+    incoming, sanitized, quarantine, interval, redactions, health_path, state_path = (
         environment.incoming,
         environment.sanitized,
         environment.quarantine,
         environment.interval,
         environment.redactions,
         environment.health_path,
+        environment.state_path,
     )
     stop_event = install_stop_handler()
     incoming.mkdir(parents=True, exist_ok=True)
-    while not stop_event.is_set():
-        failed = 0
+    store: StateStore | None = None
+    if state_path is not None:
         try:
-            # The redaction configuration is reloaded for every cycle so a
-            # changed redactions file regenerates every applicable file.
-            anonymizer = TargetedAnonymizer.from_file(redactions)
-            synchronize(incoming, os.environ["WEBDAV_PATH"])
-            changed, failed = publish_generation(incoming, sanitized, quarantine, anonymizer)
-            LOG.info("WebDAV synchronization complete: %s changed, %s quarantined", changed, failed)
-        except KeyError as error:
-            failed = 1
-            LOG.exception("WebDAV configuration is incomplete: %s is missing", error)
-        except subprocess.CalledProcessError:
-            # rclone already retried internally; keep the daemon alive and
-            # retry on the next synchronization interval.
-            failed = 1
-            LOG.exception("rclone synchronization failed")
-        except (OSError, UnicodeError, ValueError):
-            failed = 1
-            LOG.exception("WebDAV synchronization failed")
-        write_health(health_path, failed)
-        if once:
-            if failed:
-                raise SystemExit(1)
-            return
-        if stop_event.wait(interval):
-            break
+            store = StateStore.open(state_path)
+        except (sqlite3.Error, OSError, ValueError):
+            LOG.exception("Durable ingest state is unavailable; continuing without state")
+    try:
+        while not stop_event.is_set():
+            failed = 0
+            try:
+                # The redaction configuration is reloaded for every cycle so a
+                # changed redactions file regenerates every applicable file.
+                anonymizer = TargetedAnonymizer.from_file(redactions)
+                synchronize(incoming, os.environ["WEBDAV_PATH"])
+                changed, failed = process_cycle(
+                    incoming, sanitized, quarantine, anonymizer, store, interval=interval
+                )
+                LOG.info(
+                    "WebDAV synchronization complete: %s changed, %s quarantined", changed, failed
+                )
+            except KeyError as error:
+                failed = 1
+                LOG.exception("WebDAV configuration is incomplete: %s is missing", error)
+            except subprocess.CalledProcessError:
+                # rclone already retried internally; keep the daemon alive and
+                # retry on the next synchronization interval.
+                failed = 1
+                LOG.exception("rclone synchronization failed")
+            except (OSError, UnicodeError, ValueError):
+                failed = 1
+                LOG.exception("WebDAV synchronization failed")
+            metrics = None
+            if store is not None:
+                try:
+                    metrics = store.metrics()
+                except sqlite3.Error:
+                    LOG.exception("Durable ingest state metrics are unavailable")
+            write_health(health_path, failed, metrics)
+            if once:
+                if failed:
+                    raise SystemExit(1)
+                return
+            if stop_event.wait(interval):
+                break
+    finally:
+        if store is not None:
+            store.close()
 
 
 def main() -> None:

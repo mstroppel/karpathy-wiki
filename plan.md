@@ -9,6 +9,11 @@ connected to the chat browser title until OpenCode ships such a mechanism.
 
 ## Current findings
 
+- Ingest coordination is durable: a content-free SQLite store
+  (`karpathy_wiki_ingest.state`) records ingest jobs with retries, backoff,
+  and leases, the immutable source generations, and publications with
+  idempotency keys; WebDAV cycles run as idempotent recoverable jobs
+  (first work packages of [#44](https://github.com/mstroppel/karpathy-wiki/issues/44)).
 - WebDAV now publishes coherent generations (PR for [#43](https://github.com/mstroppel/karpathy-wiki/issues/43));
   the Paperless module is split along responsibility boundaries
   ([#27](https://github.com/mstroppel/karpathy-wiki/issues/27)) and Paperless

@@ -9,6 +9,8 @@ ${DATA_ROOT}/
 │   ├── webdav/             # Published WebDAV generations (current + generations/)
 │   └── paperless/          # Sanitized Paperless source files
 ├── wiki/                   # SilverBullet space and independent Git repository
+├── state/
+│   └── ingest.sqlite3      # Durable ingest jobs, leases, generations, publications
 ├── quarantine/
 │   ├── webdav/             # Content-free WebDAV error reports
 │   └── paperless/          # Content-free Paperless error reports
@@ -46,6 +48,25 @@ readers never observe a partially published cycle and the last successful
 generation stays active after any failure. See
 [configuration](configuration.md#source-generations) for the publication
 model, retention, and recovery.
+
+## Durable ingest state
+
+The ingest services record accepted work in a small embedded SQLite state
+store below `${DATA_ROOT}/state`: ingest jobs with state transitions, attempts,
+and leases, the immutable source generations they published, and wiki
+publications. The store is content-free: it records identifiers, revisions,
+counts, and content-free error strings, never source or wiki content. It
+contains no credentials.
+
+The store makes ingest work recoverable and idempotent: a restart neither
+loses accepted work nor re-executes an accepted cycle whose publication is
+already active, interrupted cycles are recovered through lease expiry, and
+failed work backs off instead of retrying every synchronization interval.
+Jobs whose rejected input is unchanged stay dead and keep the failure visible
+until the input changes or the job is rearmed explicitly. Deleting the
+database file resets only this bookkeeping; the next ingest cycle republishes
+a generation and records it again. Include the file in backups of
+`DATA_ROOT`; it is recreated automatically when missing.
 
 ## Removed data directories
 
