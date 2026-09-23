@@ -1,57 +1,19 @@
 # GitHub Issue Implementation Plan
 
-This plan covers all issues currently tracked in the repository: **22 issues in total, 10 open and 12 closed**.
-
-## Completed issues
-
-No implementation work is planned for these issues unless a regression is found:
-
-- [#14](https://github.com/mstroppel/karpathy-wiki/issues/14) — renamed the Nextcloud integration to WebDAV and added ingest tracking.
-- [#17](https://github.com/mstroppel/karpathy-wiki/issues/17) — saves analyses as wiki pages with printable PDF views.
-- [#20](https://github.com/mstroppel/karpathy-wiki/issues/20) — anonymizes WebDAV input.
-- [#23](https://github.com/mstroppel/karpathy-wiki/issues/23) — provides the version-aware installer and update launcher.
-- [#24](https://github.com/mstroppel/karpathy-wiki/issues/24) — split ingest into core and plugin distributions (PR [#64](https://github.com/mstroppel/karpathy-wiki/pull/64)).
-- [#25](https://github.com/mstroppel/karpathy-wiki/issues/25) — defined the versioned ingest status contract with shared conformance fixtures (PR [#64](https://github.com/mstroppel/karpathy-wiki/pull/64)).
-- [#26](https://github.com/mstroppel/karpathy-wiki/issues/26) — integration coverage and daemon hardening.
-- [#28](https://github.com/mstroppel/karpathy-wiki/issues/28) — consistent quality checks.
-- [#29](https://github.com/mstroppel/karpathy-wiki/issues/29) — closed supply-chain gaps.
-- [#47](https://github.com/mstroppel/karpathy-wiki/issues/47) — migrated the stack to OpenCode v2.
-- [#53](https://github.com/mstroppel/karpathy-wiki/issues/53) — removed migration code before version 1.0.
-- [#56](https://github.com/mstroppel/karpathy-wiki/issues/56) — removed the session exporter; sharing by wiki link and printable PDF view already covers its use cases, and analysis runs directly in OpenCode.
-- [#42](https://github.com/mstroppel/karpathy-wiki/issues/42) — defined the provider manifest as the end-to-end plugin contract (PR [#65](https://github.com/mstroppel/karpathy-wiki/pull/65)).
+This plan tracks the remaining open issues after Phase 2.
+[#40](https://github.com/mstroppel/karpathy-wiki/issues/40) was closed as
+upstream-blocked: OpenCode v2 exposes no supported mechanism to
+change the web UI browser title (no config field, environment variable, or
+plugin hook; the title is a static build asset), so `WIKI_NAME` cannot be
+connected to the chat browser title until OpenCode ships such a mechanism.
 
 ## Current findings
 
-- Paperless already writes `paperless_url` and a visible Paperless link into sanitized source documents. [#50](https://github.com/mstroppel/karpathy-wiki/issues/50) should first verify that the link is preserved in generated wiki pages.
-- WebDAV still publishes files one at a time and loads the redaction file only once per process. [#43](https://github.com/mstroppel/karpathy-wiki/issues/43) therefore requires a real generation-based publication design.
+- WebDAV now publishes coherent generations (PR for [#43](https://github.com/mstroppel/karpathy-wiki/issues/43));
+  the Paperless module is split along responsibility boundaries
+  ([#27](https://github.com/mstroppel/karpathy-wiki/issues/27)) and Paperless
+  links survive source-to-wiki rendering ([#50](https://github.com/mstroppel/karpathy-wiki/issues/50)).
 - OpenCode writes directly to the wiki and the SilverBullet mount is writable. These are central constraints addressed by [#44](https://github.com/mstroppel/karpathy-wiki/issues/44).
-
-## Phase 2 — Coherent source publication
-
-### [#43](https://github.com/mstroppel/karpathy-wiki/issues/43): Publish WebDAV generations
-
-1. Build each synchronization in a new temporary generation directory.
-2. Record the upstream inventory/revisions and redaction fingerprint.
-3. Validate and anonymize every file before publication.
-4. Atomically switch the active generation only after the full cycle succeeds.
-5. Keep the last successful generation active after any failure.
-6. Reload redaction configuration every cycle and regenerate on fingerprint changes.
-7. Quarantine failed generations without storing source content in reports.
-8. Document retention, cleanup, and abandoned-generation recovery.
-
-### [#27](https://github.com/mstroppel/karpathy-wiki/issues/27): Split the Paperless module
-
-Split the current module into clear boundaries for configuration, the HTTP client, anonymization, document modelling/hashing, rendering/frontmatter, persistence, and daemon/health lifecycle. Preserve the CLI and environment semantics while adding focused tests. Use the contracts from Phase 1 rather than introducing another provider-specific format.
-
-### [#50](https://github.com/mstroppel/karpathy-wiki/issues/50): Preserve Paperless links
-
-1. Verify that `paperless_url` survives source-to-wiki rendering.
-2. Ensure every Paperless source page has a visible, validated HTTPS link.
-3. Add a regression test covering frontmatter and rendered Markdown.
-
-### [#40](https://github.com/mstroppel/karpathy-wiki/issues/40): Use the wiki name in the browser title
-
-Determine the supported OpenCode v2 branding/title mechanism, connect it to `WIKI_NAME`, retain a safe fallback, and add a browser-level regression test.
 
 ## Phase 3 — Transactional ingestion and publishing
 
@@ -109,10 +71,8 @@ No pre-1.0 migration code, legacy aliases, or automatic data-layout moves should
 
 ## Suggested priority
 
-1. **Next:** #43 and #27.
-2. **Small independent improvements:** #50 and #40.
-3. **Transactional architecture:** #44, delivered incrementally.
-4. **Future capabilities:** #18 and #15.
-5. **After 1.0:** #46.
+1. **Transactional architecture:** #44, delivered incrementally.
+2. **Future capabilities:** #18 and #15.
+3. **After 1.0:** #46.
 
 Every implementation PR should use a focused Conventional Commit and document behavior changes, security implications, data-layout/migration impact, and test evidence.

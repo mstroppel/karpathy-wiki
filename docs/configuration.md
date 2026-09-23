@@ -94,6 +94,49 @@ surfaced through the Compose healthcheck instead of restarting the daemon.
 After every successful cycle the provider manifest `sources/webdav/manifest.json`
 is refreshed; the name is reserved there.
 
+## Source Generations
+
+WebDAV sources are published as coherent generations instead of file-by-file.
+Every cycle synchronizes the upstream tree into a private staging directory,
+anonymizes and validates every file with a freshly loaded redaction
+configuration, and only then exposes the complete generation: the `current`
+symlink inside `sources/webdav` is switched atomically and the provider
+manifest is rewritten immediately afterwards. Manifest items refer to the
+immutable generation they describe, so readers cannot combine a manifest from
+one generation with files from another. Readers therefore never observe a
+partially published synchronization; the last successful generation stays
+active when rclone, decoding, redaction, validation, or publication fails, and
+removed upstream files disappear only with the successfully published
+replacement generation. The redactions file is reloaded every cycle, so
+rotating it regenerates every applicable file on the next cycle.
+
+The published layout below `sources/webdav` is:
+
+```text
+sources/webdav/
+├── manifest.json        # provider manifest of the active generation
+├── current              # symlink to the active generation directory
+└── generations/<id>/    # complete sanitized trees; only the active one is kept
+```
+
+Manifest items reference their sanitized file as
+`generations/<id>/<relative path>`, while `wiki_path` and the `source_path`
+frontmatter stay keyed by the stable relative upstream path, so wiki pages
+never change their destination when a new generation is published. Each
+generation directory records a
+`.generation.json` metadata file with its creation time, the redaction
+configuration fingerprint, and the upstream inventory hashes; it never
+contains upstream content.
+
+Retention keeps only the generation the manifest describes; staging
+directories abandoned by interrupted cycles are discarded at the start of the
+next cycle. To recover manually, delete every entry of
+`sources/webdav/generations` except the directory `current` resolves to, then
+restart the service. Upgrading installations with an older flat layout remove
+the previous contents of `sources/webdav` once; the next cycle republishes
+them as a generation. The names `manifest.json`, `current`, `generations`,
+and `.generation.json` are reserved inside `sources/webdav`.
+
 Paperless credentials use files rather than environment values. Set an absolute
 path when possible:
 

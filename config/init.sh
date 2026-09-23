@@ -100,7 +100,7 @@ if [ "$PAPERLESS_ENABLED" = true ]; then
 - Versuche niemals, anonymisierte Platzhalter auf reale Identitäten zurückzuführen.
 - Lies vor schreibenden Paperless-Vorgängen `/knowledge/sources/paperless/revoked.md` und bereinige widerrufenes Wissen nur auf ausdrücklichen Auftrag.'
   paperless_structure='
-- `sources/<von>-<bis>/`: Paperless-Zusammenfassungen in Bereichen von jeweils 1000 IDs; bewahre `paperless_id` und `source_revision` aus der anonymisierten Quelle.'
+- `sources/<von>-<bis>/`: Paperless-Zusammenfassungen in Bereichen von jeweils 1000 IDs; bewahre `paperless_id`, `paperless_url` und `source_revision` aus der anonymisierten Quelle und rendere den Paperless-Link sichtbar auf der Quellenseite.'
 fi
 
 install_if_absent "$wiki/AGENTS.md" <<EOF

@@ -8,7 +8,7 @@ ingest/
   core/       karpathy-wiki-ingest            shared core: anonymizer, atomic
               (karpathy_wiki_ingest)          writes, validation, health, plugin
                                               dispatch; ships no plugins
-  webdav/     karpathy-wiki-ingest-webdav     rclone sync + sanitizer loop
+  webdav/     karpathy-wiki-ingest-webdav     rclone sync + generation publisher
               (karpathy_wiki_ingest_webdav)
   paperless/  karpathy-wiki-ingest-paperless  Paperless API + sanitizer loop
               (karpathy_wiki_ingest_paperless)
@@ -151,6 +151,11 @@ A module must guarantee the same properties the built-ins provide:
 - Read the shared `REDACTIONS_FILE` secret (JSON) and build a
   `TargetedAnonymizer` from it; never write content that has not passed
   `anonymize()` without raising `PrivacyValidationError` on residual matches.
+- Publish coherent output only. A provider that exposes multiple files for one
+  synchronization must build the complete sanitized tree in a private staging
+  area and expose it in one atomic publication step, keeping the last
+  successful generation active after any failure (the built-in WebDAV plugin
+  publishes generations behind an atomic `current` symlink).
 - Write sanitized Markdown only to `SANITIZED_ROOT`, non-destructively via
   `atomic_write()`; files that fail text decoding or privacy validation go to
   `QUARANTINE_ROOT` as content-free error reports and are removed from the

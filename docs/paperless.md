@@ -45,6 +45,12 @@ Published files contain `paperless_id`, `paperless_url`, and a deterministic
 `source_revision`. Content or relevant redaction changes produce a new revision.
 Documents are split into ID ranges of no more than 1000 items.
 
+The `paperless_url` frontmatter field is validated HTTPS and repeated as
+trusted page frontmatter in the provider manifest, so every generated wiki
+summary page can render a visible link to the Paperless original; the
+`wiki-ingest` skill preserves the field and the link, and `wiki-lint` reports
+Paperless pages that lose it.
+
 Removing the source tag deletes the sanitized source and records the ID in
 `revoked.md`. Existing derived wiki knowledge is reported but not automatically
 deleted because it may be supported by additional sources.
