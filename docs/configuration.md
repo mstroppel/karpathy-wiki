@@ -101,8 +101,10 @@ Every cycle synchronizes the upstream tree into a private staging directory,
 anonymizes and validates every file with a freshly loaded redaction
 configuration, and only then exposes the complete generation: the `current`
 symlink inside `sources/webdav` is switched atomically and the provider
-manifest is rewritten immediately afterwards. Readers therefore never observe
-a partially published synchronization; the last successful generation stays
+manifest is rewritten immediately afterwards. Manifest items refer to the
+immutable generation they describe, so readers cannot combine a manifest from
+one generation with files from another. Readers therefore never observe a
+partially published synchronization; the last successful generation stays
 active when rclone, decoding, redaction, validation, or publication fails, and
 removed upstream files disappear only with the successfully published
 replacement generation. The redactions file is reloaded every cycle, so
@@ -117,10 +119,11 @@ sources/webdav/
 └── generations/<id>/    # complete sanitized trees; only the active one is kept
 ```
 
-Manifest items reference their sanitized file as `current/<relative path>`,
-while `wiki_path` and the `source_path` frontmatter stay keyed by the stable
-relative upstream path, so wiki pages never change their destination when a
-new generation is published. Each generation directory records a
+Manifest items reference their sanitized file as
+`generations/<id>/<relative path>`, while `wiki_path` and the `source_path`
+frontmatter stay keyed by the stable relative upstream path, so wiki pages
+never change their destination when a new generation is published. Each
+generation directory records a
 `.generation.json` metadata file with its creation time, the redaction
 configuration fingerprint, and the upstream inventory hashes; it never
 contains upstream content.

@@ -88,7 +88,7 @@ class PublicationTests(unittest.TestCase):
         )
         self.assertRegex(metadata["upstream_inventory"]["notes.txt"], r"^[0-9a-f]{64}$")
 
-    def test_manifest_describes_stable_wiki_paths_and_current_source_paths(self):
+    def test_manifest_describes_stable_wiki_paths_and_immutable_source_paths(self):
         (self.incoming / "nested").mkdir()
         (self.incoming / "nested/source.txt").write_text("Hallo Max Mustermann", encoding="utf-8")
 
@@ -99,7 +99,10 @@ class PublicationTests(unittest.TestCase):
         self.assertEqual(manifest["wiki_root"], "webdav")
         item = manifest["items"][0]
         self.assertEqual(item["source_key"], "nested/source.txt")
-        self.assertEqual(item["source_path"], "current/nested/source.txt")
+        self.assertEqual(
+            item["source_path"],
+            f"{GENERATIONS_DIRECTORY}/{active(self.sanitized).name}/nested/source.txt",
+        )
         self.assertEqual(item["wiki_path"], "webdav/nested/source.txt/index.md")
         self.assertEqual(item["claim"], {"source_path": "nested/source.txt"})
         self.assertEqual(
@@ -120,7 +123,16 @@ class PublicationTests(unittest.TestCase):
 
         self.assertEqual((changed, failed), (0, 0))
         second = json.loads((self.sanitized / "manifest.json").read_text(encoding="utf-8"))
-        self.assertEqual(first["items"], second["items"])
+        self.assertEqual(
+            [
+                {key: value for key, value in item.items() if key != "source_path"}
+                for item in first["items"]
+            ],
+            [
+                {key: value for key, value in item.items() if key != "source_path"}
+                for item in second["items"]
+            ],
+        )
         self.assertEqual(
             self.current_path("notes.txt").read_text(encoding="utf-8"),
             "Hallo [ICH]",
@@ -211,6 +223,9 @@ class QuarantineTests(unittest.TestCase):
             self.incoming, self.sanitized, self.quarantine, anonymizer_instance or anonymizer()
         )
 
+    def current_path(self, relative):
+        return self.sanitized / ACTIVE_SYMLINK / relative
+
     def test_binary_files_are_quarantined_without_storing_source_content(self):
         (self.incoming / "nested").mkdir()
         (self.incoming / "nested/notes.txt").write_text("Hallo Max Mustermann", encoding="utf-8")
@@ -218,19 +233,32 @@ class QuarantineTests(unittest.TestCase):
 
         changed, failed = self.publish()
 
-        self.assertEqual((changed, failed), (1, 1))
+        self.assertEqual((changed, failed), (0, 1))
         self.assertFalse((self.sanitized / ACTIVE_SYMLINK / "private.pdf").exists())
-        generation = active(self.sanitized).name
         report = (self.quarantine / "private.pdf.error").read_text(encoding="utf-8")
         self.assertIn("path=private.pdf", report)
-        self.assertIn("generation=" + generation, report)
+        self.assertIn("generation=", report)
         self.assertIn("error_type=UnicodeDecodeError", report)
         self.assertNotIn("%PDF", report)
-        manifest = json.loads((self.sanitized / "manifest.json").read_text(encoding="utf-8"))
+        self.assertFalse((self.sanitized / "manifest.json").exists())
+
+    def test_sanitization_failure_keeps_the_previous_generation(self):
+        (self.incoming / "notes.txt").write_text("safe", encoding="utf-8")
+        self.publish()
+        previous = active(self.sanitized)
+        previous_manifest = (self.sanitized / "manifest.json").read_text(encoding="utf-8")
+
+        (self.incoming / "broken.txt").write_bytes(b"\xff")
+        changed, failed = self.publish()
+
+        self.assertEqual((changed, failed), (0, 1))
+        self.assertEqual(active(self.sanitized), previous)
         self.assertEqual(
-            manifest["errors"],
-            [{"path": "current/private.pdf", "error": "UnicodeDecodeError"}],
+            (self.sanitized / "manifest.json").read_text(encoding="utf-8"),
+            previous_manifest,
         )
+        self.assertEqual(self.current_path("notes.txt").read_text(encoding="utf-8"), "safe")
+        self.assertFalse(self.current_path("broken.txt").exists())
 
     def test_privacy_validation_failure_keeps_the_file_out_of_the_generation(self):
         (self.incoming / "notes.txt").write_text("Hallo Max Mustermann", encoding="utf-8")
@@ -251,12 +279,7 @@ class QuarantineTests(unittest.TestCase):
 
         self.assertEqual((changed, failed), (0, 1))
         self.assertFalse((self.sanitized / ACTIVE_SYMLINK / "notes.txt").exists())
-        manifest = json.loads((self.sanitized / "manifest.json").read_text(encoding="utf-8"))
-        self.assertEqual(manifest["items"], [])
-        self.assertEqual(
-            manifest["errors"],
-            [{"path": "current/notes.txt", "error": "ValueError"}],
-        )
+        self.assertFalse((self.sanitized / "manifest.json").exists())
 
     def test_reserved_manifest_name_is_quarantined(self):
         (self.incoming / "manifest.json").write_text("upstream", encoding="utf-8")
@@ -269,12 +292,7 @@ class QuarantineTests(unittest.TestCase):
         # The provider manifest is the only manifest in the source directory;
         # the upstream file is never published under `current`.
         self.assertFalse((self.sanitized / ACTIVE_SYMLINK / "manifest.json").exists())
-        manifest = json.loads((self.sanitized / "manifest.json").read_text(encoding="utf-8"))
-        self.assertEqual(manifest["items"], [])
-        self.assertEqual(
-            manifest["errors"],
-            [{"path": "current/manifest.json", "error": "ReservedManifestName"}],
-        )
+        self.assertFalse((self.sanitized / "manifest.json").exists())
 
     def test_reserved_generation_metadata_name_is_quarantined(self):
         (self.incoming / GENERATION_METADATA_FILENAME).write_text("upstream", encoding="utf-8")
@@ -286,11 +304,9 @@ class QuarantineTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn("error_type=ReservedGenerationMetadataName", report)
-        # Only the plugin's own metadata is published under the reserved name.
-        metadata = json.loads(
-            (active(self.sanitized) / GENERATION_METADATA_FILENAME).read_text(encoding="utf-8")
-        )
-        self.assertEqual(metadata["generation"], active(self.sanitized).name)
+        # A candidate containing a reserved name is rejected as a whole.
+        self.assertIsNone(active_generation(self.sanitized))
+        self.assertFalse((self.sanitized / "manifest.json").exists())
 
     def test_reports_of_sources_that_are_gone_upstream_expire(self):
         (self.incoming / "notes.txt").write_text("eins", encoding="utf-8")

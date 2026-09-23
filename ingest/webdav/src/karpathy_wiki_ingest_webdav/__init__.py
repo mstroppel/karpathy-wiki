@@ -154,7 +154,7 @@ def sanitize_into_generation(
             report_quarantine(quarantine, relative, reserved_error_type, generation_name)
             errors.append(
                 {
-                    "path": f"{ACTIVE_SYMLINK}/{relative.as_posix()}",
+                    "path": f"{GENERATIONS_DIRECTORY}/{generation_name}/{relative.as_posix()}",
                     "error": reserved_error_type,
                 }
             )
@@ -181,7 +181,7 @@ def sanitize_into_generation(
             report_quarantine(quarantine, relative, type(error).__name__, generation_name)
             errors.append(
                 {
-                    "path": f"{ACTIVE_SYMLINK}/{relative.as_posix()}",
+                    "path": f"{GENERATIONS_DIRECTORY}/{generation_name}/{relative.as_posix()}",
                     "error": type(error).__name__,
                 }
             )
@@ -266,11 +266,14 @@ def read_active_revisions(sanitized: Path) -> dict[str, str]:
     return revisions
 
 
-def manifest_items(items: list[GenerationItem]) -> list[ManifestItem]:
+def manifest_items(items: list[GenerationItem], generation_name: str) -> list[ManifestItem]:
     return [
         ManifestItem(
             source_key=item.source_key,
-            source_path=f"{ACTIVE_SYMLINK}/{item.source_key}",
+            # The manifest is written separately from the active symlink. Point
+            # at the immutable generation so a reader cannot combine an old
+            # manifest with bytes from a newer generation during publication.
+            source_path=f"{GENERATIONS_DIRECTORY}/{generation_name}/{item.source_key}",
             wiki_path=posixpath.join(WIKI_ROOT, item.source_key, "index.md"),
             source_revision=item.revision,
             frontmatter={
@@ -316,6 +319,12 @@ def publish_generation(
             incoming, staging, generation.name, anonymizer, quarantine
         )
         write_generation_metadata(staging, generation.name, anonymizer.fingerprint, inventory)
+        if failed:
+            # A generation is all-or-nothing: quarantine reports describe the
+            # rejected candidate, while the last successful generation and its
+            # manifest remain untouched.
+            shutil.rmtree(staging, ignore_errors=True)
+            return 0, failed
         staging.rename(generation)
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
@@ -326,7 +335,7 @@ def publish_generation(
             sanitized / MANIFEST_FILENAME,
             build_manifest(
                 SOURCE_NAME,
-                manifest_items(items),
+                manifest_items(items, generation.name),
                 errors=errors,
                 wiki_root=WIKI_ROOT,
             ),
