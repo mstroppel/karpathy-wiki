@@ -211,7 +211,7 @@ class ClaimTests(StoreTestCase):
         assert recovered is not None
 
     def test_heartbeat_requires_a_known_lease(self):
-        with self.assertRaises(ValueError):
+        with self.assertRaises(StateError):
             self.store.heartbeat("missing", lease_seconds=60)
 
 

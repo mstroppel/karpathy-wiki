@@ -728,6 +728,95 @@ class DurableStateTests(unittest.TestCase):
         finally:
             store.close()
 
+    def test_empty_old_manifest_does_not_complete_a_new_generation(self):
+        instance = anonymizer()
+        store = self.store()
+        try:
+            publish_generation(self.incoming, self.sanitized, self.quarantine, instance)
+            (self.incoming / "notes.txt").write_text("new", encoding="utf-8")
+            inventory = upstream_inventory(self.incoming)
+            key = cycle_idempotency_key(instance.fingerprint, inventory)
+            job, _ = store.enqueue("ingest", {"provider": "webdav"}, idempotency_key=key, now=1000)
+            lease = store.claim(job.id, "interrupted", lease_seconds=60, now=1000)
+            assert lease is not None
+            old_manifest = (self.sanitized / "manifest.json").read_bytes()
+            publish_generation(self.incoming, self.sanitized, self.quarantine, instance)
+            (self.sanitized / "manifest.json").write_bytes(old_manifest)
+            interrupted = active(self.sanitized)
+
+            self.assertFalse(published_matches(self.sanitized, instance, inventory))
+            self.assertEqual(self.cycle(instance, store, now=1100), (1, 0, False))
+            self.assertNotEqual(active(self.sanitized), interrupted)
+            manifest = json.loads((self.sanitized / "manifest.json").read_text())
+            self.assertEqual([item["source_key"] for item in manifest["items"]], ["notes.txt"])
+            self.assertEqual(store.job(job.id).state, JOB_SUCCEEDED)
+        finally:
+            store.close()
+
+    def test_publication_exceptions_are_recorded_and_bounded(self):
+        (self.incoming / "notes.txt").write_text("new", encoding="utf-8")
+        instance = anonymizer()
+        store = self.store()
+        try:
+            key = cycle_idempotency_key(instance.fingerprint, upstream_inventory(self.incoming))
+            with mock.patch(
+                "karpathy_wiki_ingest_webdav.write_manifest", side_effect=OSError("private data")
+            ):
+                for attempt in range(5):
+                    with self.assertRaises(OSError):
+                        self.cycle(instance, store, now=1000 + attempt * 600)
+                    job = store.job_by_idempotency_key(key)
+                    assert job is not None
+                    self.assertEqual(job.last_error, "publication:OSError")
+                    self.assertEqual(job.attempts, attempt + 1)
+                    self.assertEqual(job.state, JOB_DEAD if attempt == 4 else JOB_PENDING)
+                self.assertEqual(self.cycle(instance, store, now=5000), (0, 1, False))
+            self.assertIsNone(active_generation(self.sanitized))
+        finally:
+            store.close()
+
+    def test_removed_lease_fences_and_joins_publication_worker(self):
+        (self.incoming / "notes.txt").write_text("new", encoding="utf-8")
+        instance = anonymizer()
+        store = self.store()
+        try:
+            job, _ = store.enqueue("ingest", {"provider": "webdav"}, idempotency_key="lost")
+            lease = store.claim(job.id, "worker", lease_seconds=2)
+            assert lease is not None
+            started = threading.Event()
+            release = threading.Event()
+
+            def work(guard: Callable[[], None]) -> tuple[int, int]:
+                started.set()
+                release.wait(timeout=5)
+                return publish_generation(
+                    self.incoming, self.sanitized, self.quarantine, instance, commit_guard=guard
+                )
+
+            def recover() -> None:
+                other = self.store()
+                try:
+                    self.assertTrue(started.wait(timeout=5))
+                    other.expire_leases(now=lease.expires_at)
+                    # Let the renewal loop observe the missing lease and fence
+                    # the worker before it reaches the pointer switch.
+                    time.sleep(1.3)
+                finally:
+                    other.close()
+                    release.set()
+
+            recovery = threading.Thread(target=recover)
+            recovery.start()
+            try:
+                with self.assertRaises(StateError):
+                    publish_with_heartbeat(work, store, lease.id, 2)
+            finally:
+                release.set()
+                recovery.join(timeout=5)
+            self.assertIsNone(active_generation(self.sanitized))
+        finally:
+            store.close()
+
     def test_a_lost_lease_fences_the_publication(self):
         (self.incoming / "notes.txt").write_text("Hallo Max Mustermann", encoding="utf-8")
         instance = anonymizer()

@@ -457,17 +457,14 @@ class StateStore:
         _check_positive(lease_seconds, "lease_seconds")
         moment = _now() if now is None else now
         with self._transaction() as connection:
-            row = connection.execute("SELECT * FROM leases WHERE id = ?", (lease_id,)).fetchone()
-            if row is None:
-                raise ValueError(f"unknown lease: {lease_id}")
-            if row["expires_at"] <= moment:
-                raise StateError(
-                    f"lease {lease_id} expired at {row['expires_at']} and cannot be renewed"
-                )
+            self._held_lease_row(connection, lease_id, moment)
             connection.execute(
                 "UPDATE leases SET expires_at = ? WHERE id = ?", (moment + lease_seconds, lease_id)
             )
-        return self.lease(lease_id)
+            row = connection.execute("SELECT * FROM leases WHERE id = ?", (lease_id,)).fetchone()
+            renewed = self._lease(row)
+            assert renewed is not None
+            return renewed
 
     def complete(
         self, lease_id: str, *, result: dict[str, Any] | None = None, now: int | None = None

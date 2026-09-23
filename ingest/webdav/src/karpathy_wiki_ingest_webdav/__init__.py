@@ -425,13 +425,28 @@ def published_matches(
     items = payload.get("items") if isinstance(payload, dict) else None
     if not isinstance(items, list):
         return False
-    prefix = f"{GENERATIONS_DIRECTORY}/{generation.name}/"
-    return all(
-        isinstance(item, dict)
-        and isinstance(item.get("source_path"), str)
-        and item["source_path"].startswith(prefix)
-        for item in items
-    )
+    # Check completeness as well as pointer identity: a previous empty
+    # manifest would otherwise pass the vacuous all() check after a crash.
+    files = {
+        path.relative_to(generation).as_posix(): file_revision(path)
+        for path in generation.rglob("*")
+        if path.is_file() and path != generation / GENERATION_METADATA_FILENAME
+    }
+    if len(items) != len(files):
+        return False
+    revisions: dict[str, str] = {}
+    for item in items:
+        if not isinstance(item, dict):
+            return False
+        key = item.get("source_key")
+        if not isinstance(key, str) or key not in files or key in revisions:
+            return False
+        if item.get("source_path") != f"{GENERATIONS_DIRECTORY}/{generation.name}/{key}":
+            return False
+        if item.get("source_revision") != files[key]:
+            return False
+        revisions[key] = files[key]
+    return revisions == files
 
 
 def record_generation(
@@ -490,7 +505,7 @@ def publish_with_heartbeat(
     while not finished.wait(max(lease_seconds // 3, 1)):
         try:
             store.heartbeat(lease_id, lease_seconds=lease_seconds)
-        except (sqlite3.Error, StateError):
+        except (sqlite3.Error, StateError, ValueError):
             # Renewal failed; never abandon running work, just stop renewing
             # and fence the worker through the guard so it cannot commit.
             renewed.clear()
@@ -553,6 +568,7 @@ def process_cycle(
     key = cycle_idempotency_key(anonymizer.fingerprint, inventory)
     lease_seconds = max(interval * 2, 300)
     published: tuple[int, int] | None = None
+    publication_started = False
     try:
         store.expire_leases(now=moment)
         job, _ = store.enqueue(
@@ -611,7 +627,17 @@ def process_cycle(
                 commit_guard=guard,
             )
 
-        changed, failed = publish_with_heartbeat(run_publish, store, lease.id, lease_seconds)
+        publication_started = True
+        try:
+            changed, failed = publish_with_heartbeat(run_publish, store, lease.id, lease_seconds)
+        except StateError:
+            # A lost lease has no authority to record a failure.
+            raise
+        except Exception as error:
+            # Publication failed before completing; preserve the bounded
+            # retry lifecycle without persisting exception messages/content.
+            store.fail(lease.id, error=f"publication:{type(error).__name__}", now=moment)
+            raise
         published = (changed, failed)
         if failed:
             store.fail(lease.id, error=f"quarantined:{failed}", now=moment)
@@ -628,6 +654,10 @@ def process_cycle(
         # in the same cycle and never outside the lease when the work already
         # ran. The degraded cycle stays visible through the returned flag.
         LOG.exception("Durable ingest state is unavailable; publishing without state")
+        if publication_started and published is None:
+            # Publication may have partially run; retrying it without the
+            # lease would bypass the coordinator and its failure accounting.
+            raise
         if published is not None:
             changed, failed = published
             return changed, failed, True
