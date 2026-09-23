@@ -84,7 +84,7 @@ class IngestTests(unittest.TestCase):
         )
 
     def source_path(self, root, document_id=3246):
-        return source_document_path(root / "sanitized", document_id)
+        return source_document_path(root / "sanitized" / "current", document_id)
 
     def anonymizer(self):
         return TargetedAnonymizer.from_config(
@@ -314,10 +314,12 @@ class IngestTests(unittest.TestCase):
             self.assertNotIn("Unterlagen Max", output)
             self.assertIn('document_type: "Brief an [ICH]"', output)
             self.assertIn('tags: ["Ablage [ADRESSE]", "Versicherung"]', output)
+            previous = (root / "sanitized" / "current").resolve()
             self.assertEqual(ingestor.run_once(), (0, 0))
+            self.assertEqual((root / "sanitized" / "current").resolve(), previous)
             self.assertEqual(self.source_path(root).stat().st_mode & 0o777, 0o600)
             self.assertEqual(
-                (root / "sanitized" / "revoked.md").stat().st_mode & 0o777,
+                (root / "sanitized" / "current" / "revoked.md").stat().st_mode & 0o777,
                 0o600,
             )
 
@@ -330,7 +332,7 @@ class IngestTests(unittest.TestCase):
             ingestor.client.selected = []
             ingestor.run_once()
             self.assertFalse(self.source_path(root).exists())
-            self.assertIn("- 3246", (root / "sanitized" / "revoked.md").read_text())
+            self.assertIn("- 3246", (root / "sanitized" / "current" / "revoked.md").read_text())
 
     def test_manifest_is_written_after_each_cycle(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -347,7 +349,9 @@ class IngestTests(unittest.TestCase):
             self.assertEqual(len(manifest["items"]), 1)
             item = manifest["items"][0]
             self.assertEqual(item["source_key"], "3246")
-            self.assertEqual(item["source_path"], "3000-3999/document-3246.md")
+            self.assertRegex(
+                item["source_path"], r"^generations/[0-9a-f]{32}/3000-3999/document-3246.md$"
+            )
             self.assertEqual(item["wiki_path"], "3000-3999/paperless-3246.md")
             self.assertEqual(item["claim"], {"paperless_id": "3246"})
             self.assertEqual(item["frontmatter"]["source_revision"], item["source_revision"])
@@ -414,10 +418,92 @@ class IngestTests(unittest.TestCase):
             ingestor.run_once()
             target = self.source_path(root)
             previous = target.read_text()
+            generation = (root / "sanitized" / "current").resolve()
             document["content"] = "changed"
             ingestor.anonymizer = FailingAnonymizer()
             self.assertEqual(ingestor.run_once(), (0, 1))
             self.assertEqual(target.read_text(), previous)
+            self.assertEqual((root / "sanitized" / "current").resolve(), generation)
+
+    def test_interrupted_staging_is_discarded_and_immutable_manifest_paths_resolve(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            ingestor = Ingestor(self.settings(root), FakeAnonymizer())
+            ingestor.client = FakeClient({"id": 3246, "title": "T", "content": "Inhalt"})
+            staging = root / "sanitized" / "generations" / ".staging-interrupted"
+            staging.mkdir(parents=True)
+            (staging / "partial.md").write_text("unfinished")
+            ingestor.run_once()
+            self.assertFalse(staging.exists())
+            root_sources = root / "sanitized"
+            manifest = json.loads((root_sources / "manifest.json").read_text())
+            source_path = manifest["items"][0]["source_path"]
+            self.assertEqual(
+                (root_sources / source_path).read_text(), self.source_path(root).read_text()
+            )
+            self.assertEqual(len(list((root_sources / "generations").iterdir())), 1)
+
+    def test_manifest_failure_rolls_back_the_active_generation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            ingestor = Ingestor(self.settings(root), FakeAnonymizer())
+            document = {"id": 3246, "title": "T", "content": "Inhalt"}
+            ingestor.client = FakeClient(document)
+            ingestor.run_once()
+            previous = (root / "sanitized" / "current").resolve()
+            original = self.source_path(root).read_text()
+            document["content"] = "changed"
+            with mock.patch(
+                "karpathy_wiki_ingest_paperless.ingestor.write_manifest",
+                side_effect=OSError("disk"),
+            ):
+                with self.assertRaises(OSError):
+                    ingestor.run_once()
+            self.assertEqual((root / "sanitized" / "current").resolve(), previous)
+            self.assertEqual(self.source_path(root).read_text(), original)
+            self.assertEqual(len(list((root / "sanitized" / "generations").iterdir())), 1)
+
+    def test_manifest_reader_can_open_the_previous_generation_during_switch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            ingestor = Ingestor(self.settings(root), FakeAnonymizer())
+            document = {"id": 3246, "title": "T", "content": "Inhalt"}
+            ingestor.client = FakeClient(document)
+            ingestor.run_once()
+            source_root = root / "sanitized"
+            old_manifest = json.loads((source_root / "manifest.json").read_text())
+            old_source = old_manifest["items"][0]["source_path"]
+            original = (source_root / old_source).read_text()
+            document["content"] = "changed"
+
+            from karpathy_wiki_ingest.manifest import write_manifest as real_write_manifest
+
+            def read_before_manifest_change(path, manifest):
+                self.assertEqual((source_root / old_source).read_text(), original)
+                self.assertNotEqual(
+                    (source_root / "current").resolve(), (source_root / old_source).parent.parent
+                )
+                real_write_manifest(path, manifest)
+
+            with mock.patch(
+                "karpathy_wiki_ingest_paperless.ingestor.write_manifest",
+                side_effect=read_before_manifest_change,
+            ):
+                ingestor.run_once()
+            new_manifest = json.loads((source_root / "manifest.json").read_text())
+            self.assertNotEqual(new_manifest["items"][0]["source_path"], old_source)
+            self.assertTrue((source_root / new_manifest["items"][0]["source_path"]).is_file())
+
+    def test_old_flat_layout_requires_manual_reorganization(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            ingestor = Ingestor(self.settings(root), FakeAnonymizer())
+            old = source_document_path(root / "sanitized", 3246)
+            old.parent.mkdir()
+            old.write_text("old source")
+            with self.assertRaisesRegex(ValueError, "flat source layout"):
+                ingestor.run_once()
+            self.assertEqual(old.read_text(), "old source")
 
     def test_invalid_revoked_list_is_not_overwritten(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -591,7 +677,7 @@ class PersistenceFailureTests(unittest.TestCase):
         document = {"id": 3246, "title": "T", "content": "Inhalt"}
         ingestor.client = FakeClient(document)
         ingestor.run_once()
-        target = source_document_path(self.root / "sanitized", 3246)
+        target = source_document_path(self.root / "sanitized" / "current", 3246)
         previous = target.read_text()
 
         real_atomic_write = atomic_write

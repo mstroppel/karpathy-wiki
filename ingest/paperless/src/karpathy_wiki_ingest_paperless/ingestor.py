@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+import fcntl
+import json
 import logging
+import os
+import shutil
 import threading
 import urllib.error
+import uuid
 from collections import Counter
+from pathlib import Path
 from typing import Protocol
 
 from karpathy_wiki_ingest.manifest import (
@@ -35,6 +41,40 @@ from .storage import (
 
 LOG = logging.getLogger("karpathy-wiki-ingest")
 SOURCE_NAME = "paperless"
+GENERATIONS = "generations"
+
+
+def active_generation(root: Path) -> Path | None:
+    pointer = root / "current"
+    if not pointer.is_symlink():
+        return None
+    target = (root / os.readlink(pointer)).resolve()
+    generations = (root / GENERATIONS).resolve()
+    if target.parent != generations or not target.is_dir():
+        raise ValueError("Paperless current pointer does not name a published generation")
+    return target
+
+
+def switch_generation(root: Path, generation: Path) -> None:
+    pointer = root / "current"
+    if pointer.exists() and not pointer.is_symlink():
+        raise ValueError("Paperless current is reserved for the generation pointer")
+    temporary = root / f".current.{uuid.uuid4().hex}"
+    try:
+        temporary.symlink_to(f"{GENERATIONS}/{generation.name}")
+        os.replace(temporary, pointer)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def same_sanitized_file(previous: Path, staging: Path, document_id: int) -> bool:
+    try:
+        return (
+            source_document_path(previous, document_id).read_bytes()
+            == source_document_path(staging, document_id).read_bytes()
+        )
+    except OSError:
+        return False
 
 
 class Anonymizer(Protocol):
@@ -56,22 +96,62 @@ class Ingestor:
         settings.quarantine_root.mkdir(parents=True, exist_ok=True)
 
     def run_once(self) -> tuple[int, int]:
+        root = self.settings.sanitized_root
+        with (root / ".ingest.lock").open("a+") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            return self._run_locked()
+
+    def _run_locked(self) -> tuple[int, int]:
+        root = self.settings.sanitized_root
+        if (root / MANIFEST_FILENAME).exists() and not (root / "current").is_symlink():
+            raise ValueError(
+                "Paperless flat source layout must be cleared manually before upgrading"
+            )
+        if (root / "revoked.md").exists() or source_document_ids(root):
+            raise ValueError(
+                "Paperless flat source layout must be cleared manually before upgrading"
+            )
+        generations = root / GENERATIONS
+        generations.mkdir(exist_ok=True)
+        previous = active_generation(root)
+        # Staging directories are never published; discard interrupted builds.
+        for abandoned in generations.glob(".staging-*"):
+            if abandoned.is_dir():
+                shutil.rmtree(abandoned)
+        generation = generations / uuid.uuid4().hex
+        staging = generations / f".staging-{generation.name}"
+        staging.mkdir()
+        try:
+            return self._build_generation(staging, generation, previous)
+        finally:
+            if staging.exists():
+                shutil.rmtree(staging)
+
+    def _build_generation(
+        self, staging: Path, generation: Path, previous: Path | None
+    ) -> tuple[int, int]:
         changed = 0
         failed = 0
         items: list[ManifestItem] = []
         errors: list[dict[str, str]] = []
         selected_ids = self.client.selected_document_ids()
-        known_ids = source_document_ids(self.settings.sanitized_root)
+        known_ids = source_document_ids(previous) if previous is not None else set()
+        revoked_ids = read_revoked_ids(previous / "revoked.md") if previous is not None else set()
         for document_id in selected_ids:
             source_path = f"{document_directory(document_id)}/document-{document_id}.md"
             try:
-                document_changed, item = self.process(document_id)
+                document_changed, item = self.process(
+                    document_id, staging, previous, generation.name
+                )
                 items.append(item)
                 if document_changed:
                     changed += 1
+                revoked_ids.discard(document_id)
             except PrivacyValidationError as error:
                 failed += 1
                 self.quarantine(document_id, error)
+                if document_id in known_ids:
+                    revoked_ids.add(document_id)
                 errors.append(
                     {
                         "source_key": str(document_id),
@@ -83,38 +163,95 @@ class Ingestor:
             except Exception as error:
                 failed += 1
                 self.record_error(document_id, error)
-                errors.append(
-                    {
-                        "source_key": str(document_id),
-                        "path": source_path,
-                        "error": f"operational:{type(error).__name__}",
-                    }
-                )
                 LOG.error("Document %s failed with %s", document_id, type(error).__name__)
-        self.reconcile(set(selected_ids), known_ids)
-        revoked_ids = read_revoked_ids(self.settings.sanitized_root / "revoked.md")
-        write_manifest(
-            self.settings.sanitized_root / MANIFEST_FILENAME,
-            build_manifest(
-                SOURCE_NAME,
-                items,
-                revoked=[
-                    {"source_key": str(document_id), "claim": {"paperless_id": str(document_id)}}
-                    for document_id in sorted(revoked_ids)
-                ],
-                errors=errors,
-            ),
+                # Operational errors leave the last complete generation active.
+                write_health(self.settings.health_path, failed)
+                return 0, failed
+        revoked_ids.update(known_ids - set(selected_ids))
+        write_revoked_ids(staging / "revoked.md", revoked_ids)
+        manifest = build_manifest(
+            SOURCE_NAME,
+            items,
+            revoked=[
+                {"source_key": str(document_id), "claim": {"paperless_id": str(document_id)}}
+                for document_id in sorted(revoked_ids)
+            ],
+            errors=errors,
         )
+        metadata = {
+            "generation": generation.name,
+            "redaction_fingerprint": self.anonymizer.fingerprint,
+            "source_revisions": {item.source_key: item.source_revision for item in items},
+        }
+        atomic_write(staging / ".generation.json", json.dumps(metadata, sort_keys=True) + "\n")
+        if previous is not None:
+            try:
+                old_metadata = json.loads((previous / ".generation.json").read_text())
+                old_manifest = json.loads(
+                    (self.settings.sanitized_root / MANIFEST_FILENAME).read_text()
+                )
+            except (OSError, ValueError):
+                pass
+            else:
+                if (
+                    isinstance(old_metadata, dict)
+                    and isinstance(old_manifest, dict)
+                    and old_metadata.get("redaction_fingerprint") == self.anonymizer.fingerprint
+                    and old_metadata.get("source_revisions") == metadata["source_revisions"]
+                    and isinstance(old_manifest.get("items"), list)
+                    and all(isinstance(item, dict) for item in old_manifest["items"])
+                    and [item.get("source_path") for item in old_manifest["items"]]
+                    == [
+                        item.source_path.replace(
+                            f"{GENERATIONS}/{generation.name}/",
+                            f"{GENERATIONS}/{previous.name}/",
+                            1,
+                        )
+                        for item in items
+                    ]
+                    and all(
+                        same_sanitized_file(previous, staging, int(item.source_key))
+                        for item in items
+                    )
+                    and [
+                        {key: value for key, value in item.items() if key != "source_path"}
+                        for item in old_manifest["items"]
+                    ]
+                    == [
+                        {key: value for key, value in item.items() if key != "source_path"}
+                        for item in manifest["items"]
+                    ]
+                    and all(old_manifest.get(key) == manifest[key] for key in ("revoked", "errors"))
+                ):
+                    write_health(self.settings.health_path, failed)
+                    return 0, failed
+        staging.rename(generation)
+        switched = False
+        try:
+            switch_generation(self.settings.sanitized_root, generation)
+            switched = True
+            write_manifest(self.settings.sanitized_root / MANIFEST_FILENAME, manifest)
+        except BaseException:
+            if switched:
+                if previous is not None:
+                    switch_generation(self.settings.sanitized_root, previous)
+                else:
+                    (self.settings.sanitized_root / "current").unlink(missing_ok=True)
+            shutil.rmtree(generation)
+            raise
+        for obsolete in (self.settings.sanitized_root / GENERATIONS).iterdir():
+            if obsolete != generation and obsolete.is_dir():
+                shutil.rmtree(obsolete)
         write_health(self.settings.health_path, failed)
         LOG.info("Sync complete: %s changed, %s failed", changed, failed)
         return changed, failed
 
-    def manifest_item(self, document_id: int, digest: str) -> ManifestItem:
+    def manifest_item(self, document_id: int, digest: str, generation: str) -> ManifestItem:
         relative = f"{document_directory(document_id)}/document-{document_id}.md"
         wiki_relative = f"{document_directory(document_id)}/paperless-{document_id}.md"
         return ManifestItem(
             source_key=str(document_id),
-            source_path=relative,
+            source_path=f"{GENERATIONS}/{generation}/{relative}",
             wiki_path=wiki_relative,
             source_revision=digest,
             frontmatter={
@@ -125,7 +262,9 @@ class Ingestor:
             claim={"paperless_id": str(document_id)},
         )
 
-    def process(self, document_id: int) -> tuple[bool, ManifestItem]:
+    def process(
+        self, document_id: int, staging: Path, previous: Path | None, generation: str
+    ) -> tuple[bool, ManifestItem]:
         document = self.client.document(document_id)
         issued_date = normalize_issued_date(document.get("created"))
         document_type = self.client.document_type_name(document.get("document_type"))
@@ -136,11 +275,9 @@ class Ingestor:
         ]
         tag_names = sorted(self.client.tag_names(content_tag_values))
         digest = source_hash(document, self.anonymizer.fingerprint, document_type, tag_names)
-        item = self.manifest_item(document_id, digest)
-        target = source_document_path(self.settings.sanitized_root, document_id)
-        if source_revision(target) == digest:
-            self.set_revoked(document_id, False)
-            return False, item
+        item = self.manifest_item(document_id, digest, generation)
+        target = source_document_path(staging, document_id)
+        old = source_document_path(previous, document_id) if previous is not None else None
         content = document.get("content") or ""
         if not isinstance(content, str) or not content.strip():
             raise PrivacyValidationError("Paperless document has no OCR text")
@@ -174,17 +311,18 @@ class Ingestor:
             removed_person_tags,
             digest,
         )
+        try:
+            unchanged = (
+                old is not None and source_revision(old) == digest and old.read_text() == output
+            )
+        except (OSError, UnicodeError):
+            unchanged = False
         atomic_write(target, output)
-        self.set_revoked(document_id, False)
         (self.settings.quarantine_root / f"document-{document_id}.txt").unlink(missing_ok=True)
         LOG.info("Document %s was anonymized", document_id)
-        return True, item
+        return not unchanged, item
 
     def quarantine(self, document_id: int, error: Exception) -> None:
-        target = source_document_path(self.settings.sanitized_root, document_id)
-        if target.is_file():
-            self.set_revoked(document_id, True)
-        target.unlink(missing_ok=True)
         message = (
             f"document_id={document_id}\n"
             f"category=privacy-validation\nerror_type={type(error).__name__}\n"
@@ -196,28 +334,6 @@ class Ingestor:
             f"document_id={document_id}\ncategory=operational\nerror_type={type(error).__name__}\n"
         )
         atomic_write(self.settings.quarantine_root / f"document-{document_id}.txt", message)
-
-    def reconcile(self, selected_ids: set[int], known_ids: set[int]) -> None:
-        revoked_path = self.settings.sanitized_root / "revoked.md"
-        revoked_ids = read_revoked_ids(revoked_path)
-        removed_ids = known_ids - selected_ids
-        revoked_ids.update(removed_ids)
-        if removed_ids or not revoked_path.exists():
-            write_revoked_ids(revoked_path, revoked_ids)
-        for document_id in removed_ids:
-            source_document_path(self.settings.sanitized_root, document_id).unlink(missing_ok=True)
-            LOG.warning("Document %s was revoked because its tag was removed", document_id)
-
-    def set_revoked(self, document_id: int, revoked: bool) -> None:
-        path = self.settings.sanitized_root / "revoked.md"
-        ids = read_revoked_ids(path)
-        if (document_id in ids) == revoked:
-            return
-        if revoked:
-            ids.add(document_id)
-        else:
-            ids.discard(document_id)
-        write_revoked_ids(path, ids)
 
 
 def run_continuously(ingestor: Ingestor, settings: Settings, stop_event: threading.Event) -> None:

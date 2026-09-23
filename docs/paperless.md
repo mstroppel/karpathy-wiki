@@ -45,14 +45,38 @@ Published files contain `paperless_id`, `paperless_url`, and a deterministic
 `source_revision`. Content or relevant redaction changes produce a new revision.
 Documents are split into ID ranges of no more than 1000 items.
 
+Each synchronization builds all sanitized documents and revocations in a new
+private generation. The provider manifest points at the files under
+`sources/paperless/generations/<id>/` rather than a mutable source path.
+An atomic `current` symlink selects the active generation; the manifest is
+replaced only after the complete generation is available. Failed fetches,
+decoding, or writes leave the previous generation and manifest active.
+Privacy validation failures are recorded as content-free errors and any
+previously published copy is revoked in the new generation. The redaction file
+is reloaded on each daemon cycle. Unchanged cycles retain the existing
+generation; completed replacements retain only the active generation.
+
+After an interrupted cycle, the next run removes abandoned `.staging-*`
+directories. If the active pointer or manifest is corrupt, stop the importer,
+inspect `current` and `manifest.json`, and restore a consistent pair from a
+backup rather than changing individual files. The file `.generation.json`
+contains only a redaction fingerprint and source revision hashes.
+
+**Existing pre-1.0 flat Paperless installations:** back up `DATA_ROOT`, stop the
+Paperless service, and manually remove the old flat sanitized source files,
+`revoked.md`, and `manifest.json` under `sources/paperless` before starting this
+layout. The next cycle fetches and republishes the selected documents. Review
+any previous revocations and wiki pages before re-importing. The importer
+refuses a flat layout instead of silently mixing generations with old files.
+
 The `paperless_url` frontmatter field is validated HTTPS and repeated as
 trusted page frontmatter in the provider manifest, so every generated wiki
 summary page can render a visible link to the Paperless original; the
 `wiki-ingest` skill preserves the field and the link, and `wiki-lint` reports
 Paperless pages that lose it.
 
-Removing the source tag deletes the sanitized source and records the ID in
-`revoked.md`. Existing derived wiki knowledge is reported but not automatically
+Removing the source tag omits the document from the new generation and records
+the ID in `current/revoked.md`. Existing derived wiki knowledge is reported but not automatically
 deleted because it may be supported by additional sources.
 
 After every cycle the plugin writes the provider manifest
