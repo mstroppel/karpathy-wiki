@@ -3,21 +3,27 @@
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import logging
 import os
 import shutil
+import socket
+import sqlite3
 import threading
+import time
 import urllib.error
 import uuid
 from collections import Counter
+from collections.abc import Callable
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 from karpathy_wiki_ingest.manifest import (
     MANIFEST_FILENAME,
     ManifestItem,
     build_manifest,
+    validate_manifest,
     write_manifest,
 )
 from karpathy_wiki_ingest.shared import (
@@ -25,6 +31,13 @@ from karpathy_wiki_ingest.shared import (
     TargetedAnonymizer,
     atomic_write,
     write_health,
+)
+from karpathy_wiki_ingest.state import (
+    JOB_DEAD,
+    JOB_SUCCEEDED,
+    JOB_SUPERSEDED,
+    StateError,
+    StateStore,
 )
 
 from .client import PaperlessClient, PaperlessSource, resource_id
@@ -42,6 +55,7 @@ from .storage import (
 LOG = logging.getLogger("karpathy-wiki-ingest")
 SOURCE_NAME = "paperless"
 GENERATIONS = "generations"
+PreparedDocument = tuple[dict[str, Any], str | None, list[str]]
 
 
 def active_generation(root: Path) -> Path | None:
@@ -95,13 +109,151 @@ class Ingestor:
         settings.sanitized_root.mkdir(parents=True, exist_ok=True)
         settings.quarantine_root.mkdir(parents=True, exist_ok=True)
 
+    def prepare_document(self, document_id: int) -> PreparedDocument:
+        document = self.client.document(document_id)
+        document_type = self.client.document_type_name(document.get("document_type"))
+        tags = [
+            value
+            for value in document.get("tags", [])
+            if resource_id(value, "tag") != self.settings.source_tag_id
+        ]
+        return document, document_type, sorted(self.client.tag_names(tags))
+
+    def snapshot(self) -> tuple[list[int], dict[str, str]]:
+        """Identify upstream work with bounded memory; never persist raw documents."""
+        selected = self.client.selected_document_ids()
+        revisions = {}
+        for document_id in selected:
+            document, document_type, tags = self.prepare_document(document_id)
+            revisions[str(document_id)] = source_hash(
+                document, self.anonymizer.fingerprint, document_type, tags
+            )
+        return selected, revisions
+
+    def cycle_key(self, revisions: dict[str, str]) -> str:
+        identity = json.dumps(
+            {
+                "revisions": revisions,
+                "redactions": self.anonymizer.fingerprint,
+                "tag": self.settings.source_tag_id,
+                "public_url": self.settings.public_url,
+            },
+            sort_keys=True,
+        ).encode()
+        return f"paperless-generation:{hashlib.sha256(identity).hexdigest()}"
+
+    def published_matches(self, revisions: dict[str, str]) -> bool:
+        root = self.settings.sanitized_root
+        generation = active_generation(root)
+        if generation is None:
+            return False
+        try:
+            metadata = json.loads((generation / ".generation.json").read_text())
+            manifest = validate_manifest(
+                json.loads((root / MANIFEST_FILENAME).read_text()), SOURCE_NAME
+            )
+        except (OSError, ValueError):
+            return False
+        if (
+            not isinstance(metadata, dict)
+            or not isinstance(metadata.get("source_revisions"), dict)
+            or metadata.get("generation") != generation.name
+            or metadata.get("redaction_fingerprint") != self.anonymizer.fingerprint
+            or metadata.get("input_revisions") != revisions
+            or metadata.get("public_url") != self.settings.public_url
+            or metadata.get("source_tag_id") != self.settings.source_tag_id
+        ):
+            return False
+        items = manifest["items"]
+        for item in items:
+            source_key = item["source_key"]
+            if not source_key.isdecimal():
+                return False
+            relative = source_document_path(Path("."), int(source_key)).as_posix()
+            if item["source_path"] != f"{GENERATIONS}/{generation.name}/{relative}":
+                return False
+            if item["source_revision"] != metadata["source_revisions"].get(source_key):
+                return False
+            if not (generation / relative).is_file():
+                return False
+        return len(items) == len(source_document_ids(generation))
+
+    def record_generation(self, store: StateStore) -> None:
+        root = self.settings.sanitized_root
+        generation = active_generation(root)
+        assert generation is not None
+        manifest = (root / MANIFEST_FILENAME).read_bytes()
+        payload = validate_manifest(json.loads(manifest), SOURCE_NAME)
+        store.record_source_generation(
+            SOURCE_NAME,
+            generation.name,
+            manifest_revision=hashlib.sha256(manifest).hexdigest(),
+            item_count=len(payload["items"]),
+            redaction_fingerprint=self.anonymizer.fingerprint,
+        )
+
+    def published_failures(self) -> int:
+        payload = validate_manifest(
+            json.loads((self.settings.sanitized_root / MANIFEST_FILENAME).read_text()), SOURCE_NAME
+        )
+        return len(payload["errors"])
+
+    @staticmethod
+    def publish_with_heartbeat(
+        work: Callable[[Callable[[], None]], tuple[int, int]],
+        store: StateStore,
+        lease_id: str,
+        lease_seconds: int,
+    ) -> tuple[int, int]:
+        outcome: dict[str, Any] = {}
+        finished = threading.Event()
+        authority = threading.Event()
+        authority.set()
+
+        def guard() -> None:
+            if not authority.is_set():
+                raise StateError(f"Paperless ingest lease {lease_id} was lost")
+
+        def target() -> None:
+            try:
+                outcome["result"] = work(guard)
+            except BaseException as error:
+                outcome["error"] = error
+            finally:
+                finished.set()
+
+        worker = threading.Thread(target=target, daemon=True)
+        worker.start()
+        while not finished.wait(max(lease_seconds // 3, 1)):
+            try:
+                store.heartbeat(lease_id, lease_seconds=lease_seconds)
+            except (sqlite3.Error, StateError, ValueError):
+                authority.clear()
+                LOG.exception("Could not renew the Paperless ingest lease %s", lease_id)
+                break
+        worker.join()
+        if "error" in outcome:
+            raise outcome["error"]
+        guard()
+        result = outcome["result"]
+        assert isinstance(result, tuple)
+        return result
+
     def run_once(self) -> tuple[int, int]:
         root = self.settings.sanitized_root
         with (root / ".ingest.lock").open("a+") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
-            return self._run_locked()
+            if self.settings.state_path is None:
+                return self._run_locked()
+            store = StateStore.open(self.settings.state_path)
+            try:
+                result = self._run_locked(store)
+                write_health(self.settings.health_path, result[1], store.metrics())
+                return result
+            finally:
+                store.close()
 
-    def _run_locked(self) -> tuple[int, int]:
+    def _run_locked(self, store: StateStore | None = None) -> tuple[int, int]:
         root = self.settings.sanitized_root
         if (root / MANIFEST_FILENAME).exists() and not (root / "current").is_symlink():
             raise ValueError(
@@ -111,6 +263,47 @@ class Ingestor:
             raise ValueError(
                 "Paperless flat source layout must be cleared manually before upgrading"
             )
+        selected_ids: list[int] | None = None
+        input_revisions: dict[str, str] | None = None
+        lease_id: str | None = None
+        if store is not None:
+            selected_ids, input_revisions = self.snapshot()
+            moment = int(time.time())
+            store.expire_leases(now=moment)
+            key = self.cycle_key(input_revisions)
+            job, _ = store.enqueue(
+                "ingest",
+                {"provider": SOURCE_NAME, "source_count": len(selected_ids)},
+                idempotency_key=key,
+                now=moment,
+            )
+            for pending in store.pending_jobs("ingest"):
+                if pending.id != job.id and pending.payload.get("provider") == SOURCE_NAME:
+                    store.supersede(pending.id, now=moment)
+            if job.state == JOB_SUCCEEDED and self.published_matches(input_revisions):
+                return 0, self.published_failures()
+            if job.state == JOB_DEAD:
+                LOG.error("Paperless job %s is dead; change the rejected input or rearm it", job.id)
+                return 0, 1
+            if job.state in (JOB_SUCCEEDED, JOB_SUPERSEDED):
+                store.rearm(job.id, now=moment)
+            lease = store.claim(
+                job.id,
+                holder=f"{socket.gethostname()}:{os.getpid()}",
+                lease_seconds=max(self.settings.interval_seconds * 2, 300),
+                now=moment,
+            )
+            if lease is None:
+                LOG.info("Paperless job %s is leased or backing off", job.id)
+                return 0, 1
+            lease_id = lease.id
+            if self.published_matches(input_revisions):
+                self.record_generation(store)
+                current = active_generation(root)
+                assert current is not None
+                failed = self.published_failures()
+                store.complete(lease_id, result={"generation": current.name, "failed": failed})
+                return 0, failed
         generations = root / GENERATIONS
         generations.mkdir(exist_ok=True)
         previous = active_generation(root)
@@ -122,26 +315,65 @@ class Ingestor:
         staging = generations / f".staging-{generation.name}"
         staging.mkdir()
         try:
-            return self._build_generation(staging, generation, previous)
+            if store is None or lease_id is None:
+                return self._build_generation(staging, generation, previous)
+            assert selected_ids is not None and input_revisions is not None
+
+            def work(guard: Callable[[], None]) -> tuple[int, int]:
+                return self._build_generation(
+                    staging, generation, previous, selected_ids, input_revisions, guard
+                )
+
+            try:
+                changed, failed = self.publish_with_heartbeat(
+                    work, store, lease_id, max(self.settings.interval_seconds * 2, 300)
+                )
+                if failed and not self.published_matches(input_revisions):
+                    store.fail(lease_id, f"operational:{failed}")
+                    return changed, failed
+                self.record_generation(store)
+                current = active_generation(root)
+                assert current is not None
+                store.complete(
+                    lease_id,
+                    result={"generation": current.name, "changed": changed, "failed": failed},
+                )
+                return changed, failed
+            except StateError:
+                raise
+            except Exception as error:
+                store.fail(lease_id, f"publication:{type(error).__name__}")
+                raise
         finally:
             if staging.exists():
                 shutil.rmtree(staging)
 
     def _build_generation(
-        self, staging: Path, generation: Path, previous: Path | None
+        self,
+        staging: Path,
+        generation: Path,
+        previous: Path | None,
+        selected_ids: list[int] | None = None,
+        input_revisions: dict[str, str] | None = None,
+        guard: Callable[[], None] | None = None,
     ) -> tuple[int, int]:
         changed = 0
         failed = 0
         items: list[ManifestItem] = []
         errors: list[dict[str, str]] = []
-        selected_ids = self.client.selected_document_ids()
+        if selected_ids is None:
+            selected_ids = self.client.selected_document_ids()
         known_ids = source_document_ids(previous) if previous is not None else set()
         revoked_ids = read_revoked_ids(previous / "revoked.md") if previous is not None else set()
         for document_id in selected_ids:
             source_path = f"{document_directory(document_id)}/document-{document_id}.md"
             try:
                 document_changed, item = self.process(
-                    document_id, staging, previous, generation.name
+                    document_id,
+                    staging,
+                    previous,
+                    generation.name,
+                    input_revisions[str(document_id)] if input_revisions is not None else None,
                 )
                 items.append(item)
                 if document_changed:
@@ -181,7 +413,10 @@ class Ingestor:
         metadata = {
             "generation": generation.name,
             "redaction_fingerprint": self.anonymizer.fingerprint,
+            "public_url": self.settings.public_url,
+            "source_tag_id": self.settings.source_tag_id,
             "source_revisions": {item.source_key: item.source_revision for item in items},
+            "input_revisions": input_revisions,
         }
         atomic_write(staging / ".generation.json", json.dumps(metadata, sort_keys=True) + "\n")
         if previous is not None:
@@ -197,6 +432,8 @@ class Ingestor:
                     isinstance(old_metadata, dict)
                     and isinstance(old_manifest, dict)
                     and old_metadata.get("redaction_fingerprint") == self.anonymizer.fingerprint
+                    and old_metadata.get("public_url") == self.settings.public_url
+                    and old_metadata.get("source_tag_id") == self.settings.source_tag_id
                     and old_metadata.get("source_revisions") == metadata["source_revisions"]
                     and isinstance(old_manifest.get("items"), list)
                     and all(isinstance(item, dict) for item in old_manifest["items"])
@@ -225,11 +462,17 @@ class Ingestor:
                 ):
                     write_health(self.settings.health_path, failed)
                     return 0, failed
+        if guard is not None:
+            guard()
         staging.rename(generation)
         switched = False
         try:
+            if guard is not None:
+                guard()
             switch_generation(self.settings.sanitized_root, generation)
             switched = True
+            if guard is not None:
+                guard()
             write_manifest(self.settings.sanitized_root / MANIFEST_FILENAME, manifest)
         except BaseException:
             if switched:
@@ -263,18 +506,18 @@ class Ingestor:
         )
 
     def process(
-        self, document_id: int, staging: Path, previous: Path | None, generation: str
+        self,
+        document_id: int,
+        staging: Path,
+        previous: Path | None,
+        generation: str,
+        expected_revision: str | None = None,
     ) -> tuple[bool, ManifestItem]:
-        document = self.client.document(document_id)
+        document, document_type, tag_names = self.prepare_document(document_id)
         issued_date = normalize_issued_date(document.get("created"))
-        document_type = self.client.document_type_name(document.get("document_type"))
-        content_tag_values = [
-            value
-            for value in document.get("tags", [])
-            if resource_id(value, "tag") != self.settings.source_tag_id
-        ]
-        tag_names = sorted(self.client.tag_names(content_tag_values))
         digest = source_hash(document, self.anonymizer.fingerprint, document_type, tag_names)
+        if expected_revision is not None and digest != expected_revision:
+            raise ValueError("Paperless document changed after job acceptance")
         item = self.manifest_item(document_id, digest, generation)
         target = source_document_path(staging, document_id)
         old = source_document_path(previous, document_id) if previous is not None else None
@@ -341,7 +584,7 @@ def run_continuously(ingestor: Ingestor, settings: Settings, stop_event: threadi
         try:
             ingestor.anonymizer = TargetedAnonymizer.from_file(settings.redactions_path)
             ingestor.run_once()
-        except (urllib.error.URLError, OSError, ValueError):
+        except (urllib.error.URLError, OSError, ValueError, sqlite3.Error):
             LOG.exception("Paperless synchronization failed")
             write_health(settings.health_path, 1)
         if stop_event.wait(settings.interval_seconds):

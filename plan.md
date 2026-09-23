@@ -5,13 +5,11 @@ independently deployable PRs.
 
 ## Transactional ingestion and publishing — [#44](https://github.com/mstroppel/karpathy-wiki/issues/44)
 
-1. Extend durable job coordination to Paperless and future providers. Paperless
-   now publishes coherent source generations, but still needs accepted jobs,
-   lease fencing, restart recovery, and recorded generation identities in the
-   shared store. The shared state
-   store already enforces an exclusive publisher-job lease and exposes queue
-   depth, oldest pending age, last recorded source generation and committed
-   publication, and failed/retried job counts through WebDAV health records.
+1. Keep the durable source-job contract available to future providers.
+   WebDAV and Paperless record accepted work and coherent source generations;
+   the shared state store enforces an exclusive publisher-job lease and exposes
+   queue depth, oldest pending age, last recorded source generation and
+   committed publication, and failed/retried job counts in ingest health.
 2. Add a serialized publisher using isolated Git worktrees. Validate patch
    paths, provenance, schema and content; reject or explicitly rebase and
    revalidate stale-base patches. Record the source generation, wiki base,

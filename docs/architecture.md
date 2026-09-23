@@ -43,7 +43,8 @@ roots. Only trusted proxy infrastructure should join `WEBPROXY_NETWORK`.
 Ingest work is coordinated by a durable, content-free SQLite state store
 below `${DATA_ROOT}/state` (`state.py` in the ingest core): ingest jobs with
 state transitions, attempts, and leases, the immutable source generations,
-and wiki publications. Git remains the human-readable audit history, but no
+and wiki publications. WebDAV and Paperless both record accepted cycles and
+published source generations. Git remains the human-readable audit history, but no
 longer carries job state or concurrency control; a restart neither loses
 accepted ingest work nor executes an accepted publication twice. The
 experimental analysis UI is not part of this stack. It can be added later

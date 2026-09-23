@@ -3,6 +3,7 @@ import http.server
 import json
 import os
 import re
+import sqlite3
 import tempfile
 import threading
 import unittest
@@ -13,6 +14,13 @@ from typing import Any
 from unittest import mock
 
 from karpathy_wiki_ingest.shared import atomic_write, canonical_phone
+from karpathy_wiki_ingest.state import (
+    JOB_PENDING,
+    JOB_SUCCEEDED,
+    JOB_SUPERSEDED,
+    StateError,
+    StateStore,
+)
 from karpathy_wiki_ingest_paperless import (
     Ingestor,
     PaperlessClient,
@@ -250,6 +258,20 @@ class IngestTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(ValueError, "PAPERLESS_PUBLIC_URL must use HTTPS"):
                 Settings.from_env()
+
+    def test_settings_accept_shared_state_path(self):
+        with mock.patch.dict(
+            os.environ,
+            {
+                "PAPERLESS_TOKEN": "token",
+                "PAPERLESS_SOURCE_TAG_ID": "5",
+                "REDACTIONS_FILE": "/redactions.json",
+                "PAPERLESS_PUBLIC_URL": "https://paperless.example.com",
+                "INGEST_STATE_PATH": "/data/state/ingest.sqlite3",
+            },
+            clear=True,
+        ):
+            self.assertEqual(Settings.from_env().state_path, Path("/data/state/ingest.sqlite3"))
 
     def test_settings_reject_public_urls_without_an_https_host(self):
         with mock.patch.dict(
@@ -525,6 +547,137 @@ class IngestTests(unittest.TestCase):
         document["modified"] = "2"
         document["versions"].append({"id": 11})
         self.assertEqual(first, source_hash(document, "redactions", None, ["Versicherung"]))
+
+
+class DurablePaperlessTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.root = Path(self.directory.name)
+        self.settings_with_state = Settings(
+            public_url="https://paperless.example.com",
+            source_tag_id=5,
+            token="token",
+            redactions_path=self.root / "redactions.json",
+            interval_seconds=900,
+            sanitized_root=self.root / "sanitized",
+            quarantine_root=self.root / "quarantine",
+            health_path=self.root / "health.json",
+            state_path=self.root / "ingest.sqlite3",
+        )
+        self.ingestor = Ingestor(self.settings_with_state, FakeAnonymizer())
+        self.document = {"id": 3246, "title": "T", "content": "Inhalt"}
+        self.ingestor.client = FakeClient(self.document)
+
+    def store(self):
+        assert self.settings_with_state.state_path is not None
+        store = StateStore.open(self.settings_with_state.state_path)
+        self.addCleanup(store.close)
+        return store
+
+    def test_cycle_is_recorded_once_and_health_contains_metrics(self):
+        self.assertEqual(self.ingestor.run_once(), (1, 0))
+        generation = (self.root / "sanitized" / "current").resolve()
+        self.assertEqual(self.ingestor.run_once(), (0, 0))
+        self.assertEqual((self.root / "sanitized" / "current").resolve(), generation)
+        store = self.store()
+        key = self.ingestor.cycle_key(self.ingestor.snapshot()[1])
+        job = store.job_by_idempotency_key(key)
+        assert job is not None
+        self.assertEqual(job.state, JOB_SUCCEEDED)
+        self.assertEqual(job.attempts, 1)
+        self.assertEqual(store.metrics()["source_generations"], 1)
+        health = json.loads(self.settings_with_state.health_path.read_text())
+        self.assertEqual(health["metrics"]["last_source_generation"]["provider"], "paperless")
+
+    def test_restart_finishes_published_job_without_new_generation(self):
+        with mock.patch.object(StateStore, "complete", side_effect=StateError("interrupted")):
+            with self.assertRaises(StateError):
+                self.ingestor.run_once()
+        generation = (self.root / "sanitized" / "current").resolve()
+        store = self.store()
+        job = store.job_by_idempotency_key(self.ingestor.cycle_key(self.ingestor.snapshot()[1]))
+        assert job is not None
+        self.assertNotEqual(job.state, JOB_SUCCEEDED)
+        lease = store._connection.execute(
+            "SELECT expires_at FROM leases WHERE job_id = ?", (job.id,)
+        ).fetchone()
+        assert lease is not None
+        future = lease[0] + 1
+        with mock.patch("karpathy_wiki_ingest.state.time.time", return_value=future):
+            self.assertEqual(self.ingestor.run_once(), (0, 0))
+        self.assertEqual((self.root / "sanitized" / "current").resolve(), generation)
+        self.assertEqual(store.job(job.id).state, JOB_SUCCEEDED)
+
+    def test_failed_cycle_backs_off_and_new_input_supersedes_it(self):
+        with mock.patch(
+            "karpathy_wiki_ingest_paperless.ingestor.write_manifest", side_effect=OSError("disk")
+        ):
+            with self.assertRaises(OSError):
+                self.ingestor.run_once()
+        store = self.store()
+        key = self.ingestor.cycle_key(self.ingestor.snapshot()[1])
+        failed = store.job_by_idempotency_key(key)
+        assert failed is not None
+        self.assertEqual(failed.state, JOB_PENDING)
+        self.assertEqual(self.ingestor.run_once(), (0, 1))
+        self.document["content"] = "changed"
+        self.assertEqual(self.ingestor.run_once(), (1, 0))
+        self.assertEqual(store.job(failed.id).state, JOB_SUPERSEDED)
+
+    def test_lost_lease_cannot_publish(self):
+        def fenced(work, _store, _lease_id, _seconds):
+            return work(lambda: (_ for _ in ()).throw(StateError("lost")))
+
+        with mock.patch.object(self.ingestor, "publish_with_heartbeat", side_effect=fenced):
+            with self.assertRaises(StateError):
+                self.ingestor.run_once()
+        self.assertFalse((self.root / "sanitized" / "current").exists())
+
+    def test_privacy_failure_stays_visible_when_cycle_is_idempotent(self):
+        self.document["content"] = ""
+        self.assertEqual(self.ingestor.run_once(), (0, 1))
+        generation = (self.root / "sanitized" / "current").resolve()
+        self.assertEqual(self.ingestor.run_once(), (0, 1))
+        self.assertEqual((self.root / "sanitized" / "current").resolve(), generation)
+        self.assertEqual(json.loads(self.settings_with_state.health_path.read_text())["failed"], 1)
+
+    def test_different_providers_do_not_supersede_one_another(self):
+        store = self.store()
+        webdav, _ = store.enqueue("ingest", {"provider": "webdav"}, now=100)
+        self.ingestor.run_once()
+        self.assertEqual(store.job(webdav.id).state, JOB_PENDING)
+
+    def test_state_failure_prevents_publication(self):
+        assert self.settings_with_state.state_path is not None
+        self.settings_with_state.state_path.write_text("not a sqlite database")
+        with self.assertRaises(sqlite3.DatabaseError):
+            self.ingestor.run_once()
+        self.assertFalse((self.root / "sanitized" / "current").exists())
+
+    def test_upstream_change_after_acceptance_cannot_publish_mixed_snapshot(self):
+        original = dict(self.document)
+        changed = {**original, "content": "new content"}
+        with mock.patch.object(self.ingestor.client, "document", side_effect=[original, changed]):
+            self.assertEqual(self.ingestor.run_once(), (0, 1))
+        self.assertFalse((self.root / "sanitized" / "current").exists())
+        key = self.ingestor.cycle_key({"3246": source_hash(original, "fake-v1", None, [])})
+        job = self.store().job_by_idempotency_key(key)
+        assert job is not None
+        self.assertEqual(job.state, JOB_PENDING)
+
+    def test_public_url_change_republishes_even_when_document_revision_is_unchanged(self):
+        self.ingestor.run_once()
+        old_generation = (self.root / "sanitized" / "current").resolve()
+        changed_settings = dataclasses.replace(
+            self.settings_with_state, public_url="https://paperless-new.example.com"
+        )
+        other = Ingestor(changed_settings, FakeAnonymizer())
+        other.client = FakeClient(self.document)
+        self.assertEqual(other.run_once(), (1, 0))
+        self.assertNotEqual((self.root / "sanitized" / "current").resolve(), old_generation)
+        text = source_document_path(self.root / "sanitized" / "current", 3246).read_text()
+        self.assertIn("https://paperless-new.example.com/documents/3246", text)
 
 
 class ClientAndShutdownTests(unittest.TestCase):

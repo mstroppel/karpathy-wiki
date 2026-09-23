@@ -70,9 +70,11 @@ services:
       SANITIZED_ROOT: /data/sanitized/paperless
       QUARANTINE_ROOT: /data/quarantine/paperless
       HEALTH_PATH: /tmp/health.json
+      INGEST_STATE_PATH: /data/state/ingest.sqlite3
     volumes:
       - ${DATA_ROOT:-./data}/sources/paperless:/data/sanitized/paperless:rw
       - ${DATA_ROOT:-./data}/quarantine/paperless:/data/quarantine/paperless:rw
+      - ${DATA_ROOT:-./data}/state:/data/state:rw
     secrets:
       - paperless_token
       - redactions
