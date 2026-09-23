@@ -144,7 +144,7 @@ services:
         AGENTS.md
         .git/**
     volumes:
-      - ${DATA_ROOT:-./data}/wiki:/space:rw
+      - ${DATA_ROOT:-./data}/wiki:/space:ro
     depends_on:
       init:
         condition: service_completed_successfully

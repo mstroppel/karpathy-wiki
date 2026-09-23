@@ -121,13 +121,14 @@ To pin a release:
 
 Back up `DATA_ROOT` and review release notes before upgrades that change the
 data layout or generated policies. Local Compose changes belong in
-`compose.override.yaml` and survive updates.
+`compose.override.yaml` and survive updates. See [backup and restore](docs/backup-restore.md)
+for a consistent backup and a separate-instance restore check.
 
 ## Security
 
 - Never commit `.env`, tokens, redaction lists, source material, wiki content, or sessions.
 - Paperless redaction is an explicit deny-list, not general anonymization. Review output before sending it to an external model provider.
-- WebDAV material is not redacted.
+- WebDAV text is locally redacted using the configured deny-list before publication to `sources/webdav`; unknown sensitive values may remain. Review sanitized output before sending it to a model provider.
 - Put OpenCode and `raw-files` behind a trusted, authenticated reverse proxy; do not expose them directly to the internet.
 - The OpenCode configuration is not a substitute for host-level network isolation or least-privilege model credentials.
 

@@ -99,6 +99,14 @@ until compose exec -T opencode curl -sS -o /dev/null http://silverbullet:3000/ 2
   [ "$i" -lt 30 ] || fail "silverbullet does not answer HTTP on port 3000"
   sleep 2
 done
+silverbullet_space_writable=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/space"}}{{.RW}}{{end}}{{end}}' "$project_name-silverbullet-1")
+[ "$silverbullet_space_writable" = false ] || fail "silverbullet wiki mount is not read-only"
+if compose exec -T silverbullet sh -c 'touch /space/.integration-write-check' >/dev/null 2>&1; then
+  fail "silverbullet can modify the wiki space"
+fi
+if [ -e "$scratch_dir/data/wiki/.integration-write-check" ]; then
+  fail "silverbullet created a file in the wiki space"
+fi
 printf 'compose-integration: startup OK\n'
 
 # ------------------------------------------------------------- webdav health
