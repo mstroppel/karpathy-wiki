@@ -7,12 +7,21 @@ import tempfile
 import threading
 import time
 import unittest
+from collections.abc import Callable
 from pathlib import Path
 from unittest import mock
 
 from karpathy_wiki_ingest import health as healthcheck
 from karpathy_wiki_ingest.shared import TargetedAnonymizer
-from karpathy_wiki_ingest.state import JOB_DEAD, JOB_LEASED, JOB_PENDING, JOB_SUCCEEDED, StateStore
+from karpathy_wiki_ingest.state import (
+    JOB_DEAD,
+    JOB_LEASED,
+    JOB_PENDING,
+    JOB_SUCCEEDED,
+    JOB_SUPERSEDED,
+    StateError,
+    StateStore,
+)
 from karpathy_wiki_ingest_webdav import (
     ACTIVE_SYMLINK,
     GENERATION_METADATA_FILENAME,
@@ -616,7 +625,7 @@ class DurableStateTests(unittest.TestCase):
             lease = store.claim(job.id, "worker", lease_seconds=2, now=int(time.time()))
             assert lease is not None
 
-            def slow_work() -> tuple[int, int]:
+            def slow_work(guard: Callable[[], None]) -> tuple[int, int]:
                 # Longer than the lease: without renewal the lease would expire
                 # in the middle of the work.
                 time.sleep(3)
@@ -670,6 +679,85 @@ class DurableStateTests(unittest.TestCase):
         record = json.loads((self.root / "health.json").read_text())
         self.assertEqual(record["failed"], 0)
         self.assertEqual(record["metrics"]["jobs"][JOB_SUCCEEDED], 1)
+
+    def test_superseded_inputs_do_not_stay_pending_forever(self):
+        instance = anonymizer()
+        store = self.store()
+        try:
+            # An accepted job whose upstream inventory is later replaced by a
+            # new synchronization can never run again; it becomes superseded.
+            store.enqueue(
+                "ingest",
+                {"provider": "webdav", "upstream_files": 2},
+                idempotency_key="old",
+                now=100,
+            )
+            (self.incoming / "notes.txt").write_text("Hallo Max Mustermann", encoding="utf-8")
+            changed, failed, degraded = self.cycle(instance, store, now=1000)
+            self.assertEqual((changed, failed, degraded), (1, 0, False))
+            superseded = store.job_by_idempotency_key("old")
+            assert superseded is not None
+            self.assertEqual(superseded.state, JOB_SUPERSEDED)
+        finally:
+            store.close()
+
+    def test_a_stale_manifest_forces_republication(self):
+        (self.incoming / "notes.txt").write_text("Hallo Max Mustermann", encoding="utf-8")
+        instance = anonymizer()
+        store = self.store()
+        try:
+            changed, failed, degraded = self.cycle(instance, store, now=1000)
+            self.assertEqual((changed, failed, degraded), (1, 0, False))
+            generation = active_generation(self.sanitized)
+            assert generation is not None
+
+            # A crash between the pointer switch and the manifest write leaves
+            # a matching generation with a stale manifest: the cycle must not
+            # treat that state as published.
+            (self.sanitized / "manifest.json").write_text('{"contract": "bogus"}', encoding="utf-8")
+            changed, failed, degraded = self.cycle(instance, store, now=1100)
+            self.assertEqual((changed, failed, degraded), (1, 0, False))
+            self.assertNotEqual(active_generation(self.sanitized), generation)
+            republished = active_generation(self.sanitized)
+            assert republished is not None
+            manifest = json.loads((self.sanitized / "manifest.json").read_text(encoding="utf-8"))
+            self.assertIn(
+                f"{GENERATIONS_DIRECTORY}/{republished.name}/",
+                manifest["items"][0]["source_path"],
+            )
+        finally:
+            store.close()
+
+    def test_a_lost_lease_fences_the_publication(self):
+        (self.incoming / "notes.txt").write_text("Hallo Max Mustermann", encoding="utf-8")
+        instance = anonymizer()
+        store = self.store()
+        try:
+            key = cycle_idempotency_key(instance.fingerprint, upstream_inventory(self.incoming))
+            job, _ = store.enqueue("ingest", {"provider": "webdav"}, idempotency_key=key, now=0)
+            lease = store.claim(job.id, "worker", lease_seconds=2, now=int(time.time()))
+            assert lease is not None
+
+            def fenced_work(guard: Callable[[], None]) -> tuple[int, int]:
+                # Renewal fails while the work runs; the commit guard must
+                # abort it before the pointer switch.
+                time.sleep(3)
+                return publish_generation(
+                    self.incoming,
+                    self.sanitized,
+                    self.quarantine,
+                    instance,
+                    commit_guard=guard,
+                )
+
+            with (
+                mock.patch.object(store, "heartbeat", side_effect=StateError("store gone")),
+                self.assertRaises(StateError),
+            ):
+                publish_with_heartbeat(fenced_work, store, lease.id, 2)
+            self.assertIsNone(active_generation(self.sanitized))
+        finally:
+            store.close()
 
     def test_run_records_state_and_health_metrics(self):
         (self.incoming / "notes.txt").write_text("Hallo Max Mustermann", encoding="utf-8")

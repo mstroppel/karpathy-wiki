@@ -11,6 +11,7 @@ from karpathy_wiki_ingest.state import (
     JOB_LEASED,
     JOB_PENDING,
     JOB_SUCCEEDED,
+    JOB_SUPERSEDED,
     STATE_VERSION,
     Lease,
     StateError,
@@ -220,7 +221,7 @@ class CompleteTests(StoreTestCase):
         self.store = StateStore.open(self.path)
         self.addCleanup(self.store.close)
         self.job, _ = self.store.enqueue("ingest", {"provider": "webdav"}, now=1000)
-        lease = self.store.claim(self.job.id, "holder", lease_seconds=60, now=1000)
+        lease = self.store.claim(self.job.id, "holder", lease_seconds=600, now=1000)
         assert lease is not None
         self.lease_id = lease.id
 
@@ -233,14 +234,35 @@ class CompleteTests(StoreTestCase):
         with self.assertRaises(StateError):
             self.store.complete(self.lease_id)
 
+    def test_complete_and_fail_reject_an_expired_lease(self):
+        # Completing before the expiry is still valid authority.
+        done = self.store.complete(self.lease_id, now=1059)
+        self.assertEqual(done.state, JOB_SUCCEEDED)
+
+        second, _ = self.store.enqueue("ingest", {}, now=1000)
+        lease = self.store.claim(second.id, "holder", lease_seconds=60, now=1000)
+        assert lease is not None
+        with self.assertRaises(StateError):
+            self.store.complete(lease.id, now=1060)
+        # The lease still exists and only expiry recovery can reclaim it.
+        self.assertEqual(self.store.expire_leases(now=1100), 1)
+        self.assertEqual(self.store.job(second.id).state, JOB_PENDING)
+
+        third, _ = self.store.enqueue("ingest", {}, now=1000)
+        lease = self.store.claim(third.id, "holder", lease_seconds=60, now=1000)
+        assert lease is not None
+        with self.assertRaises(StateError):
+            self.store.fail(lease.id, "late failure", now=1060)
+        self.assertEqual(self.store.job(third.id).state, JOB_LEASED)
+
     def test_complete_requires_the_lease_of_a_leased_job(self):
         with self.assertRaises(StateError):
             self.store.complete("not-a-lease")
 
     def test_fail_requires_the_lease_of_a_leased_job(self):
-        self.store.complete(self.lease_id)
+        self.store.complete(self.lease_id, now=1100)
         with self.assertRaises(StateError):
-            self.store.fail(self.lease_id, "late failure")
+            self.store.fail(self.lease_id, "late failure", now=1100)
 
 
 class RecoveryTests(StoreTestCase):
@@ -341,6 +363,32 @@ class GenerationTests(StoreTestCase):
         self.assertTrue(self.store.record_publication("k", "webdav", "gen", job_id=job.id, now=100))
 
 
+class SupersedeTests(StoreTestCase):
+    def setUp(self):
+        super().setUp()
+        self.store = StateStore.open(self.path)
+        self.addCleanup(self.store.close)
+
+    def test_supersede_moves_a_pending_job_to_a_terminal_state(self):
+        job, _ = self.store.enqueue("ingest", {"provider": "webdav"}, now=1000)
+        superseded = self.store.supersede(job.id, now=1100)
+        self.assertEqual(superseded.state, JOB_SUPERSEDED)
+        self.assertIsNone(self.store.claim(job.id, "holder", lease_seconds=60, now=1100))
+        with self.assertRaises(StateError):
+            self.store.supersede(job.id, now=1200)
+        # A superseded job whose content becomes active again is rearmed.
+        rearmed = self.store.rearm(job.id, now=1200)
+        self.assertEqual(rearmed.state, JOB_PENDING)
+
+    def test_pending_jobs_lists_only_pending_jobs_of_a_type(self):
+        first, _ = self.store.enqueue("ingest", {"provider": "webdav"}, now=1000)
+        self.store.enqueue("publish", {}, now=1000)
+        second, _ = self.store.enqueue("ingest", {"provider": "webdav"}, now=1100)
+        self.store.supersede(first.id, now=1100)
+        pending = self.store.pending_jobs("ingest")
+        self.assertEqual([job.id for job in pending], [second.id])
+
+
 class MetricsTests(StoreTestCase):
     def setUp(self):
         super().setUp()
@@ -351,7 +399,13 @@ class MetricsTests(StoreTestCase):
         self.assertEqual(
             self.store.metrics(now=1000),
             {
-                "jobs": {JOB_PENDING: 0, JOB_LEASED: 0, JOB_SUCCEEDED: 0, JOB_DEAD: 0},
+                "jobs": {
+                    JOB_PENDING: 0,
+                    JOB_LEASED: 0,
+                    JOB_SUCCEEDED: 0,
+                    JOB_DEAD: 0,
+                    JOB_SUPERSEDED: 0,
+                },
                 "oldest_pending_age": 0,
                 "source_generations": 0,
                 "publications": 0,

@@ -64,8 +64,10 @@ already active, interrupted cycles are recovered through lease expiry, and
 failed work backs off instead of retrying every synchronization interval.
 Jobs whose rejected input is unchanged stay dead and keep the failure visible
 until the input changes or the job is rearmed explicitly. Deleting the
-database file resets only this bookkeeping; the next ingest cycle republishes
-a generation and records it again. Include the file in backups of
+database file resets only this bookkeeping: the next ingest cycle re-records
+the active generation and re-coordinates from there, and republishes a
+generation when the published one no longer matches the upstream content.
+Include the file in backups of
 `DATA_ROOT`; it is recreated automatically when missing.
 
 ## Removed data directories

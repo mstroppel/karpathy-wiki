@@ -44,6 +44,7 @@ from karpathy_wiki_ingest.shared import (
 from karpathy_wiki_ingest.state import (
     JOB_DEAD,
     JOB_SUCCEEDED,
+    JOB_SUPERSEDED,
     StateError,
     StateStore,
 )
@@ -306,6 +307,7 @@ def publish_generation(
     quarantine: Path,
     anonymizer: TargetedAnonymizer,
     inventory: dict[str, str] | None = None,
+    commit_guard: Callable[[], None] | None = None,
 ) -> tuple[int, int]:
     """Build a complete generation and publish it in one atomic step.
 
@@ -314,7 +316,9 @@ def publish_generation(
     provider manifest is rewritten immediately afterwards. Any failure before
     or during publication keeps the previous successful generation active.
     ``inventory`` may carry the upstream revision map computed earlier in the
-    cycle so it is only hashed once.
+    cycle so it is only hashed once. ``commit_guard`` is called immediately
+    before the pointer switch; when it raises, the fenced-out worker aborts
+    without publishing (the staged generation is discarded by retention).
     """
     sanitized.mkdir(parents=True, exist_ok=True)
     quarantine.mkdir(parents=True, exist_ok=True)
@@ -346,6 +350,8 @@ def publish_generation(
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise
+    if commit_guard is not None:
+        commit_guard()
     swap_active(sanitized, generation)
     try:
         write_manifest(
@@ -389,9 +395,14 @@ def published_matches(
 ) -> bool:
     """Whether the active generation already publishes this exact cycle.
 
-    Compares the generation's own metadata (upstream inventory hashes and
-    redaction fingerprint) with the current cycle, so a completed job whose
-    publication was later lost is detected instead of skipped.
+    Three conditions must hold, so a completed job whose publication is
+    missing or inconsistent is detected instead of skipped: the active
+    generation's metadata must match the cycle's upstream inventory and
+    redaction fingerprint, and the published provider manifest must exist and
+    reference the active generation. The manifest check is what makes the
+    crash window between the pointer switch and the manifest write safe: a
+    matching generation with a stale or missing manifest forces a
+    republication.
     """
     generation = active_generation(sanitized)
     if generation is None:
@@ -402,9 +413,24 @@ def published_matches(
         )
     except (OSError, ValueError):
         return False
-    return (
-        metadata.get("redaction_fingerprint") == anonymizer.fingerprint
-        and metadata.get("upstream_inventory") == inventory
+    if (
+        metadata.get("redaction_fingerprint") != anonymizer.fingerprint
+        or metadata.get("upstream_inventory") != inventory
+    ):
+        return False
+    try:
+        payload = json.loads((sanitized / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    items = payload.get("items") if isinstance(payload, dict) else None
+    if not isinstance(items, list):
+        return False
+    prefix = f"{GENERATIONS_DIRECTORY}/{generation.name}/"
+    return all(
+        isinstance(item, dict)
+        and isinstance(item.get("source_path"), str)
+        and item["source_path"].startswith(prefix)
+        for item in items
     )
 
 
@@ -427,7 +453,7 @@ def record_generation(
 
 
 def publish_with_heartbeat(
-    work: Callable[[], tuple[int, int]],
+    work: Callable[[Callable[[], None]], tuple[int, int]],
     store: StateStore,
     lease_id: str,
     lease_seconds: int,
@@ -436,15 +462,24 @@ def publish_with_heartbeat(
 
     Long publications must never outlive the lease: an expired lease would let
     another process recover and claim the same job while the first one is
-    still mutating the generation directory. The work itself runs unchanged;
-    only the lease bookkeeping is interleaved.
+    still mutating the generation directory. ``work`` receives a commit guard
+    that raises ``StateError`` as soon as lease renewal has failed, so a
+    fenced-out worker can never switch the active pointer. All lease
+    bookkeeping happens on the caller's thread; the work itself runs unchanged
+    on a worker thread.
     """
     outcome: dict[str, Any] = {}
     finished = threading.Event()
+    renewed = threading.Event()
+    renewed.set()
+
+    def guard() -> None:
+        if not renewed.is_set():
+            raise StateError(f"lease {lease_id} lost; aborting the publication")
 
     def target() -> None:
         try:
-            outcome["result"] = work()
+            outcome["result"] = work(guard)
         except BaseException as error:  # re-raised on the caller's thread
             outcome["error"] = error
         finally:
@@ -456,9 +491,9 @@ def publish_with_heartbeat(
         try:
             store.heartbeat(lease_id, lease_seconds=lease_seconds)
         except (sqlite3.Error, StateError):
-            # Renewal failed; never abandon running work, just stop renewing.
-            # The lease is left to expire and the outcome is reported, so the
-            # recovery path never republishes concurrently.
+            # Renewal failed; never abandon running work, just stop renewing
+            # and fence the worker through the guard so it cannot commit.
+            renewed.clear()
             LOG.exception("Could not renew the ingest lease %s", lease_id)
             break
     thread.join()
@@ -467,6 +502,22 @@ def publish_with_heartbeat(
     result = outcome["result"]
     assert isinstance(result, tuple)
     return result
+
+
+def supersede_lost_inputs(store: StateStore, current_job_id: str, *, now: int) -> None:
+    """Retire pending jobs whose immutable input no longer exists.
+
+    A pending job is keyed by the upstream inventory it was accepted for. When
+    a later synchronization replaced that inventory, its bytes are gone and
+    the job can never be recovered or executed; it is recorded as superseded
+    instead of staying pending forever. The job of the current cycle and jobs
+    of other providers are never touched.
+    """
+    for pending in store.pending_jobs("ingest"):
+        if pending.id == current_job_id or pending.payload.get("provider") != SOURCE_NAME:
+            continue
+        store.supersede(pending.id, now=now)
+        LOG.info("Superseded ingest job %s: its upstream inventory no longer exists", pending.id)
 
 
 def process_cycle(
@@ -510,16 +561,18 @@ def process_cycle(
             idempotency_key=key,
             now=moment,
         )
+        supersede_lost_inputs(store, job.id, now=moment)
         if job.state == JOB_SUCCEEDED and published_matches(sanitized, anonymizer, inventory):
             LOG.info(
                 "Upstream and redactions unchanged; keeping generation %s",
                 (job.result or {}).get("generation"),
             )
             return 0, 0, False
-        if job.state in (JOB_DEAD, JOB_SUCCEEDED):
+        if job.state in (JOB_DEAD, JOB_SUCCEEDED, JOB_SUPERSEDED):
             # A dead job with unchanged content stays dead: the input is
             # deterministic and will fail again. A succeeded job whose
-            # publication is no longer active is rearmed to restore it.
+            # publication is no longer active, or a job superseded while its
+            # content was absent, is rearmed to restore it.
             if job.state == JOB_DEAD:
                 LOG.error(
                     "Ingest job %s is dead after repeated failures;"
@@ -547,14 +600,18 @@ def process_cycle(
                 lease.id, result={"generation": generation.name, "changed": 0}, now=moment
             )
             return 0, 0, False
-        changed, failed = publish_with_heartbeat(
-            lambda: publish_generation(
-                incoming, sanitized, quarantine, anonymizer, inventory=inventory
-            ),
-            store,
-            lease.id,
-            lease_seconds,
-        )
+
+        def run_publish(guard: Callable[[], None]) -> tuple[int, int]:
+            return publish_generation(
+                incoming,
+                sanitized,
+                quarantine,
+                anonymizer,
+                inventory=inventory,
+                commit_guard=guard,
+            )
+
+        changed, failed = publish_with_heartbeat(run_publish, store, lease.id, lease_seconds)
         published = (changed, failed)
         if failed:
             store.fail(lease.id, error=f"quarantined:{failed}", now=moment)

@@ -37,13 +37,14 @@ JOB_PENDING = "pending"
 JOB_LEASED = "leased"
 JOB_SUCCEEDED = "succeeded"
 JOB_DEAD = "dead"
-JOB_STATES = (JOB_PENDING, JOB_LEASED, JOB_SUCCEEDED, JOB_DEAD)
+JOB_SUPERSEDED = "superseded"
+JOB_STATES = (JOB_PENDING, JOB_LEASED, JOB_SUCCEEDED, JOB_DEAD, JOB_SUPERSEDED)
 
 PUBLICATION_STATUSES = ("published", "rolled_back", "rejected")
 
 # A terminal job keeps its idempotency key: re-submitting the same key never
 # re-executes the work; `rearm` is the explicit recovery transition.
-REARMABLE_STATES = (JOB_SUCCEEDED, JOB_DEAD)
+REARMABLE_STATES = (JOB_SUCCEEDED, JOB_DEAD, JOB_SUPERSEDED)
 
 _IDEMPOTENCY_KEY_LIMIT = 512
 _ERROR_LIMIT = 500
@@ -404,6 +405,49 @@ class StateStore:
             raise ValueError(f"unknown lease: {lease_id}")
         return found
 
+    def _held_lease_row(
+        self, connection: sqlite3.Connection, lease_id: str, moment: int
+    ) -> sqlite3.Row:
+        """The lease row of a still-valid lease; expired authority is rejected."""
+        row = connection.execute("SELECT * FROM leases WHERE id = ?", (lease_id,)).fetchone()
+        if row is None:
+            raise StateError(f"unknown lease: {lease_id}")
+        if row["expires_at"] <= moment:
+            raise StateError(f"lease {lease_id} expired at {row['expires_at']} and cannot be used")
+        return row
+
+    def pending_jobs(self, job_type: str) -> list[Job]:
+        """All pending jobs of a type, oldest first."""
+        if job_type not in JOB_TYPES:
+            raise ValueError(f"job_type must be one of {', '.join(JOB_TYPES)}")
+        rows = self._connection.execute(
+            "SELECT * FROM jobs WHERE job_type = ? AND state = ? ORDER BY created_at, id",
+            (job_type, JOB_PENDING),
+        ).fetchall()
+        jobs = [self._job(row) for row in rows]
+        return [job for job in jobs if job is not None]
+
+    def supersede(self, job_id: str, *, now: int | None = None) -> Job:
+        """Terminal transition for a pending job whose input no longer exists.
+
+        Superseded accepted work cannot be recovered (its immutable input is
+        gone), so it is recorded as terminal instead of pending forever.
+        """
+        moment = _now() if now is None else now
+        with self._transaction() as connection:
+            row = self._job_row_for_update(connection, job_id)
+            if row["state"] != JOB_PENDING:
+                raise StateError(f"job {job_id} in state {row['state']} cannot be superseded")
+            self._set_job(
+                connection,
+                job_id,
+                state=JOB_SUPERSEDED,
+                at=moment,
+                from_state=JOB_PENDING,
+                detail="input no longer available",
+            )
+        return self.job(job_id)
+
     def heartbeat(self, lease_id: str, *, lease_seconds: int, now: int | None = None) -> Lease:
         """Extend a held lease; long work must never rely on a stale lease.
 
@@ -428,14 +472,14 @@ class StateStore:
     def complete(
         self, lease_id: str, *, result: dict[str, Any] | None = None, now: int | None = None
     ) -> Job:
-        """Finish a leased job exactly once; the lease proves the holder."""
+        """Finish a leased job exactly once; the lease proves the holder.
+
+        Like a renewal, the completion is rejected once the lease has expired:
+        the time-limited authority cannot be exercised late.
+        """
         moment = _now() if now is None else now
         with self._transaction() as connection:
-            lease_row = connection.execute(
-                "SELECT * FROM leases WHERE id = ?", (lease_id,)
-            ).fetchone()
-            if lease_row is None:
-                raise StateError(f"unknown lease: {lease_id}")
+            lease_row = self._held_lease_row(connection, lease_id, moment)
             job_row = self._job_row_for_update(connection, lease_row["job_id"])
             if job_row["state"] != JOB_LEASED:
                 raise StateError(f"job {job_row['id']} is not leased")
@@ -473,11 +517,7 @@ class StateStore:
         _check_positive(max_attempts, "max_attempts")
         moment = _now() if now is None else now
         with self._transaction() as connection:
-            lease_row = connection.execute(
-                "SELECT * FROM leases WHERE id = ?", (lease_id,)
-            ).fetchone()
-            if lease_row is None:
-                raise StateError(f"unknown lease: {lease_id}")
+            lease_row = self._held_lease_row(connection, lease_id, moment)
             job_row = self._job_row_for_update(connection, lease_row["job_id"])
             if job_row["state"] != JOB_LEASED:
                 raise StateError(f"job {job_row['id']} is not leased")

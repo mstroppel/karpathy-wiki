@@ -159,9 +159,10 @@ The store records identifiers, revisions, counts, and content-free error
 strings only — never source content or credentials. When the store is
 unavailable, the daemon logs the failure and publishes without state instead
 of losing ingest availability; the health record then reports the failure.
-Deleting the database resets only the bookkeeping: the next cycle republishes
-a generation and records it again. See [data layout](data-layout.md) for the
-persistent location.
+Deleting the database resets only the bookkeeping: the next cycle re-records
+the active generation and re-coordinates from there, and republishes a
+generation when the published one no longer matches the upstream content.
+See [data layout](data-layout.md) for the persistent location.
 
 Paperless credentials use files rather than environment values. Set an absolute
 path when possible:
