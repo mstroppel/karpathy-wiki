@@ -53,6 +53,7 @@ wiki_git() {
 
 mkdir -p "$sources/webdav" \
   "$KNOWLEDGE_ROOT/incoming/webdav" \
+  "$KNOWLEDGE_ROOT/state" \
   "$wiki/assets" \
   "$wiki/sources/webdav" \
   "$wiki/entities" \

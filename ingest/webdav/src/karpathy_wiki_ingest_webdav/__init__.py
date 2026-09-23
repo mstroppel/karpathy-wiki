@@ -17,12 +17,16 @@ import os
 import posixpath
 import shutil
 import signal
+import socket
+import sqlite3
 import subprocess
 import threading
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from karpathy_wiki_ingest.manifest import (
     MANIFEST_FILENAME,
@@ -36,6 +40,13 @@ from karpathy_wiki_ingest.shared import (
     interval_seconds,
     required_env,
     write_health,
+)
+from karpathy_wiki_ingest.state import (
+    JOB_DEAD,
+    JOB_SUCCEEDED,
+    JOB_SUPERSEDED,
+    StateError,
+    StateStore,
 )
 
 LOG = logging.getLogger("karpathy-wiki-webdav")
@@ -64,9 +75,11 @@ class Settings:
     interval: int
     redactions: Path
     health_path: Path
+    state_path: Path | None = None
 
     @classmethod
     def from_env(cls) -> Settings:
+        state_path = os.getenv("INGEST_STATE_PATH", "").strip()
         return cls(
             incoming=Path(os.getenv("WEBDAV_INCOMING_ROOT", "/data/incoming/webdav")),
             sanitized=Path(os.getenv("WEBDAV_SANITIZED_ROOT", "/data/sanitized/webdav")),
@@ -74,6 +87,7 @@ class Settings:
             interval=interval_seconds(os.getenv("WEBDAV_SYNC_INTERVAL", "15m")),
             redactions=Path(required_env("REDACTIONS_FILE")),
             health_path=Path(os.getenv("HEALTH_PATH", "/tmp/health.json")),
+            state_path=Path(state_path) if state_path else None,
         )
 
 
@@ -292,6 +306,8 @@ def publish_generation(
     sanitized: Path,
     quarantine: Path,
     anonymizer: TargetedAnonymizer,
+    inventory: dict[str, str] | None = None,
+    commit_guard: Callable[[], None] | None = None,
 ) -> tuple[int, int]:
     """Build a complete generation and publish it in one atomic step.
 
@@ -299,6 +315,10 @@ def publish_generation(
     ``current`` is switched only after the full sanitized tree exists; the
     provider manifest is rewritten immediately afterwards. Any failure before
     or during publication keeps the previous successful generation active.
+    ``inventory`` may carry the upstream revision map computed earlier in the
+    cycle so it is only hashed once. ``commit_guard`` is called immediately
+    before the pointer switch; when it raises, the fenced-out worker aborts
+    without publishing (the staged generation is discarded by retention).
     """
     sanitized.mkdir(parents=True, exist_ok=True)
     quarantine.mkdir(parents=True, exist_ok=True)
@@ -308,7 +328,8 @@ def publish_generation(
     for report in sorted(quarantine.rglob("*.error")):
         report.unlink(missing_ok=True)
 
-    inventory = upstream_inventory(incoming)
+    if inventory is None:
+        inventory = upstream_inventory(incoming)
     staging = generations / f"{STAGING_PREFIX}{uuid.uuid4().hex}"
     generation = generations / new_generation_id()
     previous = active_generation(sanitized)
@@ -329,6 +350,8 @@ def publish_generation(
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise
+    if commit_guard is not None:
+        commit_guard()
     swap_active(sanitized, generation)
     try:
         write_manifest(
@@ -351,6 +374,297 @@ def publish_generation(
     prune_generations(generations, generation)
     changed = sum(1 for item in items if previous_revisions.get(item.source_key) != item.revision)
     return changed, failed
+
+
+def cycle_idempotency_key(fingerprint: str, inventory: dict[str, str]) -> str:
+    """Stable identity of an ingest cycle: upstream revisions plus redactions.
+
+    The identical upstream state with the identical redaction configuration is
+    the same accepted work, so re-submission cannot execute a second cycle.
+    """
+    encoded = json.dumps(
+        {"fingerprint": fingerprint, "inventory": inventory},
+        ensure_ascii=False,
+        sort_keys=True,
+    ).encode("utf-8")
+    return f"webdav-generation:{hashlib.sha256(encoded).hexdigest()}"
+
+
+def published_matches(
+    sanitized: Path, anonymizer: TargetedAnonymizer, inventory: dict[str, str]
+) -> bool:
+    """Whether the active generation already publishes this exact cycle.
+
+    Three conditions must hold, so a completed job whose publication is
+    missing or inconsistent is detected instead of skipped: the active
+    generation's metadata must match the cycle's upstream inventory and
+    redaction fingerprint, and the published provider manifest must exist and
+    reference the active generation. The manifest check is what makes the
+    crash window between the pointer switch and the manifest write safe: a
+    matching generation with a stale or missing manifest forces a
+    republication.
+    """
+    generation = active_generation(sanitized)
+    if generation is None:
+        return False
+    try:
+        metadata = json.loads(
+            (generation / GENERATION_METADATA_FILENAME).read_text(encoding="utf-8")
+        )
+    except (OSError, ValueError):
+        return False
+    if (
+        metadata.get("redaction_fingerprint") != anonymizer.fingerprint
+        or metadata.get("upstream_inventory") != inventory
+    ):
+        return False
+    try:
+        payload = json.loads((sanitized / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    items = payload.get("items") if isinstance(payload, dict) else None
+    if not isinstance(items, list):
+        return False
+    # Check completeness as well as pointer identity: a previous empty
+    # manifest would otherwise pass the vacuous all() check after a crash.
+    files = {
+        path.relative_to(generation).as_posix(): file_revision(path)
+        for path in generation.rglob("*")
+        if path.is_file() and path != generation / GENERATION_METADATA_FILENAME
+    }
+    if len(items) != len(files):
+        return False
+    revisions: dict[str, str] = {}
+    for item in items:
+        if not isinstance(item, dict):
+            return False
+        key = item.get("source_key")
+        if not isinstance(key, str) or key not in files or key in revisions:
+            return False
+        if item.get("source_path") != f"{GENERATIONS_DIRECTORY}/{generation.name}/{key}":
+            return False
+        if item.get("source_revision") != files[key]:
+            return False
+        revisions[key] = files[key]
+    return revisions == files
+
+
+def record_generation(
+    store: StateStore, sanitized: Path, generation: Path, fingerprint: str, *, now: int
+) -> None:
+    """Record the published generation in the durable state store."""
+    payload = json.loads((sanitized / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    items = payload.get("items") if isinstance(payload, dict) else None
+    item_count = len(items) if isinstance(items, list) else 0
+    manifest_revision = hashlib.sha256((sanitized / MANIFEST_FILENAME).read_bytes()).hexdigest()
+    store.record_source_generation(
+        SOURCE_NAME,
+        generation.name,
+        manifest_revision=manifest_revision,
+        item_count=item_count,
+        redaction_fingerprint=fingerprint,
+        now=now,
+    )
+
+
+def publish_with_heartbeat(
+    work: Callable[[Callable[[], None]], tuple[int, int]],
+    store: StateStore,
+    lease_id: str,
+    lease_seconds: int,
+) -> tuple[int, int]:
+    """Run the publication while continuously renewing the job's lease.
+
+    Long publications must never outlive the lease: an expired lease would let
+    another process recover and claim the same job while the first one is
+    still mutating the generation directory. ``work`` receives a commit guard
+    that raises ``StateError`` as soon as lease renewal has failed, so a
+    fenced-out worker can never switch the active pointer. All lease
+    bookkeeping happens on the caller's thread; the work itself runs unchanged
+    on a worker thread.
+    """
+    outcome: dict[str, Any] = {}
+    finished = threading.Event()
+    renewed = threading.Event()
+    renewed.set()
+
+    def guard() -> None:
+        if not renewed.is_set():
+            raise StateError(f"lease {lease_id} lost; aborting the publication")
+
+    def target() -> None:
+        try:
+            outcome["result"] = work(guard)
+        except BaseException as error:  # re-raised on the caller's thread
+            outcome["error"] = error
+        finally:
+            finished.set()
+
+    thread = threading.Thread(target=target, daemon=True)
+    thread.start()
+    while not finished.wait(max(lease_seconds // 3, 1)):
+        try:
+            store.heartbeat(lease_id, lease_seconds=lease_seconds)
+        except (sqlite3.Error, StateError, ValueError):
+            # Renewal failed; never abandon running work, just stop renewing
+            # and fence the worker through the guard so it cannot commit.
+            renewed.clear()
+            LOG.exception("Could not renew the ingest lease %s", lease_id)
+            break
+    thread.join()
+    if "error" in outcome:
+        raise outcome["error"]
+    result = outcome["result"]
+    assert isinstance(result, tuple)
+    return result
+
+
+def supersede_lost_inputs(store: StateStore, current_job_id: str, *, now: int) -> None:
+    """Retire pending jobs whose immutable input no longer exists.
+
+    A pending job is keyed by the upstream inventory it was accepted for. When
+    a later synchronization replaced that inventory, its bytes are gone and
+    the job can never be recovered or executed; it is recorded as superseded
+    instead of staying pending forever. The job of the current cycle and jobs
+    of other providers are never touched.
+    """
+    for pending in store.pending_jobs("ingest"):
+        if pending.id == current_job_id or pending.payload.get("provider") != SOURCE_NAME:
+            continue
+        store.supersede(pending.id, now=now)
+        LOG.info("Superseded ingest job %s: its upstream inventory no longer exists", pending.id)
+
+
+def process_cycle(
+    incoming: Path,
+    sanitized: Path,
+    quarantine: Path,
+    anonymizer: TargetedAnonymizer,
+    store: StateStore | None,
+    *,
+    interval: int,
+    now: int | None = None,
+) -> tuple[int, int, bool]:
+    """Run one ingest cycle as a durable, idempotent job.
+
+    Returns ``(changed, failed, degraded)`` where ``degraded`` marks a cycle
+    that ran without durable state. Without a state store the cycle behaves
+    exactly as before. With one, the cycle is an accepted job keyed by the
+    upstream inventory and redaction fingerprint: identical accepted work is
+    never executed twice, unchanged upstream content keeps the active
+    generation, failures back off instead of hammering every interval, and
+    expired leases from interrupted cycles are recovered. A failing state
+    store degrades to the stateless publication instead of losing ingest
+    availability, but the degraded cycle stays visible through the health
+    record.
+    """
+    moment = int(time.time() if now is None else now)
+    inventory = upstream_inventory(incoming)
+    if store is None:
+        changed, failed = publish_generation(
+            incoming, sanitized, quarantine, anonymizer, inventory=inventory
+        )
+        return changed, failed, False
+    key = cycle_idempotency_key(anonymizer.fingerprint, inventory)
+    lease_seconds = max(interval * 2, 300)
+    published: tuple[int, int] | None = None
+    publication_started = False
+    try:
+        store.expire_leases(now=moment)
+        job, _ = store.enqueue(
+            "ingest",
+            {"provider": SOURCE_NAME, "upstream_files": len(inventory)},
+            idempotency_key=key,
+            now=moment,
+        )
+        supersede_lost_inputs(store, job.id, now=moment)
+        if job.state == JOB_SUCCEEDED and published_matches(sanitized, anonymizer, inventory):
+            LOG.info(
+                "Upstream and redactions unchanged; keeping generation %s",
+                (job.result or {}).get("generation"),
+            )
+            return 0, 0, False
+        if job.state in (JOB_DEAD, JOB_SUCCEEDED, JOB_SUPERSEDED):
+            # A dead job with unchanged content stays dead: the input is
+            # deterministic and will fail again. A succeeded job whose
+            # publication is no longer active, or a job superseded while its
+            # content was absent, is rearmed to restore it.
+            if job.state == JOB_DEAD:
+                LOG.error(
+                    "Ingest job %s is dead after repeated failures;"
+                    " fix the rejected source content",
+                    job.id,
+                )
+                return 0, 1, False
+            store.rearm(job.id, now=moment)
+        lease = store.claim(
+            job.id,
+            holder=f"{socket.gethostname()}:{os.getpid()}",
+            lease_seconds=lease_seconds,
+            now=moment,
+        )
+        if lease is None:
+            LOG.info("Ingest job %s is not claimable yet; keeping the active generation", job.id)
+            return 0, 1, False
+        if published_matches(sanitized, anonymizer, inventory):
+            # A previous cycle published the generation but died before
+            # completing the job; record and complete without republishing.
+            generation = active_generation(sanitized)
+            assert generation is not None
+            record_generation(store, sanitized, generation, anonymizer.fingerprint, now=moment)
+            store.complete(
+                lease.id, result={"generation": generation.name, "changed": 0}, now=moment
+            )
+            return 0, 0, False
+
+        def run_publish(guard: Callable[[], None]) -> tuple[int, int]:
+            return publish_generation(
+                incoming,
+                sanitized,
+                quarantine,
+                anonymizer,
+                inventory=inventory,
+                commit_guard=guard,
+            )
+
+        publication_started = True
+        try:
+            changed, failed = publish_with_heartbeat(run_publish, store, lease.id, lease_seconds)
+        except StateError:
+            # A lost lease has no authority to record a failure.
+            raise
+        except Exception as error:
+            # Publication failed before completing; preserve the bounded
+            # retry lifecycle without persisting exception messages/content.
+            store.fail(lease.id, error=f"publication:{type(error).__name__}", now=moment)
+            raise
+        published = (changed, failed)
+        if failed:
+            store.fail(lease.id, error=f"quarantined:{failed}", now=moment)
+            return changed, failed, False
+        generation = active_generation(sanitized)
+        assert generation is not None
+        record_generation(store, sanitized, generation, anonymizer.fingerprint, now=moment)
+        store.complete(
+            lease.id, result={"generation": generation.name, "changed": changed}, now=moment
+        )
+        return changed, failed, False
+    except sqlite3.Error:
+        # Coordination is unavailable; publish without state, but never again
+        # in the same cycle and never outside the lease when the work already
+        # ran. The degraded cycle stays visible through the returned flag.
+        LOG.exception("Durable ingest state is unavailable; publishing without state")
+        if publication_started and published is None:
+            # Publication may have partially run; retrying it without the
+            # lease would bypass the coordinator and its failure accounting.
+            raise
+        if published is not None:
+            changed, failed = published
+            return changed, failed, True
+        changed, failed = publish_generation(
+            incoming, sanitized, quarantine, anonymizer, inventory=inventory
+        )
+        return changed, failed, True
 
 
 def synchronize(incoming: Path, path: str) -> None:
@@ -385,43 +699,75 @@ def install_stop_handler() -> threading.Event:
 
 def run(once: bool) -> None:
     environment = Settings.from_env()
-    incoming, sanitized, quarantine, interval, redactions, health_path = (
+    incoming, sanitized, quarantine, interval, redactions, health_path, state_path = (
         environment.incoming,
         environment.sanitized,
         environment.quarantine,
         environment.interval,
         environment.redactions,
         environment.health_path,
+        environment.state_path,
     )
     stop_event = install_stop_handler()
     incoming.mkdir(parents=True, exist_ok=True)
-    while not stop_event.is_set():
-        failed = 0
-        try:
-            # The redaction configuration is reloaded for every cycle so a
-            # changed redactions file regenerates every applicable file.
-            anonymizer = TargetedAnonymizer.from_file(redactions)
-            synchronize(incoming, os.environ["WEBDAV_PATH"])
-            changed, failed = publish_generation(incoming, sanitized, quarantine, anonymizer)
-            LOG.info("WebDAV synchronization complete: %s changed, %s quarantined", changed, failed)
-        except KeyError as error:
-            failed = 1
-            LOG.exception("WebDAV configuration is incomplete: %s is missing", error)
-        except subprocess.CalledProcessError:
-            # rclone already retried internally; keep the daemon alive and
-            # retry on the next synchronization interval.
-            failed = 1
-            LOG.exception("rclone synchronization failed")
-        except (OSError, UnicodeError, ValueError):
-            failed = 1
-            LOG.exception("WebDAV synchronization failed")
-        write_health(health_path, failed)
-        if once:
-            if failed:
-                raise SystemExit(1)
-            return
-        if stop_event.wait(interval):
-            break
+    store: StateStore | None = None
+    try:
+        while not stop_event.is_set():
+            failed = 0
+            degraded = False
+            store_failed = False
+            if state_path is not None and store is None:
+                # Keep retrying the store: a transient outage must not disable
+                # durability for the daemon's whole lifetime. An incompatible
+                # schema is not retried; it fails the daemon visibly.
+                try:
+                    store = StateStore.open(state_path)
+                except (sqlite3.Error, OSError):
+                    LOG.exception("Durable ingest state is unavailable; continuing without state")
+                    store_failed = True
+            try:
+                # The redaction configuration is reloaded for every cycle so a
+                # changed redactions file regenerates every applicable file.
+                anonymizer = TargetedAnonymizer.from_file(redactions)
+                synchronize(incoming, os.environ["WEBDAV_PATH"])
+                changed, failed, degraded = process_cycle(
+                    incoming, sanitized, quarantine, anonymizer, store, interval=interval
+                )
+                LOG.info(
+                    "WebDAV synchronization complete: %s changed, %s quarantined", changed, failed
+                )
+            except KeyError as error:
+                failed = 1
+                LOG.exception("WebDAV configuration is incomplete: %s is missing", error)
+            except subprocess.CalledProcessError:
+                # rclone already retried internally; keep the daemon alive and
+                # retry on the next synchronization interval.
+                failed = 1
+                LOG.exception("rclone synchronization failed")
+            except (OSError, UnicodeError, ValueError):
+                failed = 1
+                LOG.exception("WebDAV synchronization failed")
+            metrics = None
+            if store is not None:
+                try:
+                    metrics = store.metrics()
+                except sqlite3.Error:
+                    LOG.exception("Durable ingest state metrics are unavailable")
+                    degraded = True
+            if degraded or store_failed:
+                # A cycle without durable coordination is a real failure: keep
+                # the daemon unhealthy until the store works again.
+                failed = 1
+            write_health(health_path, failed, metrics)
+            if once:
+                if failed:
+                    raise SystemExit(1)
+                return
+            if stop_event.wait(interval):
+                break
+    finally:
+        if store is not None:
+            store.close()
 
 
 def main() -> None:

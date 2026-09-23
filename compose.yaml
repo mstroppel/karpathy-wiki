@@ -29,6 +29,7 @@ services:
       WEBDAV_SYNC_INTERVAL: ${WEBDAV_SYNC_INTERVAL:-15m}
       REDACTIONS_FILE: /run/secrets/redactions
       HEALTH_PATH: /tmp/health.json
+      INGEST_STATE_PATH: /data/state/ingest.sqlite3
       RCLONE_CONFIG_WEBDAV_TYPE: webdav
       RCLONE_CONFIG_WEBDAV_URL: ${WEBDAV_URL:-https://cloud.example.com/remote.php/dav/files/username/}
       RCLONE_CONFIG_WEBDAV_VENDOR: ${WEBDAV_VENDOR:-nextcloud}
@@ -39,6 +40,7 @@ services:
       - ${DATA_ROOT:-./data}/incoming/webdav:/data/incoming/webdav:rw
       - ${DATA_ROOT:-./data}/sources/webdav:/data/sanitized/webdav:rw
       - ${DATA_ROOT:-./data}/quarantine/webdav:/data/quarantine/webdav:rw
+      - ${DATA_ROOT:-./data}/state:/data/state:rw
     secrets:
       - redactions
     depends_on:
