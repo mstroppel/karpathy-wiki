@@ -25,7 +25,7 @@ OpenCode sessions remain directly accessible in OpenCode; they are no longer
 exported.
 
 OpenCode reads source directories and writes generated Markdown to `wiki/`.
-SilverBullet reads the wiki space. Services do not publish host ports; the
+SilverBullet serves the wiki space from a read-only mount. Services do not publish host ports; the
 reverse proxy reaches them through `WEBPROXY_NETWORK` using these aliases:
 
 ```text
