@@ -5,6 +5,7 @@ import sqlite3
 import subprocess
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -23,6 +24,7 @@ from karpathy_wiki_ingest_webdav import (
     interval_seconds,
     process_cycle,
     publish_generation,
+    publish_with_heartbeat,
     published_matches,
     record_generation,
     run,
@@ -449,7 +451,9 @@ class DurableStateTests(unittest.TestCase):
     def store(self) -> StateStore:
         return StateStore.open(self.state_path)
 
-    def cycle(self, instance: TargetedAnonymizer, store: StateStore, now: int) -> tuple[int, int]:
+    def cycle(
+        self, instance: TargetedAnonymizer, store: StateStore | None, now: int
+    ) -> tuple[int, int, bool]:
         return process_cycle(
             self.incoming, self.sanitized, self.quarantine, instance, store, interval=60, now=now
         )
@@ -498,8 +502,8 @@ class DurableStateTests(unittest.TestCase):
         instance = anonymizer()
         store = self.store()
         try:
-            changed, failed = self.cycle(instance, store, now=1000)
-            self.assertEqual((changed, failed), (1, 0))
+            changed, failed, degraded = self.cycle(instance, store, now=1000)
+            self.assertEqual((changed, failed, degraded), (1, 0, False))
             generation = active_generation(self.sanitized)
             assert generation is not None
             key = cycle_idempotency_key(instance.fingerprint, upstream_inventory(self.incoming))
@@ -510,8 +514,8 @@ class DurableStateTests(unittest.TestCase):
 
             # An identical cycle re-submits the same accepted work and keeps
             # the active generation instead of republishing it.
-            changed, failed = self.cycle(instance, store, now=1120)
-            self.assertEqual((changed, failed), (0, 0))
+            changed, failed, degraded = self.cycle(instance, store, now=1120)
+            self.assertEqual((changed, failed, degraded), (0, 0, False))
             self.assertEqual(active_generation(self.sanitized), generation)
         finally:
             store.close()
@@ -524,8 +528,8 @@ class DurableStateTests(unittest.TestCase):
             # Every cycle fails identically; the job backs off and eventually
             # becomes dead instead of retrying forever.
             for attempt in range(5):
-                changed, failed = self.cycle(instance, store, now=1000 + attempt * 600)
-                self.assertEqual((changed, failed), (0, 1))
+                changed, failed, degraded = self.cycle(instance, store, now=1000 + attempt * 600)
+                self.assertEqual((changed, failed, degraded), (0, 1, False))
             key = cycle_idempotency_key(instance.fingerprint, upstream_inventory(self.incoming))
             job = store.job_by_idempotency_key(key)
             assert job is not None
@@ -535,8 +539,8 @@ class DurableStateTests(unittest.TestCase):
 
             # A dead job with unchanged content stays dead and keeps the
             # failure visible through the returned failed count.
-            changed, failed = self.cycle(instance, store, now=100000)
-            self.assertEqual((changed, failed), (0, 1))
+            changed, failed, degraded = self.cycle(instance, store, now=100000)
+            self.assertEqual((changed, failed, degraded), (0, 1, False))
             self.assertIsNone(active_generation(self.sanitized))
         finally:
             store.close()
@@ -557,8 +561,8 @@ class DurableStateTests(unittest.TestCase):
 
             # The expired lease is recovered and the published generation is
             # completed without a second publication.
-            changed, failed = self.cycle(instance, store, now=1100)
-            self.assertEqual((changed, failed), (0, 0))
+            changed, failed, degraded = self.cycle(instance, store, now=1100)
+            self.assertEqual((changed, failed, degraded), (0, 0, False))
             self.assertEqual(active_generation(self.sanitized), generation)
             recovered = store.job(job.id)
             self.assertEqual(recovered.state, JOB_SUCCEEDED)
@@ -575,16 +579,16 @@ class DurableStateTests(unittest.TestCase):
         instance = anonymizer()
         store = self.store()
         try:
-            changed, failed = self.cycle(instance, store, now=1000)
-            self.assertEqual((changed, failed), (1, 0))
+            changed, failed, degraded = self.cycle(instance, store, now=1000)
+            self.assertEqual((changed, failed, degraded), (1, 0, False))
             first = active_generation(self.sanitized)
             assert first is not None
 
             # The publication disappears, for example after a manual recovery:
             # the succeeded job is rearmed and republished.
             shutil.rmtree(self.sanitized)
-            changed, failed = self.cycle(instance, store, now=1200)
-            self.assertEqual((changed, failed), (1, 0))
+            changed, failed, degraded = self.cycle(instance, store, now=1200)
+            self.assertEqual((changed, failed, degraded), (1, 0, False))
             self.assertIsNotNone(active_generation(self.sanitized))
             self.assertNotEqual(active_generation(self.sanitized), first)
         finally:
@@ -597,10 +601,75 @@ class DurableStateTests(unittest.TestCase):
         with mock.patch.object(
             store, "enqueue", side_effect=sqlite3.OperationalError("disk I/O error")
         ):
-            changed, failed = self.cycle(instance, store, now=1000)
+            changed, failed, degraded = self.cycle(instance, store, now=1000)
         store.close()
-        self.assertEqual((changed, failed), (1, 0))
+        self.assertEqual((changed, failed, degraded), (1, 0, True))
         self.assertIsNotNone(active_generation(self.sanitized))
+
+    def test_publication_renews_the_lease_while_the_work_runs(self):
+        (self.incoming / "notes.txt").write_text("Hallo Max Mustermann", encoding="utf-8")
+        instance = anonymizer()
+        store = self.store()
+        try:
+            key = cycle_idempotency_key(instance.fingerprint, upstream_inventory(self.incoming))
+            job, _ = store.enqueue("ingest", {"provider": "webdav"}, idempotency_key=key, now=0)
+            lease = store.claim(job.id, "worker", lease_seconds=2, now=int(time.time()))
+            assert lease is not None
+
+            def slow_work() -> tuple[int, int]:
+                # Longer than the lease: without renewal the lease would expire
+                # in the middle of the work.
+                time.sleep(3)
+                return 1, 0
+
+            changed, failed = publish_with_heartbeat(slow_work, store, lease.id, 2)
+            self.assertEqual((changed, failed), (1, 0))
+            # The lease was renewed while the work ran and is still held.
+            renewed = store.lease(lease.id)
+            self.assertGreater(renewed.expires_at, lease.expires_at)
+        finally:
+            store.close()
+
+    def test_run_recovers_a_failed_state_store(self):
+        (self.incoming / "notes.txt").write_text("Hallo Max Mustermann", encoding="utf-8")
+        redactions = self.root / "redactions.json"
+        redactions.write_text(json.dumps(ANONYMIZER_CONFIGURATION), encoding="utf-8")
+        broken_path = self.root / "state-directory"
+        broken_path.mkdir()
+        base_environment = {
+            "WEBDAV_INCOMING_ROOT": str(self.incoming),
+            "WEBDAV_SANITIZED_ROOT": str(self.sanitized),
+            "WEBDAV_QUARANTINE_ROOT": str(self.quarantine),
+            "WEBDAV_SYNC_INTERVAL": "1s",
+            "WEBDAV_PATH": "Wiki Sources",
+            "REDACTIONS_FILE": str(redactions),
+            "HEALTH_PATH": str(self.root / "health.json"),
+        }
+        with (
+            mock.patch.dict(
+                os.environ, {**base_environment, "INGEST_STATE_PATH": str(broken_path)}, clear=True
+            ),
+            mock.patch("karpathy_wiki_ingest_webdav.synchronize"),
+        ):
+            # A state path that cannot be opened degrades the cycle and keeps
+            # the daemon unhealthy instead of reporting false success.
+            with self.assertRaises(SystemExit):
+                run(once=True)
+            first = json.loads((self.root / "health.json").read_text())
+            self.assertEqual(first["failed"], 1)
+            self.assertIsNotNone(active_generation(self.sanitized))
+
+            # Once the store is available again the daemon recovers and
+            # reports healthy coordinated work.
+            with mock.patch.dict(
+                os.environ,
+                {**base_environment, "INGEST_STATE_PATH": str(self.state_path)},
+                clear=True,
+            ):
+                run(once=True)
+        record = json.loads((self.root / "health.json").read_text())
+        self.assertEqual(record["failed"], 0)
+        self.assertEqual(record["metrics"]["jobs"][JOB_SUCCEEDED], 1)
 
     def test_run_records_state_and_health_metrics(self):
         (self.incoming / "notes.txt").write_text("Hallo Max Mustermann", encoding="utf-8")

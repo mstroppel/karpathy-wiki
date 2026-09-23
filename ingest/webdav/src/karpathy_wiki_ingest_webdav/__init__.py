@@ -23,8 +23,10 @@ import subprocess
 import threading
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from karpathy_wiki_ingest.manifest import (
     MANIFEST_FILENAME,
@@ -42,6 +44,7 @@ from karpathy_wiki_ingest.shared import (
 from karpathy_wiki_ingest.state import (
     JOB_DEAD,
     JOB_SUCCEEDED,
+    StateError,
     StateStore,
 )
 
@@ -423,6 +426,49 @@ def record_generation(
     )
 
 
+def publish_with_heartbeat(
+    work: Callable[[], tuple[int, int]],
+    store: StateStore,
+    lease_id: str,
+    lease_seconds: int,
+) -> tuple[int, int]:
+    """Run the publication while continuously renewing the job's lease.
+
+    Long publications must never outlive the lease: an expired lease would let
+    another process recover and claim the same job while the first one is
+    still mutating the generation directory. The work itself runs unchanged;
+    only the lease bookkeeping is interleaved.
+    """
+    outcome: dict[str, Any] = {}
+    finished = threading.Event()
+
+    def target() -> None:
+        try:
+            outcome["result"] = work()
+        except BaseException as error:  # re-raised on the caller's thread
+            outcome["error"] = error
+        finally:
+            finished.set()
+
+    thread = threading.Thread(target=target, daemon=True)
+    thread.start()
+    while not finished.wait(max(lease_seconds // 3, 1)):
+        try:
+            store.heartbeat(lease_id, lease_seconds=lease_seconds)
+        except (sqlite3.Error, StateError):
+            # Renewal failed; never abandon running work, just stop renewing.
+            # The lease is left to expire and the outcome is reported, so the
+            # recovery path never republishes concurrently.
+            LOG.exception("Could not renew the ingest lease %s", lease_id)
+            break
+    thread.join()
+    if "error" in outcome:
+        raise outcome["error"]
+    result = outcome["result"]
+    assert isinstance(result, tuple)
+    return result
+
+
 def process_cycle(
     incoming: Path,
     sanitized: Path,
@@ -432,21 +478,27 @@ def process_cycle(
     *,
     interval: int,
     now: int | None = None,
-) -> tuple[int, int]:
+) -> tuple[int, int, bool]:
     """Run one ingest cycle as a durable, idempotent job.
 
-    Without a state store the cycle behaves exactly as before. With one, the
-    cycle is an accepted job keyed by the upstream inventory and redaction
-    fingerprint: identical accepted work is never executed twice, unchanged
-    upstream content keeps the active generation, failures back off instead of
-    hammering every interval, and expired leases from interrupted cycles are
-    recovered. A failing state store degrades to the stateless publication
-    instead of losing ingest availability.
+    Returns ``(changed, failed, degraded)`` where ``degraded`` marks a cycle
+    that ran without durable state. Without a state store the cycle behaves
+    exactly as before. With one, the cycle is an accepted job keyed by the
+    upstream inventory and redaction fingerprint: identical accepted work is
+    never executed twice, unchanged upstream content keeps the active
+    generation, failures back off instead of hammering every interval, and
+    expired leases from interrupted cycles are recovered. A failing state
+    store degrades to the stateless publication instead of losing ingest
+    availability, but the degraded cycle stays visible through the health
+    record.
     """
     moment = int(time.time() if now is None else now)
     inventory = upstream_inventory(incoming)
     if store is None:
-        return publish_generation(incoming, sanitized, quarantine, anonymizer, inventory=inventory)
+        changed, failed = publish_generation(
+            incoming, sanitized, quarantine, anonymizer, inventory=inventory
+        )
+        return changed, failed, False
     key = cycle_idempotency_key(anonymizer.fingerprint, inventory)
     lease_seconds = max(interval * 2, 300)
     published: tuple[int, int] | None = None
@@ -463,7 +515,7 @@ def process_cycle(
                 "Upstream and redactions unchanged; keeping generation %s",
                 (job.result or {}).get("generation"),
             )
-            return 0, 0
+            return 0, 0, False
         if job.state in (JOB_DEAD, JOB_SUCCEEDED):
             # A dead job with unchanged content stays dead: the input is
             # deterministic and will fail again. A succeeded job whose
@@ -474,7 +526,7 @@ def process_cycle(
                     " fix the rejected source content",
                     job.id,
                 )
-                return 0, 1
+                return 0, 1, False
             store.rearm(job.id, now=moment)
         lease = store.claim(
             job.id,
@@ -484,7 +536,7 @@ def process_cycle(
         )
         if lease is None:
             LOG.info("Ingest job %s is not claimable yet; keeping the active generation", job.id)
-            return 0, 1
+            return 0, 1, False
         if published_matches(sanitized, anonymizer, inventory):
             # A previous cycle published the generation but died before
             # completing the job; record and complete without republishing.
@@ -494,26 +546,38 @@ def process_cycle(
             store.complete(
                 lease.id, result={"generation": generation.name, "changed": 0}, now=moment
             )
-            return 0, 0
-        changed, failed = publish_generation(
-            incoming, sanitized, quarantine, anonymizer, inventory=inventory
+            return 0, 0, False
+        changed, failed = publish_with_heartbeat(
+            lambda: publish_generation(
+                incoming, sanitized, quarantine, anonymizer, inventory=inventory
+            ),
+            store,
+            lease.id,
+            lease_seconds,
         )
         published = (changed, failed)
         if failed:
             store.fail(lease.id, error=f"quarantined:{failed}", now=moment)
-            return changed, failed
+            return changed, failed, False
         generation = active_generation(sanitized)
         assert generation is not None
         record_generation(store, sanitized, generation, anonymizer.fingerprint, now=moment)
         store.complete(
             lease.id, result={"generation": generation.name, "changed": changed}, now=moment
         )
-        return changed, failed
-    except (sqlite3.Error, OSError, ValueError):
+        return changed, failed, False
+    except sqlite3.Error:
+        # Coordination is unavailable; publish without state, but never again
+        # in the same cycle and never outside the lease when the work already
+        # ran. The degraded cycle stays visible through the returned flag.
         LOG.exception("Durable ingest state is unavailable; publishing without state")
         if published is not None:
-            return published
-        return publish_generation(incoming, sanitized, quarantine, anonymizer, inventory=inventory)
+            changed, failed = published
+            return changed, failed, True
+        changed, failed = publish_generation(
+            incoming, sanitized, quarantine, anonymizer, inventory=inventory
+        )
+        return changed, failed, True
 
 
 def synchronize(incoming: Path, path: str) -> None:
@@ -560,20 +624,26 @@ def run(once: bool) -> None:
     stop_event = install_stop_handler()
     incoming.mkdir(parents=True, exist_ok=True)
     store: StateStore | None = None
-    if state_path is not None:
-        try:
-            store = StateStore.open(state_path)
-        except (sqlite3.Error, OSError, ValueError):
-            LOG.exception("Durable ingest state is unavailable; continuing without state")
     try:
         while not stop_event.is_set():
             failed = 0
+            degraded = False
+            store_failed = False
+            if state_path is not None and store is None:
+                # Keep retrying the store: a transient outage must not disable
+                # durability for the daemon's whole lifetime. An incompatible
+                # schema is not retried; it fails the daemon visibly.
+                try:
+                    store = StateStore.open(state_path)
+                except (sqlite3.Error, OSError):
+                    LOG.exception("Durable ingest state is unavailable; continuing without state")
+                    store_failed = True
             try:
                 # The redaction configuration is reloaded for every cycle so a
                 # changed redactions file regenerates every applicable file.
                 anonymizer = TargetedAnonymizer.from_file(redactions)
                 synchronize(incoming, os.environ["WEBDAV_PATH"])
-                changed, failed = process_cycle(
+                changed, failed, degraded = process_cycle(
                     incoming, sanitized, quarantine, anonymizer, store, interval=interval
                 )
                 LOG.info(
@@ -596,6 +666,11 @@ def run(once: bool) -> None:
                     metrics = store.metrics()
                 except sqlite3.Error:
                     LOG.exception("Durable ingest state metrics are unavailable")
+                    degraded = True
+            if degraded or store_failed:
+                # A cycle without durable coordination is a real failure: keep
+                # the daemon unhealthy until the store works again.
+                failed = 1
             write_health(health_path, failed, metrics)
             if once:
                 if failed:

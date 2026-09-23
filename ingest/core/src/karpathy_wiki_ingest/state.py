@@ -405,24 +405,25 @@ class StateStore:
         return found
 
     def heartbeat(self, lease_id: str, *, lease_seconds: int, now: int | None = None) -> Lease:
-        """Extend a held lease; long work must never rely on a stale lease."""
+        """Extend a held lease; long work must never rely on a stale lease.
+
+        An expired lease cannot be renewed: the job must be recovered through
+        ``expire_leases`` so restart recovery cannot be blocked indefinitely.
+        """
         _check_positive(lease_seconds, "lease_seconds")
         moment = _now() if now is None else now
         with self._transaction() as connection:
             row = connection.execute("SELECT * FROM leases WHERE id = ?", (lease_id,)).fetchone()
             if row is None:
                 raise ValueError(f"unknown lease: {lease_id}")
+            if row["expires_at"] <= moment:
+                raise StateError(
+                    f"lease {lease_id} expired at {row['expires_at']} and cannot be renewed"
+                )
             connection.execute(
                 "UPDATE leases SET expires_at = ? WHERE id = ?", (moment + lease_seconds, lease_id)
             )
         return self.lease(lease_id)
-
-    def _lease_job(self, lease_id: str) -> tuple[Lease, Job]:
-        lease = self.lease(lease_id)
-        job = self.job(lease.job_id)
-        if job.state != JOB_LEASED:
-            raise StateError(f"job {job.id} is not leased")
-        return lease, job
 
     def complete(
         self, lease_id: str, *, result: dict[str, Any] | None = None, now: int | None = None
@@ -648,11 +649,14 @@ class StateStore:
             for state in JOB_STATES
         }
         row = self._connection.execute(
-            "SELECT MIN(next_attempt_at) FROM jobs WHERE state = ?", (JOB_PENDING,)
+            "SELECT MIN(created_at) FROM jobs WHERE state = ?", (JOB_PENDING,)
         ).fetchone()
         oldest = row[0]
         return {
             "jobs": jobs,
+            # The pending age is measured from acceptance, not from the
+            # backoff-scheduled `next_attempt_at`, so an old retrying job
+            # cannot appear freshly accepted.
             "oldest_pending_age": max(moment - oldest, 0) if oldest is not None else 0,
             "source_generations": self._connection.execute(
                 "SELECT COUNT(*) FROM source_generations"

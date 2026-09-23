@@ -199,6 +199,16 @@ class ClaimTests(StoreTestCase):
         extended = self.store.heartbeat(lease.id, lease_seconds=120, now=1050)
         self.assertEqual(extended.expires_at, 1170)
 
+    def test_an_expired_lease_cannot_be_renewed(self):
+        lease = self.store.claim(self.job.id, "holder", lease_seconds=60, now=1000)
+        assert lease is not None
+        with self.assertRaises(StateError):
+            self.store.heartbeat(lease.id, lease_seconds=60, now=1100)
+        # The expired lease is recovered only through expire_leases.
+        self.assertEqual(self.store.expire_leases(now=1100), 1)
+        recovered = self.store.claim(self.job.id, "holder", lease_seconds=60, now=1100)
+        assert recovered is not None
+
     def test_heartbeat_requires_a_known_lease(self):
         with self.assertRaises(ValueError):
             self.store.heartbeat("missing", lease_seconds=60)
@@ -347,10 +357,18 @@ class MetricsTests(StoreTestCase):
                 "publications": 0,
             },
         )
-        self.store.enqueue("ingest", {}, now=1000)
+        job, _ = self.store.enqueue("ingest", {}, now=1000)
         metrics = self.store.metrics(now=1100)
         self.assertEqual(metrics["jobs"][JOB_PENDING], 1)
         self.assertEqual(metrics["oldest_pending_age"], 100)
+
+        # The pending age is measured from acceptance: a job that is only
+        # waiting out its retry backoff keeps its original age.
+        lease = self.store.claim(job.id, "holder", lease_seconds=60, now=1100)
+        assert lease is not None
+        failed = self.store.fail(lease.id, "error", base_backoff_seconds=600, now=1100)
+        self.assertEqual(failed.next_attempt_at, 1700)
+        self.assertEqual(self.store.metrics(now=2000)["oldest_pending_age"], 1000)
         self.store.record_source_generation(
             "webdav", "gen", manifest_revision=MANIFEST_REVISION, item_count=1, now=1100
         )
