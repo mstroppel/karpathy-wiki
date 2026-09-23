@@ -9,8 +9,14 @@ The plugin is split along responsibility boundaries:
 - ``ingestor``: the synchronization service
 - ``cli``: argument parsing and daemon lifecycle
 
-The public API is re-exported here; the package entry point stays
-``karpathy_wiki_ingest_paperless:main``.
+Breaking change (pre-1.0, no backwards compatibility): the former
+single-module package exported ``MANIFEST_FILENAME``, ``ManifestItem``,
+``build_manifest``, ``write_manifest``, and ``required_env`` from here.
+Those symbols were never plugin state and are no longer re-exported;
+import ``required_env`` from ``karpathy_wiki_ingest.shared`` and the
+manifest names from ``karpathy_wiki_ingest.manifest`` instead.
+
+The package entry point stays ``karpathy_wiki_ingest_paperless:main``.
 """
 
 from __future__ import annotations

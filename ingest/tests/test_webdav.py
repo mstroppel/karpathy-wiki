@@ -258,6 +258,24 @@ class QuarantineTests(unittest.TestCase):
             [{"path": "current/notes.txt", "error": "ValueError"}],
         )
 
+    def test_reserved_manifest_name_is_quarantined(self):
+        (self.incoming / "manifest.json").write_text("upstream", encoding="utf-8")
+
+        changed, failed = self.publish()
+
+        self.assertEqual((changed, failed), (0, 1))
+        report = (self.quarantine / "manifest.json.error").read_text(encoding="utf-8")
+        self.assertIn("error_type=ReservedManifestName", report)
+        # The provider manifest is the only manifest in the source directory;
+        # the upstream file is never published under `current`.
+        self.assertFalse((self.sanitized / ACTIVE_SYMLINK / "manifest.json").exists())
+        manifest = json.loads((self.sanitized / "manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(manifest["items"], [])
+        self.assertEqual(
+            manifest["errors"],
+            [{"path": "current/manifest.json", "error": "ReservedManifestName"}],
+        )
+
     def test_reserved_generation_metadata_name_is_quarantined(self):
         (self.incoming / GENERATION_METADATA_FILENAME).write_text("upstream", encoding="utf-8")
 

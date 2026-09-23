@@ -47,6 +47,14 @@ ACTIVE_SYMLINK = "current"
 GENERATION_METADATA_FILENAME = ".generation.json"
 STAGING_PREFIX = ".staging-"
 
+# Reserved source file names are never published into a generation: the
+# provider manifest contract reserves `manifest.json` at the root of every
+# source directory, and `.generation.json` is the generation's own metadata.
+RESERVED_SOURCE_FILENAMES = {
+    MANIFEST_FILENAME: "ReservedManifestName",
+    GENERATION_METADATA_FILENAME: "ReservedGenerationMetadataName",
+}
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -137,22 +145,23 @@ def sanitize_into_generation(
     for relative in sorted(incoming_files):
         source = incoming / relative
         target = staging / relative
-        if relative == Path(GENERATION_METADATA_FILENAME):
-            # The generation metadata name is reserved inside every
-            # generation; never publish upstream content under it.
+        reserved_error_type = RESERVED_SOURCE_FILENAMES.get(relative.as_posix())
+        if reserved_error_type is not None:
+            # Reserved names (`manifest.json`, `.generation.json`) never
+            # carry upstream content; the generation publishes only its own
+            # metadata and the provider manifest stays at the source root.
             failed += 1
-            report_quarantine(
-                quarantine, relative, "ReservedGenerationMetadataName", generation_name
-            )
+            report_quarantine(quarantine, relative, reserved_error_type, generation_name)
             errors.append(
                 {
                     "path": f"{ACTIVE_SYMLINK}/{relative.as_posix()}",
-                    "error": "ReservedGenerationMetadataName",
+                    "error": reserved_error_type,
                 }
             )
             LOG.error(
-                "WebDAV file %s uses the reserved generation metadata name and was quarantined",
+                "WebDAV file %s uses the reserved name %s and was quarantined",
                 relative,
+                reserved_error_type,
             )
             continue
         try:

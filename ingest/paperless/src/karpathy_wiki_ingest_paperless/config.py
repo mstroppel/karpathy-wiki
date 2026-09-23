@@ -42,8 +42,13 @@ class Settings:
         if interval_seconds <= 0:
             raise ValueError("SYNC_INTERVAL_SECONDS must be greater than zero")
         public_url = os.getenv("PAPERLESS_PUBLIC_URL", "https://paperless.rafatz.de").rstrip("/")
-        if urllib.parse.urlsplit(public_url).scheme != "https":
+        parts = urllib.parse.urlsplit(public_url)
+        if parts.scheme != "https":
             raise ValueError("PAPERLESS_PUBLIC_URL must use HTTPS")
+        if not parts.netloc:
+            raise ValueError("PAPERLESS_PUBLIC_URL must include an HTTPS host")
+        if parts.query or parts.fragment:
+            raise ValueError("PAPERLESS_PUBLIC_URL must not include a query or fragment")
         return cls(
             public_url=public_url,
             source_tag_id=source_tag_id,

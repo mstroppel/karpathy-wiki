@@ -251,6 +251,43 @@ class IngestTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "PAPERLESS_PUBLIC_URL must use HTTPS"):
                 Settings.from_env()
 
+    def test_settings_reject_public_urls_without_an_https_host(self):
+        with mock.patch.dict(
+            os.environ,
+            {
+                "PAPERLESS_TOKEN": "token",
+                "PAPERLESS_SOURCE_TAG_ID": "5",
+                "REDACTIONS_FILE": "/redactions.json",
+                "PAPERLESS_PUBLIC_URL": "https:paperless.example.com",
+            },
+            clear=True,
+        ):
+            with self.assertRaisesRegex(
+                ValueError, "PAPERLESS_PUBLIC_URL must include an HTTPS host"
+            ):
+                Settings.from_env()
+
+    def test_settings_reject_public_urls_with_query_or_fragment(self):
+        for public_url in (
+            "https://paperless.example.com/?query=1",
+            "https://paperless.example.com/#section",
+        ):
+            with self.subTest(public_url=public_url):
+                with mock.patch.dict(
+                    os.environ,
+                    {
+                        "PAPERLESS_TOKEN": "token",
+                        "PAPERLESS_SOURCE_TAG_ID": "5",
+                        "REDACTIONS_FILE": "/redactions.json",
+                        "PAPERLESS_PUBLIC_URL": public_url,
+                    },
+                    clear=True,
+                ):
+                    with self.assertRaisesRegex(
+                        ValueError, "PAPERLESS_PUBLIC_URL must not include a query or fragment"
+                    ):
+                        Settings.from_env()
+
     def test_ingest_anonymizes_metadata_and_is_idempotent(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
