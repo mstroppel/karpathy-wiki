@@ -7,7 +7,7 @@ export default {
       tools.add({
         name: 'wiki_ingest_status',
         description:
-          'Vergleicht die vorhandenen Quellen mit ihren Wiki-Quellenseiten und meldet den Status aller erkannten Adapter.',
+          'Vergleicht die vorhandenen Quellen über ihre Provider-Manifeste mit ihren Wiki-Quellenseiten und meldet den Status aller Quellen.',
         input: {
           type: 'object',
           properties: {
@@ -23,7 +23,6 @@ export default {
           const result = await scanIngestStatus({
             sourceRoot: '/knowledge/sources',
             wikiSourceRoot: '/knowledge/wiki/sources',
-            adapterRoot: '/etc/opencode/ingest-adapters',
             includeCurrent: args.include_current,
           })
           const content = JSON.stringify(result, null, 2)

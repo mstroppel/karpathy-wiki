@@ -17,6 +17,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
+from karpathy_wiki_ingest.manifest import (
+    MANIFEST_FILENAME,
+    ManifestItem,
+    build_manifest,
+    write_manifest,
+)
 from karpathy_wiki_ingest.shared import (
     PrivacyValidationError,
     TargetedAnonymizer,
@@ -27,6 +33,7 @@ from karpathy_wiki_ingest.shared import (
 
 LOG = logging.getLogger("karpathy-wiki-ingest")
 SOURCE_FORMAT_VERSION = 2
+SOURCE_NAME = "paperless"
 SOURCE_FILE_RE = re.compile(r"^document-(\d+)\.md$")
 DOCUMENTS_PER_DIRECTORY = 1000
 SOURCE_REVISION_RE = re.compile(r'(?m)^source_revision:\s*["\']?([0-9a-f]{64})["\']?\s*$')
@@ -272,26 +279,74 @@ class Ingestor:
     def run_once(self) -> tuple[int, int]:
         changed = 0
         failed = 0
+        items: list[ManifestItem] = []
+        errors: list[dict[str, str]] = []
         selected_ids = self.client.selected_document_ids()
         known_ids = source_document_ids(self.settings.sanitized_root)
         for document_id in selected_ids:
+            source_path = f"{document_directory(document_id)}/document-{document_id}.md"
             try:
-                if self.process(document_id):
+                document_changed, item = self.process(document_id)
+                items.append(item)
+                if document_changed:
                     changed += 1
             except PrivacyValidationError as error:
                 failed += 1
                 self.quarantine(document_id, error)
+                errors.append(
+                    {
+                        "source_key": str(document_id),
+                        "path": source_path,
+                        "error": f"privacy-validation:{type(error).__name__}",
+                    }
+                )
                 LOG.error("Document %s failed privacy validation", document_id)
             except Exception as error:
                 failed += 1
                 self.record_error(document_id, error)
+                errors.append(
+                    {
+                        "source_key": str(document_id),
+                        "path": source_path,
+                        "error": f"operational:{type(error).__name__}",
+                    }
+                )
                 LOG.error("Document %s failed with %s", document_id, type(error).__name__)
         self.reconcile(set(selected_ids), known_ids)
+        revoked_ids = read_revoked_ids(self.settings.sanitized_root / "revoked.md")
+        write_manifest(
+            self.settings.sanitized_root / MANIFEST_FILENAME,
+            build_manifest(
+                SOURCE_NAME,
+                items,
+                revoked=[
+                    {"source_key": str(document_id), "claim": {"paperless_id": str(document_id)}}
+                    for document_id in sorted(revoked_ids)
+                ],
+                errors=errors,
+            ),
+        )
         write_health(self.settings.health_path, failed)
         LOG.info("Sync complete: %s changed, %s failed", changed, failed)
         return changed, failed
 
-    def process(self, document_id: int) -> bool:
+    def manifest_item(self, document_id: int, digest: str) -> ManifestItem:
+        relative = f"{document_directory(document_id)}/document-{document_id}.md"
+        wiki_relative = f"{document_directory(document_id)}/paperless-{document_id}.md"
+        return ManifestItem(
+            source_key=str(document_id),
+            source_path=relative,
+            wiki_path=wiki_relative,
+            source_revision=digest,
+            frontmatter={
+                "paperless_id": document_id,
+                "paperless_url": f"{self.settings.public_url}/documents/{document_id}",
+                "source_revision": digest,
+            },
+            claim={"paperless_id": str(document_id)},
+        )
+
+    def process(self, document_id: int) -> tuple[bool, ManifestItem]:
         document = self.client.document(document_id)
         issued_date = normalize_issued_date(document.get("created"))
         document_type = self.client.document_type_name(document.get("document_type"))
@@ -302,10 +357,11 @@ class Ingestor:
         ]
         tag_names = sorted(self.client.tag_names(content_tag_values))
         digest = source_hash(document, self.anonymizer.fingerprint, document_type, tag_names)
+        item = self.manifest_item(document_id, digest)
         target = source_document_path(self.settings.sanitized_root, document_id)
         if source_revision(target) == digest:
             self.set_revoked(document_id, False)
-            return False
+            return False, item
         content = document.get("content") or ""
         if not isinstance(content, str) or not content.strip():
             raise PrivacyValidationError("Paperless document has no OCR text")
@@ -343,7 +399,7 @@ class Ingestor:
         self.set_revoked(document_id, False)
         (self.settings.quarantine_root / f"document-{document_id}.txt").unlink(missing_ok=True)
         LOG.info("Document %s was anonymized", document_id)
-        return True
+        return True, item
 
     def quarantine(self, document_id: int, error: Exception) -> None:
         target = source_document_path(self.settings.sanitized_root, document_id)

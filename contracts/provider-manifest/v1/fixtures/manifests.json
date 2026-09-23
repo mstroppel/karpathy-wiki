@@ -1,0 +1,340 @@
+{
+  "version": 1,
+  "topic": "provider-manifests",
+  "description": "Conformance cases for provider manifest validation, executed by the Python core (ingest/tests/test_manifest.py) and the JavaScript scanner tests (tests/test_contract_fixtures.mjs).",
+  "cases": [
+    {
+      "name": "minimal valid manifest",
+      "valid": true,
+      "manifest": {
+        "contract": "karpathy-wiki-provider-manifest",
+        "version": 1,
+        "source": "notes",
+        "generated_at": 1760000000,
+        "items": [
+          {
+            "source_key": "meeting.md",
+            "source_path": "meeting.md",
+            "wiki_path": "notes/meeting/index.md",
+            "source_revision": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "frontmatter": {
+              "source_revision": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+            },
+            "claim": { "source_path": "meeting.md" }
+          }
+        ],
+        "revoked": [],
+        "errors": []
+      }
+    },
+    {
+      "name": "valid manifest with revocations and errors",
+      "valid": true,
+      "manifest": {
+        "contract": "karpathy-wiki-provider-manifest",
+        "version": 1,
+        "source": "paperless",
+        "generated_at": 1760000000,
+        "items": [
+          {
+            "source_key": "42",
+            "source_path": "0000-0999/document-42.md",
+            "wiki_path": "0000-0999/paperless-42.md",
+            "source_revision": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "frontmatter": {
+              "paperless_id": 42,
+              "source_revision": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+            },
+            "claim": { "paperless_id": "42" }
+          }
+        ],
+        "revoked": [{ "source_key": "7", "claim": { "paperless_id": "7" } }],
+        "errors": [
+          {
+            "source_key": "9",
+            "path": "0000-0999/document-9.md",
+            "error": "privacy-validation:PrivacyValidationError"
+          }
+        ]
+      }
+    },
+    {
+      "name": "manifest with wiki_root is valid",
+      "valid": true,
+      "manifest": {
+        "contract": "karpathy-wiki-provider-manifest",
+        "version": 1,
+        "source": "webdav",
+        "generated_at": 1760000000,
+        "wiki_root": "webdav",
+        "items": [
+          {
+            "source_key": "meeting.md",
+            "source_path": "meeting.md",
+            "wiki_path": "webdav/meeting/index.md",
+            "source_revision": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "frontmatter": {
+              "source_revision": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+            },
+            "claim": { "source_path": "meeting.md" }
+          }
+        ],
+        "revoked": [],
+        "errors": []
+      }
+    },
+    {
+      "name": "wrong contract is invalid",
+      "valid": false,
+      "manifest": {
+        "contract": "karpathy-wiki-manifest",
+        "version": 1,
+        "source": "notes",
+        "generated_at": 1760000000,
+        "items": []
+      }
+    },
+    {
+      "name": "unsupported version is invalid",
+      "valid": false,
+      "manifest": {
+        "contract": "karpathy-wiki-provider-manifest",
+        "version": 2,
+        "source": "notes",
+        "generated_at": 1760000000,
+        "items": []
+      }
+    },
+    {
+      "name": "missing generated_at is invalid",
+      "valid": false,
+      "manifest": {
+        "contract": "karpathy-wiki-provider-manifest",
+        "version": 1,
+        "source": "notes",
+        "items": []
+      }
+    },
+    {
+      "name": "duplicate source_key is invalid",
+      "valid": false,
+      "manifest": {
+        "contract": "karpathy-wiki-provider-manifest",
+        "version": 1,
+        "source": "notes",
+        "generated_at": 1760000000,
+        "items": [
+          {
+            "source_key": "a.md",
+            "source_path": "a.md",
+            "wiki_path": "notes/a/index.md",
+            "source_revision": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "frontmatter": {
+              "source_revision": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+            },
+            "claim": { "source_path": "a.md" }
+          },
+          {
+            "source_key": "a.md",
+            "source_path": "b.md",
+            "wiki_path": "notes/b/index.md",
+            "source_revision": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "frontmatter": {
+              "source_revision": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+            },
+            "claim": { "source_path": "b.md" }
+          }
+        ]
+      }
+    },
+    {
+      "name": "duplicate claim is invalid",
+      "valid": false,
+      "manifest": {
+        "contract": "karpathy-wiki-provider-manifest",
+        "version": 1,
+        "source": "notes",
+        "generated_at": 1760000000,
+        "items": [
+          {
+            "source_key": "a.md",
+            "source_path": "a.md",
+            "wiki_path": "notes/a/index.md",
+            "source_revision": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "frontmatter": {
+              "source_revision": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+            },
+            "claim": { "source_path": "a.md" }
+          },
+          {
+            "source_key": "b.md",
+            "source_path": "b.md",
+            "wiki_path": "notes/b/index.md",
+            "source_revision": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "frontmatter": {
+              "source_revision": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+            },
+            "claim": { "source_path": "a.md" }
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid revision is invalid",
+      "valid": false,
+      "manifest": {
+        "contract": "karpathy-wiki-provider-manifest",
+        "version": 1,
+        "source": "notes",
+        "generated_at": 1760000000,
+        "items": [
+          {
+            "source_key": "a.md",
+            "source_path": "a.md",
+            "wiki_path": "notes/a/index.md",
+            "source_revision": "not-a-revision",
+            "frontmatter": { "source_revision": "not-a-revision" },
+            "claim": { "source_path": "a.md" }
+          }
+        ]
+      }
+    },
+    {
+      "name": "frontmatter revision mismatch is invalid",
+      "valid": false,
+      "manifest": {
+        "contract": "karpathy-wiki-provider-manifest",
+        "version": 1,
+        "source": "notes",
+        "generated_at": 1760000000,
+        "items": [
+          {
+            "source_key": "a.md",
+            "source_path": "a.md",
+            "wiki_path": "notes/a/index.md",
+            "source_revision": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "frontmatter": {
+              "source_revision": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+            },
+            "claim": { "source_path": "a.md" }
+          }
+        ]
+      }
+    },
+    {
+      "name": "escaping source_path is invalid",
+      "valid": false,
+      "manifest": {
+        "contract": "karpathy-wiki-provider-manifest",
+        "version": 1,
+        "source": "notes",
+        "generated_at": 1760000000,
+        "items": [
+          {
+            "source_key": "a.md",
+            "source_path": "../secrets/a.md",
+            "wiki_path": "notes/a/index.md",
+            "source_revision": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "frontmatter": {
+              "source_revision": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+            },
+            "claim": { "source_path": "a.md" }
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty claim is invalid",
+      "valid": false,
+      "manifest": {
+        "contract": "karpathy-wiki-provider-manifest",
+        "version": 1,
+        "source": "notes",
+        "generated_at": 1760000000,
+        "items": [
+          {
+            "source_key": "a.md",
+            "source_path": "a.md",
+            "wiki_path": "notes/a/index.md",
+            "source_revision": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "frontmatter": {
+              "source_revision": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+            },
+            "claim": {}
+          }
+        ]
+      }
+    },
+    {
+      "name": "revoked entry without claim is invalid",
+      "valid": false,
+      "manifest": {
+        "contract": "karpathy-wiki-provider-manifest",
+        "version": 1,
+        "source": "notes",
+        "generated_at": 1760000000,
+        "items": [],
+        "revoked": [{ "source_key": "a.md" }]
+      }
+    },
+    {
+      "name": "revoked source_key that is also an item is invalid",
+      "valid": false,
+      "manifest": {
+        "contract": "karpathy-wiki-provider-manifest",
+        "version": 1,
+        "source": "notes",
+        "generated_at": 1760000000,
+        "items": [
+          {
+            "source_key": "a.md",
+            "source_path": "a.md",
+            "wiki_path": "notes/a/index.md",
+            "source_revision": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "frontmatter": {
+              "source_revision": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+            },
+            "claim": { "source_path": "a.md" }
+          }
+        ],
+        "revoked": [{ "source_key": "a.md", "claim": { "source_path": "a.md" } }]
+      }
+    },
+    {
+      "name": "escaping wiki_root is invalid",
+      "valid": false,
+      "manifest": {
+        "contract": "karpathy-wiki-provider-manifest",
+        "version": 1,
+        "source": "notes",
+        "generated_at": 1760000000,
+        "wiki_root": "../outside",
+        "items": []
+      }
+    },
+    {
+      "name": "error entry without error string is invalid",
+      "valid": false,
+      "manifest": {
+        "contract": "karpathy-wiki-provider-manifest",
+        "version": 1,
+        "source": "notes",
+        "generated_at": 1760000000,
+        "items": [],
+        "errors": [{ "source_key": "a.md" }]
+      }
+    },
+    {
+      "name": "error entry with a non-string source_key is invalid",
+      "valid": false,
+      "manifest": {
+        "contract": "karpathy-wiki-provider-manifest",
+        "version": 1,
+        "source": "notes",
+        "generated_at": 1760000000,
+        "items": [],
+        "errors": [{ "source_key": 1, "error": "boom" }]
+      }
+    }
+  ]
+}
