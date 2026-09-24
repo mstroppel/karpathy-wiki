@@ -159,6 +159,7 @@ class Ingestor:
             not isinstance(metadata, dict)
             or not isinstance(metadata.get("source_revisions"), dict)
             or metadata.get("generation") != generation.name
+            or metadata.get("manifest_digest") != self.manifest_digest(manifest)
             or metadata.get("redaction_fingerprint") != self.anonymizer.fingerprint
             or metadata.get("input_revisions") != revisions
             or metadata.get("public_url") != self.settings.public_url
@@ -178,6 +179,19 @@ class Ingestor:
             if not (generation / relative).is_file():
                 return False
         return len(items) == len(source_document_ids(generation))
+
+    @staticmethod
+    def manifest_digest(manifest: dict[str, Any]) -> str:
+        """Digest binding a manifest to the generation it was written for.
+
+        The published manifest must be the one built alongside the active
+        generation. Item paths distinguish generations only when the manifest
+        has items, so the digest is the binding that also works for empty
+        manifests, such as a privacy revocation of the only document.
+        """
+        return hashlib.sha256(
+            json.dumps(manifest, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        ).hexdigest()
 
     def record_generation(self, store: StateStore) -> None:
         root = self.settings.sanitized_root
@@ -199,7 +213,8 @@ class Ingestor:
         root = self.settings.sanitized_root
         if not generation.exists():
             return
-        if active_generation(root) == generation:
+        active = active_generation(root)
+        if active is not None and active.resolve() == generation.resolve():
             if previous is None:
                 (root / "current").unlink()
             else:
@@ -210,6 +225,18 @@ class Ingestor:
             else:
                 atomic_write(manifest_path, previous_manifest)
         shutil.rmtree(generation)
+
+    def prune_generations(self, current: Path) -> None:
+        """Delete every generation directory other than the active one.
+
+        Both sides are resolved before comparing: a relative ``SANITIZED_ROOT``
+        yields relative paths from ``iterdir()`` while the active generation
+        from ``active_generation()`` is absolute, and an unresolved comparison
+        would delete the active generation itself.
+        """
+        for obsolete in (self.settings.sanitized_root / GENERATIONS).iterdir():
+            if obsolete.is_dir() and obsolete.resolve() != current.resolve():
+                shutil.rmtree(obsolete)
 
     def published_failures(self) -> int:
         payload = validate_manifest(
@@ -305,6 +332,9 @@ class Ingestor:
                 if pending.id != job.id and pending.payload.get("provider") == SOURCE_NAME:
                     store.supersede(pending.id, now=moment)
             if job.state == JOB_SUCCEEDED and self.published_matches(input_revisions):
+                current = active_generation(root)
+                assert current is not None
+                self.prune_generations(current)
                 return 0, self.published_failures()
             if job.state == JOB_DEAD:
                 LOG.error("Paperless job %s is dead; change the rejected input or rearm it", job.id)
@@ -327,6 +357,7 @@ class Ingestor:
                 assert current is not None
                 failed = self.published_failures()
                 store.complete(lease_id, result={"generation": current.name, "failed": failed})
+                self.prune_generations(current)
                 return 0, failed
         generations = root / GENERATIONS
         generations.mkdir(exist_ok=True)
@@ -368,9 +399,7 @@ class Ingestor:
                     lease_id,
                     result={"generation": current.name, "changed": changed, "failed": failed},
                 )
-                for obsolete in generations.iterdir():
-                    if obsolete != current and obsolete.is_dir():
-                        shutil.rmtree(obsolete)
+                self.prune_generations(current)
                 return changed, failed
             except StateError:
                 raise
@@ -448,6 +477,7 @@ class Ingestor:
             "redaction_fingerprint": self.anonymizer.fingerprint,
             "public_url": self.settings.public_url,
             "source_tag_id": self.settings.source_tag_id,
+            "manifest_digest": self.manifest_digest(manifest),
             "source_revisions": {item.source_key: item.source_revision for item in items},
             "input_revisions": input_revisions,
         }
@@ -514,9 +544,7 @@ class Ingestor:
             self.rollback_generation(generation, previous, old_manifest)
             raise
         if guard is None:
-            for obsolete in (self.settings.sanitized_root / GENERATIONS).iterdir():
-                if obsolete != generation and obsolete.is_dir():
-                    shutil.rmtree(obsolete)
+            self.prune_generations(generation)
         write_health(self.settings.health_path, failed)
         LOG.info("Sync complete: %s changed, %s failed", changed, failed)
         return changed, failed

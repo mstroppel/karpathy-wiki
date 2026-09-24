@@ -60,8 +60,9 @@ After an interrupted cycle, the next run removes abandoned `.staging-*`
 directories. If the active pointer or manifest is corrupt, stop the importer,
 inspect `current` and `manifest.json`, and restore a consistent pair from a
 backup rather than changing individual files. The file `.generation.json`
-contains only a redaction fingerprint, source revision hashes, the source tag
-ID, and the configured public URL; it does not contain source text or tokens.
+contains only a redaction fingerprint, source revision hashes, the digest of
+the manifest written for the generation, the source tag ID, and the configured
+public URL; it does not contain source text or tokens.
 
 **Existing pre-1.0 flat Paperless installations:** back up `DATA_ROOT`, stop the
 Paperless service, and manually remove the old flat sanitized source files,

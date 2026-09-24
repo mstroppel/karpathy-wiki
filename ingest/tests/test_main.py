@@ -609,6 +609,102 @@ class DurablePaperlessTests(unittest.TestCase):
         self.assertEqual((self.root / "sanitized" / "current").resolve(), generation)
         self.assertEqual(store.job(job.id).state, JOB_SUCCEEDED)
 
+    def test_relative_sanitized_root_keeps_the_active_generation_during_cleanup(self):
+        previous = os.getcwd()
+        os.chdir(self.root)
+        self.addCleanup(os.chdir, previous)
+        settings = dataclasses.replace(
+            self.settings_with_state,
+            sanitized_root=Path("sanitized"),
+            quarantine_root=Path("quarantine"),
+            health_path=Path("health.json"),
+        )
+        ingestor = Ingestor(settings, FakeAnonymizer())
+        ingestor.client = FakeClient(self.document)
+        self.assertEqual(ingestor.run_once(), (1, 0))
+        self.document["content"] = "changed"
+        self.assertEqual(ingestor.run_once(), (1, 0))
+        root = self.root / "sanitized"
+        self.assertTrue((root / "current").is_symlink())
+        self.assertTrue(source_document_path(root / "current", 3246).is_file())
+        self.assertEqual(len(list((root / "generations").iterdir())), 1)
+
+    def test_recovery_prunes_obsolete_generations(self):
+        self.assertEqual(self.ingestor.run_once(), (1, 0))
+        first = (self.root / "sanitized" / "current").resolve()
+        self.document["content"] = ""
+        with mock.patch.object(StateStore, "complete", side_effect=StateError("interrupted")):
+            with self.assertRaises(StateError):
+                self.ingestor.run_once()
+        second = (self.root / "sanitized" / "current").resolve()
+        self.assertNotEqual(first, second)
+        self.assertEqual(len(list((self.root / "sanitized" / "generations").iterdir())), 2)
+        store = self.store()
+        job = store.job_by_idempotency_key(self.ingestor.cycle_key(self.ingestor.snapshot()[1]))
+        assert job is not None
+        self.assertNotEqual(job.state, JOB_SUCCEEDED)
+        lease = store._connection.execute(
+            "SELECT expires_at FROM leases WHERE job_id = ?", (job.id,)
+        ).fetchone()
+        assert lease is not None
+        future = lease[0] + 1
+        with mock.patch("karpathy_wiki_ingest.state.time.time", return_value=future):
+            self.assertEqual(self.ingestor.run_once(), (0, 1))
+        self.assertEqual((self.root / "sanitized" / "current").resolve(), second)
+        self.assertEqual(len(list((self.root / "sanitized" / "generations").iterdir())), 1)
+        self.assertEqual(store.job(job.id).state, JOB_SUCCEEDED)
+        # A restart that lands after completion but before cleanup also
+        # finishes the pruning through the succeeded-job shortcut.
+        stale = self.root / "sanitized" / "generations" / "stale"
+        stale.mkdir()
+        with mock.patch("karpathy_wiki_ingest.state.time.time", return_value=future):
+            self.assertEqual(self.ingestor.run_once(), (0, 1))
+        self.assertFalse(stale.exists())
+        self.assertEqual(len(list((self.root / "sanitized" / "generations").iterdir())), 1)
+
+    def test_stale_empty_manifest_is_republished_with_the_privacy_error(self):
+        # An empty selection publishes an empty manifest for generation A.
+        self.ingestor.client = FakeClient(self.document, selected=[])
+        self.assertEqual(self.ingestor.run_once(), (0, 0))
+        root = self.root / "sanitized"
+        self.assertEqual(len(list((root / "generations").iterdir())), 1)
+        stale_manifest = (root / "manifest.json").read_text()
+        self.assertNotIn("privacy-validation", stale_manifest)
+        # The next cycle revokes a document whose OCR is empty, so the new
+        # manifest is empty again apart from the privacy error. The on-disk
+        # state mimics an interruption before the manifest replacement: the
+        # pointer switched, the manifest still belongs to generation A.
+        from karpathy_wiki_ingest.manifest import write_manifest as real_write_manifest
+
+        def write_stale_manifest(_path, _manifest):
+            real_write_manifest(root / "manifest.json", json.loads(stale_manifest))
+
+        self.document["content"] = ""
+        self.ingestor.client = FakeClient(self.document)
+        with mock.patch(
+            "karpathy_wiki_ingest_paperless.ingestor.write_manifest",
+            side_effect=write_stale_manifest,
+        ):
+            self.assertEqual(self.ingestor.run_once(), (0, 1))
+        self.assertEqual((root / "manifest.json").read_text(), stale_manifest)
+        store = self.store()
+        job = store.job_by_idempotency_key(self.ingestor.cycle_key(self.ingestor.snapshot()[1]))
+        assert job is not None
+        self.assertEqual(job.state, JOB_PENDING)
+        # Once the retry backoff expires the cycle republishes, and the
+        # manifest carries the privacy error again.
+        future = job.next_attempt_at + 1
+        with mock.patch("karpathy_wiki_ingest.state.time.time", return_value=future):
+            self.assertEqual(self.ingestor.run_once(), (0, 1))
+        manifest = json.loads((root / "manifest.json").read_text())
+        self.assertEqual(
+            [error["error"] for error in manifest["errors"]],
+            ["privacy-validation:PrivacyValidationError"],
+        )
+        self.assertEqual(json.loads(self.settings_with_state.health_path.read_text())["failed"], 1)
+        self.assertEqual(len(list((root / "generations").iterdir())), 1)
+        self.assertEqual(store.job(job.id).state, JOB_SUCCEEDED)
+
     def test_failed_cycle_backs_off_and_new_input_supersedes_it(self):
         with mock.patch(
             "karpathy_wiki_ingest_paperless.ingestor.write_manifest", side_effect=OSError("disk")
