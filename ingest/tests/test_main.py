@@ -625,6 +625,39 @@ class DurablePaperlessTests(unittest.TestCase):
         self.assertEqual(self.ingestor.run_once(), (1, 0))
         self.assertEqual(store.job(failed.id).state, JOB_SUPERSEDED)
 
+    def test_failure_health_retains_retry_metrics(self):
+        with mock.patch(
+            "karpathy_wiki_ingest_paperless.ingestor.write_manifest", side_effect=OSError("disk")
+        ):
+            with self.assertRaises(OSError):
+                self.ingestor.run_once()
+        health = json.loads(self.settings_with_state.health_path.read_text())
+        self.assertEqual(health["failed"], 1)
+        self.assertEqual(health["metrics"]["failed_jobs"], 1)
+        self.assertEqual(health["metrics"]["queue_depth"], 1)
+
+    def test_continuous_failure_health_retains_retry_metrics(self):
+        stop = threading.Event()
+
+        def fail_manifest(_path, _manifest):
+            stop.set()
+            raise OSError("disk")
+
+        with (
+            mock.patch(
+                "karpathy_wiki_ingest_paperless.ingestor.write_manifest",
+                side_effect=fail_manifest,
+            ),
+            mock.patch(
+                "karpathy_wiki_ingest_paperless.ingestor.TargetedAnonymizer.from_file",
+                return_value=FakeAnonymizer(),
+            ),
+        ):
+            run_continuously(self.ingestor, self.settings_with_state, stop)
+        health = json.loads(self.settings_with_state.health_path.read_text())
+        self.assertEqual(health["failed"], 1)
+        self.assertEqual(health["metrics"]["failed_jobs"], 1)
+
     def test_lost_lease_cannot_publish(self):
         def fenced(work, _store, _lease_id, _seconds):
             return work(lambda: (_ for _ in ()).throw(StateError("lost")))
@@ -634,6 +667,58 @@ class DurablePaperlessTests(unittest.TestCase):
                 self.ingestor.run_once()
         self.assertFalse((self.root / "sanitized" / "current").exists())
 
+    def test_lease_lost_during_manifest_write_restores_previous_publication(self):
+        self.ingestor.run_once()
+        root = self.root / "sanitized"
+        old_generation = (root / "current").resolve()
+        old_manifest = (root / "manifest.json").read_text()
+        self.document["content"] = "changed"
+        from karpathy_wiki_ingest.manifest import write_manifest as real_write_manifest
+
+        lost = False
+
+        def write_then_lose(path, manifest):
+            nonlocal lost
+            real_write_manifest(path, manifest)
+            lost = True
+
+        def fenced(work, _store, _lease_id, _seconds):
+            def guard():
+                if lost:
+                    raise StateError("lost")
+
+            return work(guard)
+
+        with (
+            mock.patch.object(self.ingestor, "publish_with_heartbeat", side_effect=fenced),
+            mock.patch(
+                "karpathy_wiki_ingest_paperless.ingestor.write_manifest",
+                side_effect=write_then_lose,
+            ),
+            self.assertRaises(StateError),
+        ):
+            self.ingestor.run_once()
+        self.assertEqual((root / "current").resolve(), old_generation)
+        self.assertEqual((root / "manifest.json").read_text(), old_manifest)
+        self.assertEqual(len(list((root / "generations").iterdir())), 1)
+
+    def test_lease_lost_after_worker_returns_rolls_back_publication(self):
+        self.ingestor.run_once()
+        root = self.root / "sanitized"
+        old_generation = (root / "current").resolve()
+        old_manifest = (root / "manifest.json").read_text()
+        self.document["content"] = "changed"
+
+        def fenced(work, _store, _lease_id, _seconds):
+            work(lambda: None)
+            raise StateError("lost after publication")
+
+        with mock.patch.object(self.ingestor, "publish_with_heartbeat", side_effect=fenced):
+            with self.assertRaises(StateError):
+                self.ingestor.run_once()
+        self.assertEqual((root / "current").resolve(), old_generation)
+        self.assertEqual((root / "manifest.json").read_text(), old_manifest)
+
     def test_privacy_failure_stays_visible_when_cycle_is_idempotent(self):
         self.document["content"] = ""
         self.assertEqual(self.ingestor.run_once(), (0, 1))
@@ -641,6 +726,19 @@ class DurablePaperlessTests(unittest.TestCase):
         self.assertEqual(self.ingestor.run_once(), (0, 1))
         self.assertEqual((self.root / "sanitized" / "current").resolve(), generation)
         self.assertEqual(json.loads(self.settings_with_state.health_path.read_text())["failed"], 1)
+
+    def test_new_invalid_snapshot_publishes_its_own_privacy_revocation(self):
+        self.document["content"] = ""
+        self.assertEqual(self.ingestor.run_once(), (0, 1))
+        previous = (self.root / "sanitized" / "current").resolve()
+        self.document["title"] = "new title"
+        self.assertEqual(self.ingestor.run_once(), (0, 1))
+        self.assertNotEqual((self.root / "sanitized" / "current").resolve(), previous)
+        job = self.store().job_by_idempotency_key(
+            self.ingestor.cycle_key(self.ingestor.snapshot()[1])
+        )
+        assert job is not None
+        self.assertEqual(job.state, JOB_SUCCEEDED)
 
     def test_different_providers_do_not_supersede_one_another(self):
         store = self.store()

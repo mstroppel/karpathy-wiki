@@ -16,6 +16,7 @@ import urllib.error
 import uuid
 from collections import Counter
 from collections.abc import Callable
+from contextlib import suppress
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -192,6 +193,24 @@ class Ingestor:
             redaction_fingerprint=self.anonymizer.fingerprint,
         )
 
+    def rollback_generation(
+        self, generation: Path, previous: Path | None, previous_manifest: str | None
+    ) -> None:
+        root = self.settings.sanitized_root
+        if not generation.exists():
+            return
+        if active_generation(root) == generation:
+            if previous is None:
+                (root / "current").unlink()
+            else:
+                switch_generation(root, previous)
+            manifest_path = root / MANIFEST_FILENAME
+            if previous_manifest is None:
+                manifest_path.unlink(missing_ok=True)
+            else:
+                atomic_write(manifest_path, previous_manifest)
+        shutil.rmtree(generation)
+
     def published_failures(self) -> int:
         payload = validate_manifest(
             json.loads((self.settings.sanitized_root / MANIFEST_FILENAME).read_text()), SOURCE_NAME
@@ -247,7 +266,12 @@ class Ingestor:
                 return self._run_locked()
             store = StateStore.open(self.settings.state_path)
             try:
-                result = self._run_locked(store)
+                try:
+                    result = self._run_locked(store)
+                except Exception:
+                    with suppress(sqlite3.Error, StateError, ValueError):
+                        write_health(self.settings.health_path, 1, store.metrics())
+                    raise
                 write_health(self.settings.health_path, result[1], store.metrics())
                 return result
             finally:
@@ -307,6 +331,8 @@ class Ingestor:
         generations = root / GENERATIONS
         generations.mkdir(exist_ok=True)
         previous = active_generation(root)
+        manifest_path = root / MANIFEST_FILENAME
+        previous_manifest = manifest_path.read_text() if manifest_path.exists() else None
         # Staging directories are never published; discard interrupted builds.
         for abandoned in generations.glob(".staging-*"):
             if abandoned.is_dir():
@@ -325,9 +351,13 @@ class Ingestor:
                 )
 
             try:
-                changed, failed = self.publish_with_heartbeat(
-                    work, store, lease_id, max(self.settings.interval_seconds * 2, 300)
-                )
+                try:
+                    changed, failed = self.publish_with_heartbeat(
+                        work, store, lease_id, max(self.settings.interval_seconds * 2, 300)
+                    )
+                except StateError:
+                    self.rollback_generation(generation, previous, previous_manifest)
+                    raise
                 if failed and not self.published_matches(input_revisions):
                     store.fail(lease_id, f"operational:{failed}")
                     return changed, failed
@@ -338,6 +368,9 @@ class Ingestor:
                     lease_id,
                     result={"generation": current.name, "changed": changed, "failed": failed},
                 )
+                for obsolete in generations.iterdir():
+                    if obsolete != current and obsolete.is_dir():
+                        shutil.rmtree(obsolete)
                 return changed, failed
             except StateError:
                 raise
@@ -435,6 +468,7 @@ class Ingestor:
                     and old_metadata.get("public_url") == self.settings.public_url
                     and old_metadata.get("source_tag_id") == self.settings.source_tag_id
                     and old_metadata.get("source_revisions") == metadata["source_revisions"]
+                    and old_metadata.get("input_revisions") == metadata["input_revisions"]
                     and isinstance(old_manifest.get("items"), list)
                     and all(isinstance(item, dict) for item in old_manifest["items"])
                     and [item.get("source_path") for item in old_manifest["items"]]
@@ -464,27 +498,25 @@ class Ingestor:
                     return 0, failed
         if guard is not None:
             guard()
+        previous_manifest = self.settings.sanitized_root / MANIFEST_FILENAME
+        old_manifest = previous_manifest.read_text() if previous_manifest.exists() else None
         staging.rename(generation)
-        switched = False
         try:
             if guard is not None:
                 guard()
             switch_generation(self.settings.sanitized_root, generation)
-            switched = True
             if guard is not None:
                 guard()
             write_manifest(self.settings.sanitized_root / MANIFEST_FILENAME, manifest)
+            if guard is not None:
+                guard()
         except BaseException:
-            if switched:
-                if previous is not None:
-                    switch_generation(self.settings.sanitized_root, previous)
-                else:
-                    (self.settings.sanitized_root / "current").unlink(missing_ok=True)
-            shutil.rmtree(generation)
+            self.rollback_generation(generation, previous, old_manifest)
             raise
-        for obsolete in (self.settings.sanitized_root / GENERATIONS).iterdir():
-            if obsolete != generation and obsolete.is_dir():
-                shutil.rmtree(obsolete)
+        if guard is None:
+            for obsolete in (self.settings.sanitized_root / GENERATIONS).iterdir():
+                if obsolete != generation and obsolete.is_dir():
+                    shutil.rmtree(obsolete)
         write_health(self.settings.health_path, failed)
         LOG.info("Sync complete: %s changed, %s failed", changed, failed)
         return changed, failed
@@ -586,6 +618,14 @@ def run_continuously(ingestor: Ingestor, settings: Settings, stop_event: threadi
             ingestor.run_once()
         except (urllib.error.URLError, OSError, ValueError, sqlite3.Error):
             LOG.exception("Paperless synchronization failed")
-            write_health(settings.health_path, 1)
+            metrics = None
+            if settings.state_path is not None:
+                with suppress(sqlite3.Error, StateError, ValueError, OSError):
+                    store = StateStore.open(settings.state_path)
+                    try:
+                        metrics = store.metrics()
+                    finally:
+                        store.close()
+            write_health(settings.health_path, 1, metrics)
         if stop_event.wait(settings.interval_seconds):
             return
