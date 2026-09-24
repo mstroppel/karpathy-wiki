@@ -60,7 +60,9 @@ After an interrupted cycle, the next run removes abandoned `.staging-*`
 directories. If the active pointer or manifest is corrupt, stop the importer,
 inspect `current` and `manifest.json`, and restore a consistent pair from a
 backup rather than changing individual files. The file `.generation.json`
-contains only a redaction fingerprint and source revision hashes.
+contains only a redaction fingerprint, source revision hashes, the digest of
+the manifest written for the generation, the source tag ID, and the configured
+public URL; it does not contain source text or tokens.
 
 **Existing pre-1.0 flat Paperless installations:** back up `DATA_ROOT`, stop the
 Paperless service, and manually remove the old flat sanitized source files,
@@ -68,6 +70,24 @@ Paperless service, and manually remove the old flat sanitized source files,
 layout. The next cycle fetches and republishes the selected documents. Review
 any previous revocations and wiki pages before re-importing. The importer
 refuses a flat layout instead of silently mixing generations with old files.
+
+### Durable cycles
+
+With the Compose-provided `INGEST_STATE_PATH`, Paperless identifies each cycle
+by the selected documents' revisions, the redaction fingerprint, source tag,
+and public URL. It records a content-free accepted job in the shared SQLite
+store before publishing. A lease with periodic renewal fences a worker that
+loses authority; failed work backs off, and an unchanged failed input becomes
+dead after repeated attempts. A restart checks the active manifest and
+generation before retrying, so a cycle that published before its job completed
+is recorded without a duplicate generation. A changed upstream snapshot
+supersedes older pending jobs. Raw API documents are kept only in memory and
+are never persisted in job payloads or health metrics.
+
+The daemon's health record includes the shared store's queue depth, age,
+failed/retried counts, last recorded source generation, and last committed
+wiki publication. An unavailable or incompatible state store stops the
+Paperless cycle instead of publishing without coordination.
 
 The `paperless_url` frontmatter field is validated HTTPS and repeated as
 trusted page frontmatter in the provider manifest, so every generated wiki

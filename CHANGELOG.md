@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Paperless cycles now use the shared SQLite ingest state: content-free
+  idempotent jobs keyed by the upstream snapshot and redaction settings,
+  renewable leases, bounded retries, supersession of replaced inputs, restart
+  recovery without duplicate publication, retention that also completes after
+  interrupted completions, and health metrics. Recovery verifies the manifest
+  against a digest recorded in the generation metadata, so an interrupted
+  publication is republished instead of retaining a stale manifest. A
+  configured but unavailable store stops publication rather than silently
+  bypassing coordination. No data schema migration is required.
 - Paperless ingest now builds complete sanitized source generations and
   publishes a manifest with immutable source paths only after the generation
   is ready. Failed cycles leave the previous generation available, unchanged

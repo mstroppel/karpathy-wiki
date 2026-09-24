@@ -31,6 +31,7 @@ class Settings:
     sanitized_root: Path
     quarantine_root: Path
     health_path: Path
+    state_path: Path | None = None
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -58,4 +59,7 @@ class Settings:
             sanitized_root=Path(os.getenv("SANITIZED_ROOT", "/data/sanitized/paperless")),
             quarantine_root=Path(os.getenv("QUARANTINE_ROOT", "/data/quarantine/paperless")),
             health_path=Path(os.getenv("HEALTH_PATH", "/tmp/health.json")),
+            state_path=Path(os.environ["INGEST_STATE_PATH"])
+            if os.getenv("INGEST_STATE_PATH")
+            else None,
         )
