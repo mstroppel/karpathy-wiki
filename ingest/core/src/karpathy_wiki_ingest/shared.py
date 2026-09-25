@@ -167,13 +167,16 @@ class TargetedAnonymizer:
                     last_names = [last_name]
                     if "previous_last_name" in entry:
                         last_names.append(required_entry_text(entry, "previous_last_name", section))
-                    person_names.update((first_name, *last_names, *middle_names))
+                    person_names.update(
+                        (*first_name_variants(first_name), *last_names, *middle_names)
+                    )
                     for configured_last_name in last_names:
                         for variant in name_variants(
                             first_name, middle_names, configured_last_name
                         ):
                             add_literal(category, replacement, variant)
-                    add_literal(category, replacement, first_name)
+                    for variant in first_name_variants(first_name):
+                        add_literal(category, replacement, variant)
                     has_structured_fields = True
                 elif section == "addresses" and any(
                     key in entry for key in ("street", "house_number", "postal_code", "city")
@@ -290,6 +293,10 @@ def name_variants(first_name: str, middle_names: list[str], last_name: str) -> s
             f"{last_name}, {given_names}",
         )
     }
+
+
+def first_name_variants(first_name: str) -> set[str]:
+    return {first_name, f"{first_name}s", f"{first_name}'s", f"{first_name}’s"}
 
 
 def birth_date_variants(value: str) -> set[str]:

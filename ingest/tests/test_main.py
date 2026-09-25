@@ -172,6 +172,24 @@ class IngestTests(unittest.TestCase):
         )
         self.assertEqual(counts, Counter({"PERSON": 4}))
 
+    def test_structured_first_name_possessive_variants_are_filtered_and_redacted(self):
+        anonymizer = TargetedAnonymizer.from_config(
+            {
+                "people": [
+                    {"replacement": "[PERSON_1]", "first_name": "Anton", "last_name": "Muster"}
+                ]
+            }
+        )
+
+        for text in ("Antons House", "Anton's House", "Anton’s House"):
+            with self.subTest(text=text):
+                self.assertTrue(anonymizer.contains_person_name(text))
+                result, counts = anonymizer.anonymize(text)
+                self.assertEqual(result, "[PERSON_1] House")
+                self.assertEqual(counts, Counter({"PERSON": 1}))
+
+        self.assertFalse(anonymizer.contains_person_name("Antonym House"))
+
     def test_shared_first_name_with_different_replacements_is_rejected(self):
         configuration = {
             "people": [
