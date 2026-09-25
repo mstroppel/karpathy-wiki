@@ -142,6 +142,10 @@ class ConfigTests(unittest.TestCase):
             "git mv *",
             "git rm *",
             "git commit *",
+            "printf *",
+            "echo *",
+            "ls *",
+            "cat *",
         ):
             self.assertEqual(ingest_shell_rules[command], "allow")
         ingest_new = config["commands"]["ingest-new"]
