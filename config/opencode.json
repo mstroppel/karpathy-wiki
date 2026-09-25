@@ -80,7 +80,7 @@
       "description": "Alle neuen und geänderten Quellen einlesen",
       "agent": "wiki-ingest",
       "subagent": true,
-      "template": "Lies alle neuen und geänderten Quellen unter /knowledge/sources strikt nacheinander ein."
+      "template": "Lies alle neuen und geänderten Quellen unter /knowledge/sources strikt nacheinander ein. Arbeite alle Adapter und Einträge der Statusliste ab; beende den Auftrag erst nach einer abschließenden Statusprüfung mit new=0 und outdated=0 oder benenne einen konkreten Blocker und die offenen Quellen."
     },
     "lint": {
       "description": "Wiki prüfen",

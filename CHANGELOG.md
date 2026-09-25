@@ -7,8 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-09-25
+
 ### Fixed
 
+- The `wiki_ingest_status` plugin tool no longer returns a structured `output`
+  field that its definition does not declare. OpenCode 2.0.15 rejects such
+  results with "Tool result declared output without an output schema", which
+  made every ingest and lint request fail at the status lookup. The model now
+  receives the complete JSON result through the tool content as before.
 - The `init` service now tolerates spaces after commas in `COMPOSE_PROFILES`
   (for example `webdav, paperless`). Previously such values silently disabled
   the Paperless initialization, so `sources/paperless` and
