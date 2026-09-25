@@ -7,6 +7,29 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 INIT = ROOT / "config" / "init.sh"
+ENTRYPOINT = ROOT / "opencode" / "entrypoint.sh"
+
+
+class EntrypointTests(unittest.TestCase):
+    def test_global_routing_is_installed_without_overwriting_custom_instructions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            opencode = bin_dir / "opencode"
+            opencode.write_text("#!/bin/sh\nexit 0\n")
+            opencode.chmod(0o755)
+            env = {**os.environ, "HOME": str(root), "PATH": f"{bin_dir}:{os.environ['PATH']}"}
+            instructions = root / ".config" / "opencode" / "AGENTS.md"
+
+            subprocess.run(["sh", str(ENTRYPOINT), "--version"], env=env, check=True)
+            self.assertTrue(instructions.is_symlink())
+            self.assertEqual(os.readlink(instructions), "/etc/opencode/routing.md")
+
+            instructions.unlink()
+            instructions.write_text("custom instructions\n")
+            subprocess.run(["sh", str(ENTRYPOINT), "--version"], env=env, check=True)
+            self.assertEqual(instructions.read_text(), "custom instructions\n")
 
 
 class InitTests(unittest.TestCase):
