@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The `init` service now tolerates spaces after commas in `COMPOSE_PROFILES`
+  (for example `webdav, paperless`). Previously such values silently disabled
+  the Paperless initialization, so `sources/paperless` and
+  `quarantine/paperless` were never created and `chown`ed, and the Paperless
+  ingest then failed with permission errors on its first write. The `.env`
+  example documents the comma-separated profile format.
+
 ## [0.2.0] - 2026-09-24
 
 ### Added

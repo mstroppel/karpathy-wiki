@@ -10,7 +10,10 @@ set -eu
 : "${PUID:=1000}"
 : "${PGID:=1000}"
 
-case ",$COMPOSE_PROFILES," in
+# Docker Compose tolerates spaces after commas in COMPOSE_PROFILES, so the
+# matching here must tolerate them as well (e.g. "webdav, paperless").
+profiles_without_space=$(printf '%s' "$COMPOSE_PROFILES" | tr -d ' \t')
+case ",$profiles_without_space," in
   *,paperless,*) PAPERLESS_ENABLED=true ;;
   *) PAPERLESS_ENABLED=false ;;
 esac

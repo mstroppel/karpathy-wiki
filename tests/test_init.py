@@ -102,6 +102,13 @@ class InitTests(unittest.TestCase):
             self.assertTrue((root / "sources" / "paperless").is_dir())
             self.assertTrue((root / "quarantine" / "paperless").is_dir())
 
+    def test_paperless_profile_matching_ignores_spaces(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "knowledge"
+            self.run_init(root, COMPOSE_PROFILES="webdav, paperless, raw-files")
+            self.assertTrue((root / "sources" / "paperless").is_dir())
+            self.assertTrue((root / "quarantine" / "paperless").is_dir())
+
 
 class ConfigTests(unittest.TestCase):
     def test_config_is_json_and_restricts_sources(self):
