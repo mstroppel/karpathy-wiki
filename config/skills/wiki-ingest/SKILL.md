@@ -31,6 +31,32 @@ anzulegen. Arbeite und berichte auf Deutsch.
    nach dem Commit und nenne Quellpfad, Commit-Hash, geänderte Seiten,
    Widersprüche und Extraktionsgrenzen.
 
+## Shell-Aufrufe und Fehler
+
+Die Shell ist auf freigegebene Befehle beschränkt. Führe jeden Git-Befehl in
+einem eigenen `shell`-Aufruf mit `workdir: /knowledge/wiki` aus. Beginne mit
+`git status --short` und danach `git log -5 --oneline`. Verwende keine
+Verkettungen, Pipes, Umleitungen oder zusätzlichen Hilfsbefehle wie `printf`,
+`echo`, `ls` oder `cat`: Ein nicht erlaubter Teilbefehl kann den gesamten
+Aufruf blockieren. Nutze `read` für Dateien und Verzeichnisse. Führe auch
+Diff-Prüfung, Staging und Commit jeweils separat aus und fahre nur nach
+erfolgreicher Prüfung fort.
+
+Wird ein solcher zusammengesetzter Aufruf mit `Permission denied: shell`
+abgewiesen, wurde er nicht ausgeführt. Wiederhole ausschließlich die benötigten,
+freigegebenen Git-Prüfungen einzeln; lies Dateien mit `read`. Das ist keine
+Freigabe für den abgewiesenen Hilfsbefehl. Wird auch ein einzelner benötigter
+Git-Befehl abgewiesen, beende den Auftrag als blockiert. Wiederhole keine
+fehlgeschlagenen schreibenden Befehle blind und erweitere keine Berechtigungen.
+
+Melde Tool-Fehler im Abschlussbericht an den primären Agenten mit Toolname,
+exakter Fehlermeldung, betroffenem Befehl und Arbeitsschritt. Kennzeichne,
+ob der Fehler behoben wurde oder weiterhin blockiert. Bei einem Abbruch nenne
+bereits erstellte Commits, noch nicht committete eigene Änderungen und alle
+offenen Quellen; unterscheide den zuletzt geprüften Status von ungeprüften
+Restarbeiten. Ein Fehler darf nicht durch eine reine Teilerfolgsmeldung ersetzt
+werden.
+
 ## Revisionsstatus
 
 Rufe vor jedem Einlesen `wiki_ingest_status` auf. Das Tool entdeckt Quellenarten
