@@ -103,6 +103,7 @@ class TargetedAnonymizer:
         phone_replacements: dict[str, str] = {}
         seen_literals: dict[str, str] = {}
         person_names: set[str] = set()
+        structured_first_names: set[str] = set()
 
         def add_literal(category: str, replacement: str, value: str) -> None:
             normalized = " ".join(value.lower().split())
@@ -170,6 +171,7 @@ class TargetedAnonymizer:
                     person_names.update(
                         (*first_name_variants(first_name), *last_names, *middle_names)
                     )
+                    structured_first_names.add(first_name)
                     for configured_last_name in last_names:
                         for variant in name_variants(
                             first_name, middle_names, configured_last_name
@@ -201,7 +203,13 @@ class TargetedAnonymizer:
         if not literals and not phone_replacements:
             raise ValueError("at least one redaction value must be configured")
         literal_rules = [
-            LiteralRule(category, replacement, literal_pattern(value))
+            LiteralRule(
+                category,
+                replacement,
+                first_name_pattern(value)
+                if value in structured_first_names
+                else literal_pattern(value),
+            )
             for category, replacement, value in sorted(
                 literals, key=lambda item: len(item[2]), reverse=True
             )
@@ -210,7 +218,8 @@ class TargetedAnonymizer:
             configuration, ensure_ascii=False, sort_keys=True, separators=(",", ":")
         ).encode("utf-8")
         person_name_patterns = [
-            literal_pattern(value) for value in sorted(person_names, key=len, reverse=True)
+            first_name_pattern(value) if value in structured_first_names else literal_pattern(value)
+            for value in sorted(person_names, key=len, reverse=True)
         ]
         return cls(
             literal_rules,
@@ -257,6 +266,13 @@ def literal_pattern(value: str) -> re.Pattern[str]:
     return re.compile(r"(?<!\w)" + pattern + r"(?!\w)", re.IGNORECASE)
 
 
+def first_name_pattern(value: str) -> re.Pattern[str]:
+    pattern = literal_pattern(value)
+    if not value.casefold().endswith(("s", "x", "z", "ß")):
+        return pattern
+    return re.compile(r"(?<!\w)" + re.escape(value) + r"(?!\w|['’]s\b)", re.IGNORECASE)
+
+
 def required_entry_text(entry: dict[str, Any], key: str, section: str) -> str:
     value = entry.get(key)
     if not isinstance(value, str) or not value.strip():
@@ -296,6 +312,8 @@ def name_variants(first_name: str, middle_names: list[str], last_name: str) -> s
 
 
 def first_name_variants(first_name: str) -> set[str]:
+    if first_name.casefold().endswith(("s", "x", "z", "ß")):
+        return {first_name, f"{first_name}'", f"{first_name}’"}
     return {first_name, f"{first_name}s", f"{first_name}'s", f"{first_name}’s"}
 
 
