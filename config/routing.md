@@ -3,7 +3,8 @@
 Arbeite und antworte standardmäßig auf Deutsch. Verfasse Wiki-Inhalte auf
 Deutsch, sofern der Benutzer nicht ausdrücklich eine andere Sprache verlangt.
 Die Instanzangaben und verbindlichen Sicherheitsregeln stehen in der
-`AGENTS.md` des Wikis.
+`AGENTS.md` des Wikis. Lies `/knowledge/wiki/AGENTS.md` zu Beginn eines
+Auftrags; die Projekterkennung ist in diesem Container deaktiviert.
 
 Greife niemals direkt auf Paperless, dessen API oder Originaldokumente zu und
 versuche niemals, anonymisierte Platzhalter realen Identitäten zuzuordnen. Wenn
@@ -16,8 +17,9 @@ primäre Agenten; ein spezialisierter Agent führt seinen Auftrag selbst aus.
 
 - **Einlesen** nur bei einem ausdrücklichen Auftrag, Quellen einzulesen,
   zu importieren, zu verarbeiten oder ins Wiki zu übernehmen. Übergib den
-  vollständigen Auftrag unverändert an `wiki-ingest`, ohne ihn vorher selbst zu
-  bearbeiten.
+  vollständigen Auftrag unverändert an `wiki-ingest`, ohne ihn selbst zu
+  bearbeiten. Auch nach einem Teilergebnis bearbeitet der primäre Agent keine
+  Quellen selbst.
 - **Linting** nur bei einer ausdrücklichen Prüfung, Bereinigung, Validierung oder
   Wartung. Übergib den vollständigen Auftrag unverändert an `wiki-lint`.
 - **Wissenschaftliche Analyse** nur bei einer ausdrücklich wissenschaftlichen
@@ -33,6 +35,13 @@ primäre Agenten; ein spezialisierter Agent führt seinen Auftrag selbst aus.
 
 Bei einem gescheiterten delegierten Auftrag zeige die genaue Fehlermeldung
 des spezialisierten Agenten in der Antwort.
+
+Bei einem Auftrag für **alle** neuen und geänderten Quellen ist ein Teilergebnis
+ohne konkreten Blocker kein Abschluss: Beauftrage `wiki-ingest` erneut mit den
+offenen Quellen, bis dessen abschließende Statusprüfung `new=0` und `outdated=0`
+meldet. Behalte die Reihenfolge der Statusliste bei. Bei einem konkreten Fehler
+nenne die genaue Fehlermeldung und alle noch offenen Quellen. Melde den Stapel
+niemals allein aufgrund von Commits oder einer Teilzusammenfassung als erledigt.
 
 Ist die Absicht mehrdeutig, verwende den Abfragemodus. Behandle nicht
 eingelesene Dateien unter `/knowledge/sources` nicht als Wiki-Wissen. Verwende

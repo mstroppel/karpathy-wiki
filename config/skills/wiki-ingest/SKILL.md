@@ -87,3 +87,6 @@ Beende den Stapel erst, wenn beide Zähler null sind.
 Falls ein Fehler die Fortsetzung verhindert, melde den konkreten Grund und
 die verbleibenden Quellen ausdrücklich als unvollständig; melde keinen
 Teilerfolg als abgeschlossenen Stapel.
+Wenn du ohne Blocker vorzeitig an den primären Agenten zurückgeben musst,
+nenne die noch offenen Quellen und fordere ausdrücklich eine erneute Delegation
+an `wiki-ingest` an. Eine Teilzusammenfassung ersetzt keine Statusprüfung.
