@@ -90,9 +90,9 @@ WebDAV files are synchronized into a private staging directory first. The
 `REDACTIONS_FILE` locally, and publishes only UTF-8 Markdown files to
 `sources/webdav`; non-Markdown files are ignored, while Markdown files that
 cannot be read as text are kept out of the source tree and written to
-`quarantine/webdav`. A failed
-upstream synchronization is retried on the next `WEBDAV_SYNC_INTERVAL` and
-surfaced through the Compose healthcheck instead of restarting the daemon.
+`quarantine/webdav`. A failed upstream synchronization is retried on the next
+`WEBDAV_SYNC_INTERVAL` and surfaced through the Compose healthcheck instead of
+restarting the daemon.
 After every successful cycle the provider manifest `sources/webdav/manifest.json`
 is refreshed; the name is reserved there.
 
