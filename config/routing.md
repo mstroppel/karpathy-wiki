@@ -31,6 +31,9 @@ primäre Agenten; ein spezialisierter Agent führt seinen Auftrag selbst aus.
 - **Abfrage** für jede andere Anfrage. Beginne mit `index.md`, lies nur relevante
   Wiki-Seiten und verändere das Wiki nicht.
 
+Bei einem gescheiterten delegierten Auftrag zeige die genaue Fehlermeldung
+des spezialisierten Agenten in der Antwort.
+
 Ist die Absicht mehrdeutig, verwende den Abfragemodus. Behandle nicht
 eingelesene Dateien unter `/knowledge/sources` nicht als Wiki-Wissen. Verwende
 für Links in Antworten die in `AGENTS.md` angegebene öffentliche Wiki-URL.

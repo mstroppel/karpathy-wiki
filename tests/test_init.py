@@ -132,18 +132,23 @@ class ConfigTests(unittest.TestCase):
             for rule in ingest_agent["permissions"]
             if rule["action"] == "shell"
         }
-        for command in (
-            "git status*",
-            "git diff*",
-            "git log*",
-            "git show*",
-            "git rev-parse*",
-            "git add *",
-            "git mv *",
-            "git rm *",
-            "git commit *",
-        ):
-            self.assertEqual(ingest_shell_rules[command], "allow")
+        self.assertEqual(
+            ingest_shell_rules,
+            dict.fromkeys(
+                (
+                    "git status*",
+                    "git diff*",
+                    "git log*",
+                    "git show*",
+                    "git rev-parse*",
+                    "git add *",
+                    "git mv *",
+                    "git rm *",
+                    "git commit *",
+                ),
+                "allow",
+            ),
+        )
         ingest_new = config["commands"]["ingest-new"]
         self.assertNotIn("WebDAV", ingest_new["description"] + ingest_new["template"])
         self.assertNotIn("Paperless", ingest_new["description"] + ingest_new["template"])

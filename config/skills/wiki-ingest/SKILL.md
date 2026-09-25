@@ -31,6 +31,11 @@ anzulegen. Arbeite und berichte auf Deutsch.
    nach dem Commit und nenne Quellpfad, Commit-Hash, geänderte Seiten,
    Widersprüche und Extraktionsgrenzen.
 
+Scheitert ein benötigter Befehl, beende den Auftrag als unvollständig und
+melde dem primären Agenten den Befehl, die genaue Fehlermeldung und die noch
+offene Arbeit.
+Verwende `read`/`glob` statt Shell-Hilfsbefehlen.
+
 ## Revisionsstatus
 
 Rufe vor jedem Einlesen `wiki_ingest_status` auf. Das Tool entdeckt Quellenarten
