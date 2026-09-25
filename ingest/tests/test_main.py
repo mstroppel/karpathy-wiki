@@ -167,7 +167,8 @@ class IngestTests(unittest.TestCase):
 
         self.assertEqual(
             result,
-            "Mit freundlichen Grüßen\n\n[PERSON_1] und [PERSON_2]\n[PERSON_1], [PERSON_2]\nMarianne",
+            "Mit freundlichen Grüßen\n\n[PERSON_1] und [PERSON_2]\n"
+            "[PERSON_1], [PERSON_2]\nMarianne",
         )
         self.assertEqual(counts, Counter({"PERSON": 4}))
 
