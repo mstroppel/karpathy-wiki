@@ -151,6 +151,38 @@ class IngestTests(unittest.TestCase):
                 self.assertEqual(result, expected)
                 self.assertEqual(counts, Counter({category: 1}))
 
+    def test_structured_first_names_are_redacted_in_signoffs(self):
+        anonymizer = TargetedAnonymizer.from_config(
+            {
+                "people": [
+                    {"replacement": "[PERSON_1]", "first_name": "Maria", "last_name": "Muster"},
+                    {"replacement": "[PERSON_2]", "first_name": "Josef", "last_name": "Beispiel"},
+                ]
+            }
+        )
+
+        result, counts = anonymizer.anonymize(
+            "Mit freundlichen Grüßen\n\nMaria und Josef\nMaria Muster, JOSEF Beispiel\nMarianne"
+        )
+
+        self.assertEqual(
+            result,
+            "Mit freundlichen Grüßen\n\n[PERSON_1] und [PERSON_2]\n"
+            "[PERSON_1], [PERSON_2]\nMarianne",
+        )
+        self.assertEqual(counts, Counter({"PERSON": 4}))
+
+    def test_shared_first_name_with_different_replacements_is_rejected(self):
+        configuration = {
+            "people": [
+                {"replacement": "[PERSON_1]", "first_name": "Maria", "last_name": "Muster"},
+                {"replacement": "[PERSON_2]", "first_name": "maria", "last_name": "Beispiel"},
+            ]
+        }
+
+        with self.assertRaisesRegex(ValueError, "one literal value has multiple replacements"):
+            TargetedAnonymizer.from_config(configuration)
+
     def test_phone_formats_are_equivalent(self):
         expected = canonical_phone("+49 170 1234567")
         self.assertEqual(canonical_phone("0049 (170) 123-4567"), expected)
