@@ -173,6 +173,7 @@ class TargetedAnonymizer:
                             first_name, middle_names, configured_last_name
                         ):
                             add_literal(category, replacement, variant)
+                    add_literal(category, replacement, first_name)
                     has_structured_fields = True
                 elif section == "addresses" and any(
                     key in entry for key in ("street", "house_number", "postal_code", "city")

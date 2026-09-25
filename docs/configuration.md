@@ -176,6 +176,13 @@ absolute path, for example `/private/personal-wiki/redactions.json`. Apply mode
 `0600` to both files. Never place real values below the repository's `secrets/`
 directory in a commit.
 
+For structured `people` entries, the configured `first_name` is redacted even
+when it appears alone (for example, in a sign-off), as well as in full-name
+variants. Matching is case-insensitive and uses word boundaries. A common first
+name elsewhere in a document is therefore also redacted. If two entries use the
+same first name with different replacements, the redaction configuration is
+rejected because a standalone name cannot identify which person it refers to.
+
 ## Reverse Proxy
 
 Compose creates these aliases on `WEBPROXY_NETWORK`:
