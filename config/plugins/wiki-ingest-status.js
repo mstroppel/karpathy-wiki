@@ -25,8 +25,11 @@ export default {
             wikiSourceRoot: '/knowledge/wiki/sources',
             includeCurrent: args.include_current,
           })
-          const content = JSON.stringify(result, null, 2)
-          return { output: result, content }
+          // The tool definition declares no output schema, so the result must
+          // not carry a structured `output` field (OpenCode rejects that with
+          // "Tool result declared output without an output schema"). The model
+          // receives the complete JSON result through `content`.
+          return { content: JSON.stringify(result, null, 2) }
         },
       })
     })
