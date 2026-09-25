@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 
-import { scanIngestStatus } from '../config/tools/wiki_ingest_status_core.mjs'
+import { scanIngestStatus, selectIngestStatus } from '../config/tools/wiki_ingest_status_core.mjs'
 
 const REVISION = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
 const OTHER_REVISION = 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'
@@ -176,6 +176,51 @@ test('omits current entries but retains their count', async () => {
   } finally {
     await rm(root, { recursive: true, force: true })
   }
+})
+
+test('scoped status retains global blockers and counts while narrowing pending work', async () => {
+  const { root, sourceRoot, wikiSourceRoot } = await fixture()
+  try {
+    await writeManifest(sourceRoot, 'paperless', {
+      items: [paperlessItem(42), paperlessItem(43)],
+    })
+    await writeManifest(sourceRoot, 'webdav', {
+      wiki_root: 'webdav',
+      items: [webdavItem('note.md')],
+      errors: [{ error: 'privacy-validation:PrivacyValidationError' }],
+    })
+    const full = await scanIngestStatus({ sourceRoot, wikiSourceRoot })
+    const scoped = selectIngestStatus(full, { adapter: 'paperless', sourceKey: '42' })
+
+    assert.deepEqual(scoped.summary, full.summary)
+    assert.deepEqual(scoped.adapters.paperless.summary, full.adapters.paperless.summary)
+    assert.deepEqual(scoped.adapters.paperless.new, [full.adapters.paperless.new[0]])
+    assert.deepEqual(scoped.adapters.webdav.new, [])
+    assert.deepEqual(scoped.adapters.webdav.invalid, full.adapters.webdav.invalid)
+    assert.equal(scoped.adapters.webdav.summary.invalid, 1)
+
+    const finalCheck = selectIngestStatus(full, { summaryOnly: true })
+    assert.deepEqual(finalCheck.summary, full.summary)
+    assert.deepEqual(finalCheck.adapters.paperless.new, [])
+    assert.deepEqual(finalCheck.adapters.webdav.new, [])
+    assert.deepEqual(finalCheck.adapters.webdav.invalid, full.adapters.webdav.invalid)
+    assert.deepEqual(
+      full.adapters.paperless.new.map((entry) => entry.source_key),
+      ['42', '43'],
+    )
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('scoped status rejects ambiguous filter combinations', () => {
+  const status = { summary: {}, adapters: {} }
+  assert.throws(() => selectIngestStatus(status, { adapter: 'paperless' }), /zusammen/)
+  assert.throws(() => selectIngestStatus(status, { sourceKey: '42' }), /zusammen/)
+  assert.throws(
+    () => selectIngestStatus(status, { adapter: 'paperless', sourceKey: '42', summaryOnly: true }),
+    /kombiniert/,
+  )
 })
 
 test('preserves Paperless revision states and revocations', async () => {

@@ -69,5 +69,16 @@ Brich den gesamten Stapel vor Änderungen ab, wenn irgendein entdeckter Adapter
 Bereinigung. Durchlaufe alle vom Tool gelieferten Adapter in der
 ausgegebenen Reihenfolge und verarbeite jedes ihrer Elemente aus `new` und
 `outdated` einzeln mit je einem Commit. Die Reihenfolge des Tool-Ergebnisses ist
-verbindlich; sortiere sie nicht selbst um. Prüfe Status und Revision unmittelbar
-vor jeder Quelle und abschließend erneut.
+verbindlich; sortiere sie nicht selbst um. Die erste Antwort ist bereits die
+vollständige Arbeitsliste mit exakten Pfaden: vermeide zusätzliche `find`- oder
+`glob`-Aufrufe zur erneuten Quellensuche. Prüfe unmittelbar vor jeder Quelle mit
+`wiki_ingest_status` und `adapter` plus `source_key` deren Status und Revision;
+beachte dabei auch die globalen `invalid`- und `conflict`-Zähler. Fehlt die
+geplante Quelle oder hat sich ihre Revision geändert, hole die vollständige
+Arbeitsliste erneut und prüfe den Stapel vor weiteren Änderungen. Prüfe nach
+dem letzten Commit mit `summary_only: true` erneut. Sind noch `new` oder
+`outdated` vorhanden, arbeite sie weiter ab und prüfe zum Schluss wieder.
+Beende den Stapel erst, wenn beide Zähler null sind.
+Falls ein Fehler die Fortsetzung verhindert, melde den konkreten Grund und
+die verbleibenden Quellen ausdrücklich als unvollständig; melde keinen
+Teilerfolg als abgeschlossenen Stapel.
