@@ -34,6 +34,7 @@ anzulegen. Arbeite und berichte auf Deutsch.
 Scheitert ein benötigter Befehl, beende den Auftrag als unvollständig und
 melde dem primären Agenten den Befehl, die genaue Fehlermeldung und die noch
 offene Arbeit.
+Verwende `read`/`glob` statt Shell-Hilfsbefehlen.
 
 ## Revisionsstatus
 

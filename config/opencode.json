@@ -63,26 +63,6 @@
           "action": "shell",
           "resource": "git commit *",
           "effect": "allow"
-        },
-        {
-          "action": "shell",
-          "resource": "printf *",
-          "effect": "allow"
-        },
-        {
-          "action": "shell",
-          "resource": "echo *",
-          "effect": "allow"
-        },
-        {
-          "action": "shell",
-          "resource": "ls *",
-          "effect": "allow"
-        },
-        {
-          "action": "shell",
-          "resource": "cat *",
-          "effect": "allow"
         }
       ]
     },
