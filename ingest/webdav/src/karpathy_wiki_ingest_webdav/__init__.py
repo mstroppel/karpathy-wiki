@@ -91,6 +91,15 @@ class GenerationItem:
     revision: str
 
 
+def markdown_source_files(incoming: Path) -> set[Path]:
+    """Return relative paths for all Markdown files in the staging tree."""
+    return {
+        path.relative_to(incoming)
+        for path in incoming.rglob("*")
+        if path.is_file() and path.suffix.lower() == ".md"
+    }
+
+
 def upstream_inventory(incoming: Path) -> dict[str, str]:
     """Content hashes of the synchronized upstream tree.
 
@@ -98,9 +107,8 @@ def upstream_inventory(incoming: Path) -> dict[str, str]:
     generation metadata so every generation documents what it published.
     """
     return {
-        path.relative_to(incoming).as_posix(): file_revision(path)
-        for path in sorted(incoming.rglob("*"))
-        if path.is_file() and path.suffix.lower() == ".md"
+        relative.as_posix(): file_revision(incoming / relative)
+        for relative in sorted(markdown_source_files(incoming))
     }
 
 
@@ -144,11 +152,7 @@ def sanitize_into_generation(
     Files that cannot be decoded or that fail privacy validation never enter
     the generation; they are reported content-free and counted as failed.
     """
-    incoming_files = {
-        path.relative_to(incoming)
-        for path in incoming.rglob("*")
-        if path.is_file() and path.suffix.lower() == ".md"
-    }
+    incoming_files = markdown_source_files(incoming)
     items: list[GenerationItem] = []
     errors: list[dict[str, str]] = []
     failed = 0
