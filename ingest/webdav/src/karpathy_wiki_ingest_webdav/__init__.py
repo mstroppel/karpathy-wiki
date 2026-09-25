@@ -108,7 +108,7 @@ def upstream_inventory(incoming: Path) -> dict[str, str]:
     return {
         path.relative_to(incoming).as_posix(): file_revision(path)
         for path in sorted(incoming.rglob("*"))
-        if path.is_file()
+        if path.is_file() and path.suffix.lower() == ".md"
     }
 
 
@@ -152,7 +152,11 @@ def sanitize_into_generation(
     Files that cannot be decoded or that fail privacy validation never enter
     the generation; they are reported content-free and counted as failed.
     """
-    incoming_files = {path.relative_to(incoming) for path in incoming.rglob("*") if path.is_file()}
+    incoming_files = {
+        path.relative_to(incoming)
+        for path in incoming.rglob("*")
+        if path.is_file() and path.suffix.lower() == ".md"
+    }
     items: list[GenerationItem] = []
     errors: list[dict[str, str]] = []
     failed = 0

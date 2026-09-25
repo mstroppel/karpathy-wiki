@@ -72,7 +72,7 @@ karpathy-wiki-opencode:4096     # OPENCODE_PUBLIC_URL
 ask OpenCode to ingest a source. For a first test with the `webdav`
 provider: enable the `webdav` profile (`COMPOSE_PROFILES=webdav` in `.env`,
 then `./karpathy-wiki.sh up -d`), configure WebDAV access and redactions (see
-[configuration](docs/configuration.md#secrets)), and create a `notes.txt` file
+[configuration](docs/configuration.md#secrets)), and create a `notes.md` file
 (UTF-8 text) inside the WebDAV folder configured via `WEBDAV_PATH`.
 The `webdav-ingest` service stages the file through the provider flow; never
 place files directly into `data/sources/webdav/`, which only carries the

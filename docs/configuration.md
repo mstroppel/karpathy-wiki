@@ -86,9 +86,11 @@ source provider. `WEBDAV_VENDOR` defaults to `nextcloud`; rclone also supports
 other WebDAV implementations.
 
 WebDAV files are synchronized into a private staging directory first. The
-`webdav-ingest` service applies `REDACTIONS_FILE` locally and publishes only
-UTF-8 text files to `sources/webdav`; files that cannot be read as text are
-kept out of the source tree and written to `quarantine/webdav`. A failed
+`webdav-ingest` service processes only files whose name ends in `.md`, applies
+`REDACTIONS_FILE` locally, and publishes only UTF-8 Markdown files to
+`sources/webdav`; non-Markdown files are ignored, while Markdown files that
+cannot be read as text are kept out of the source tree and written to
+`quarantine/webdav`. A failed
 upstream synchronization is retried on the next `WEBDAV_SYNC_INTERVAL` and
 surfaced through the Compose healthcheck instead of restarting the daemon.
 After every successful cycle the provider manifest `sources/webdav/manifest.json`
