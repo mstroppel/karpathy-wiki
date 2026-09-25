@@ -459,3 +459,39 @@ export async function scanIngestStatus({ sourceRoot, wikiSourceRoot, includeCurr
   )
   return { summary, adapters: results }
 }
+
+// Keep global diagnostics and counts even when narrowing the work items sent
+// to the model. A filtered result must never hide a batch-wide blocker.
+export function selectIngestStatus(status, { adapter, sourceKey, summaryOnly = false } = {}) {
+  if ((adapter === undefined) !== (sourceKey === undefined)) {
+    throw new Error('adapter und source_key müssen zusammen angegeben werden')
+  }
+  if (summaryOnly && adapter !== undefined) {
+    throw new Error('summary_only und Quellfilter können nicht kombiniert werden')
+  }
+
+  const adapters = Object.fromEntries(
+    Object.entries(status.adapters).map(([name, result]) => [
+      name,
+      {
+        ...result,
+        new: summaryOnly
+          ? []
+          : adapter === undefined
+            ? result.new
+            : result.new.filter((item) => name === adapter && item.source_key === sourceKey),
+        outdated: summaryOnly
+          ? []
+          : adapter === undefined
+            ? result.outdated
+            : result.outdated.filter((item) => name === adapter && item.source_key === sourceKey),
+        current: summaryOnly
+          ? []
+          : adapter === undefined
+            ? result.current
+            : result.current.filter((item) => name === adapter && item.source_key === sourceKey),
+      },
+    ]),
+  )
+  return { summary: status.summary, adapters }
+}
