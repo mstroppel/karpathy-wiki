@@ -74,12 +74,12 @@ class PublicationTests(unittest.TestCase):
 
     def test_publishes_a_complete_generation_behind_an_atomic_pointer(self):
         (self.incoming / "nested").mkdir()
-        (self.incoming / "nested/source.txt").write_text("Hallo Max Mustermann", encoding="utf-8")
+        (self.incoming / "nested/source.md").write_text("Hallo Max Mustermann", encoding="utf-8")
 
         changed, failed = self.publish()
 
         self.assertEqual((changed, failed), (1, 0))
-        published = self.current_path("nested/source.txt")
+        published = self.current_path("nested/source.md")
         self.assertEqual(published.read_text(encoding="utf-8"), "Hallo [ICH]")
         # The active pointer resolves inside the generations directory.
         self.assertEqual(
@@ -88,7 +88,7 @@ class PublicationTests(unittest.TestCase):
         )
 
     def test_generation_records_inventory_and_redaction_fingerprint(self):
-        (self.incoming / "notes.txt").write_text("Hallo Max Mustermann", encoding="utf-8")
+        (self.incoming / "notes.md").write_text("Hallo Max Mustermann", encoding="utf-8")
 
         self.publish()
 
@@ -103,13 +103,24 @@ class PublicationTests(unittest.TestCase):
         )
         self.assertEqual(
             sorted(metadata["upstream_inventory"]),
-            ["notes.txt"],
+            ["notes.md"],
         )
-        self.assertRegex(metadata["upstream_inventory"]["notes.txt"], r"^[0-9a-f]{64}$")
+        self.assertRegex(metadata["upstream_inventory"]["notes.md"], r"^[0-9a-f]{64}$")
+
+    def test_non_markdown_files_are_ignored(self):
+        (self.incoming / "notes.md").write_text("safe", encoding="utf-8")
+        (self.incoming / "attachment.txt").write_text("ignored", encoding="utf-8")
+
+        changed, failed = self.publish()
+
+        self.assertEqual((changed, failed), (1, 0))
+        self.assertTrue(self.current_path("notes.md").is_file())
+        self.assertFalse(self.current_path("attachment.txt").exists())
+        self.assertFalse((self.quarantine / "attachment.txt.error").exists())
 
     def test_manifest_describes_stable_wiki_paths_and_immutable_source_paths(self):
         (self.incoming / "nested").mkdir()
-        (self.incoming / "nested/source.txt").write_text("Hallo Max Mustermann", encoding="utf-8")
+        (self.incoming / "nested/source.md").write_text("Hallo Max Mustermann", encoding="utf-8")
 
         self.publish()
 
@@ -117,24 +128,24 @@ class PublicationTests(unittest.TestCase):
         self.assertEqual(manifest["source"], "webdav")
         self.assertEqual(manifest["wiki_root"], "webdav")
         item = manifest["items"][0]
-        self.assertEqual(item["source_key"], "nested/source.txt")
+        self.assertEqual(item["source_key"], "nested/source.md")
         self.assertEqual(
             item["source_path"],
-            f"{GENERATIONS_DIRECTORY}/{active(self.sanitized).name}/nested/source.txt",
+            f"{GENERATIONS_DIRECTORY}/{active(self.sanitized).name}/nested/source.md",
         )
-        self.assertEqual(item["wiki_path"], "webdav/nested/source.txt/index.md")
-        self.assertEqual(item["claim"], {"source_path": "nested/source.txt"})
+        self.assertEqual(item["wiki_path"], "webdav/nested/source.md/index.md")
+        self.assertEqual(item["claim"], {"source_path": "nested/source.md"})
         self.assertEqual(
             item["frontmatter"],
             {
                 "source_adapter": "webdav",
-                "source_path": "nested/source.txt",
+                "source_path": "nested/source.md",
                 "source_revision": item["source_revision"],
             },
         )
 
     def test_republishing_identical_content_keeps_revisions_and_pages_stable(self):
-        (self.incoming / "notes.txt").write_text("Hallo Max Mustermann", encoding="utf-8")
+        (self.incoming / "notes.md").write_text("Hallo Max Mustermann", encoding="utf-8")
         self.publish()
         first = json.loads((self.sanitized / "manifest.json").read_text(encoding="utf-8"))
 
@@ -153,37 +164,37 @@ class PublicationTests(unittest.TestCase):
             ],
         )
         self.assertEqual(
-            self.current_path("notes.txt").read_text(encoding="utf-8"),
+            self.current_path("notes.md").read_text(encoding="utf-8"),
             "Hallo [ICH]",
         )
 
     def test_upstream_deletions_are_published_only_with_the_new_generation(self):
-        (self.incoming / "a.txt").write_text("eins", encoding="utf-8")
-        (self.incoming / "b.txt").write_text("zwei", encoding="utf-8")
+        (self.incoming / "a.md").write_text("eins", encoding="utf-8")
+        (self.incoming / "b.md").write_text("zwei", encoding="utf-8")
         self.publish()
 
         # The upstream file disappears, but the synchronization fails before
         # publication: the previous generation must stay active.
-        (self.incoming / "b.txt").unlink()
+        (self.incoming / "b.md").unlink()
         with mock.patch(
             "karpathy_wiki_ingest_webdav.sanitize_into_generation",
             side_effect=OSError("interrupted"),
         ):
             with self.assertRaises(OSError):
                 self.publish()
-        self.assertTrue(self.current_path("b.txt").is_file())
+        self.assertTrue(self.current_path("b.md").is_file())
 
         changed, failed = self.publish()
         self.assertEqual((changed, failed), (0, 0))
-        self.assertFalse(self.current_path("b.txt").exists())
+        self.assertFalse(self.current_path("b.md").exists())
         manifest = json.loads((self.sanitized / "manifest.json").read_text(encoding="utf-8"))
-        self.assertEqual([item["source_key"] for item in manifest["items"]], ["a.txt"])
+        self.assertEqual([item["source_key"] for item in manifest["items"]], ["a.md"])
 
     def test_failed_publication_rolls_back_to_the_previous_generation(self):
-        (self.incoming / "notes.txt").write_text("eins", encoding="utf-8")
+        (self.incoming / "notes.md").write_text("eins", encoding="utf-8")
         self.publish()
         previous_generation = active(self.sanitized)
-        (self.incoming / "notes.txt").write_text("zwei", encoding="utf-8")
+        (self.incoming / "notes.md").write_text("zwei", encoding="utf-8")
 
         with mock.patch(
             "karpathy_wiki_ingest_webdav.write_manifest",
@@ -193,7 +204,7 @@ class PublicationTests(unittest.TestCase):
                 self.publish()
 
         self.assertEqual(active(self.sanitized), previous_generation)
-        self.assertEqual(self.current_path("notes.txt").read_text(encoding="utf-8"), "eins")
+        self.assertEqual(self.current_path("notes.md").read_text(encoding="utf-8"), "eins")
         # The unpublished generation and any staging leftovers are removed.
         self.assertEqual(
             [entry.name for entry in (self.sanitized / GENERATIONS_DIRECTORY).iterdir()],
@@ -201,23 +212,23 @@ class PublicationTests(unittest.TestCase):
         )
 
     def test_abandoned_staging_directories_are_discarded(self):
-        (self.incoming / "notes.txt").write_text("eins", encoding="utf-8")
+        (self.incoming / "notes.md").write_text("eins", encoding="utf-8")
         generations = self.sanitized / GENERATIONS_DIRECTORY
         generations.mkdir(parents=True)
         abandoned = generations / ".staging-abandoned"
         abandoned.mkdir()
-        (abandoned / "leftover.txt").write_text("x", encoding="utf-8")
+        (abandoned / "leftover.md").write_text("x", encoding="utf-8")
 
         self.publish()
 
         self.assertFalse(abandoned.exists())
-        self.assertTrue(self.current_path("notes.txt").is_file())
+        self.assertTrue(self.current_path("notes.md").is_file())
 
     def test_retention_keeps_only_the_active_generation(self):
-        (self.incoming / "notes.txt").write_text("eins", encoding="utf-8")
+        (self.incoming / "notes.md").write_text("eins", encoding="utf-8")
         self.publish()
         first = active(self.sanitized)
-        (self.incoming / "notes.txt").write_text("zwei", encoding="utf-8")
+        (self.incoming / "notes.md").write_text("zwei", encoding="utf-8")
         self.publish()
 
         self.assertFalse(first.exists())
@@ -247,27 +258,27 @@ class QuarantineTests(unittest.TestCase):
 
     def test_binary_files_are_quarantined_without_storing_source_content(self):
         (self.incoming / "nested").mkdir()
-        (self.incoming / "nested/notes.txt").write_text("Hallo Max Mustermann", encoding="utf-8")
-        (self.incoming / "private.pdf").write_bytes(b"%PDF\xff")
+        (self.incoming / "nested/notes.md").write_text("Hallo Max Mustermann", encoding="utf-8")
+        (self.incoming / "private.md").write_bytes(b"%PDF\xff")
 
         changed, failed = self.publish()
 
         self.assertEqual((changed, failed), (0, 1))
-        self.assertFalse((self.sanitized / ACTIVE_SYMLINK / "private.pdf").exists())
-        report = (self.quarantine / "private.pdf.error").read_text(encoding="utf-8")
-        self.assertIn("path=private.pdf", report)
+        self.assertFalse((self.sanitized / ACTIVE_SYMLINK / "private.md").exists())
+        report = (self.quarantine / "private.md.error").read_text(encoding="utf-8")
+        self.assertIn("path=private.md", report)
         self.assertIn("generation=", report)
         self.assertIn("error_type=UnicodeDecodeError", report)
         self.assertNotIn("%PDF", report)
         self.assertFalse((self.sanitized / "manifest.json").exists())
 
     def test_sanitization_failure_keeps_the_previous_generation(self):
-        (self.incoming / "notes.txt").write_text("safe", encoding="utf-8")
+        (self.incoming / "notes.md").write_text("safe", encoding="utf-8")
         self.publish()
         previous = active(self.sanitized)
         previous_manifest = (self.sanitized / "manifest.json").read_text(encoding="utf-8")
 
-        (self.incoming / "broken.txt").write_bytes(b"\xff")
+        (self.incoming / "broken.md").write_bytes(b"\xff")
         changed, failed = self.publish()
 
         self.assertEqual((changed, failed), (0, 1))
@@ -276,11 +287,11 @@ class QuarantineTests(unittest.TestCase):
             (self.sanitized / "manifest.json").read_text(encoding="utf-8"),
             previous_manifest,
         )
-        self.assertEqual(self.current_path("notes.txt").read_text(encoding="utf-8"), "safe")
-        self.assertFalse(self.current_path("broken.txt").exists())
+        self.assertEqual(self.current_path("notes.md").read_text(encoding="utf-8"), "safe")
+        self.assertFalse(self.current_path("broken.md").exists())
 
     def test_privacy_validation_failure_keeps_the_file_out_of_the_generation(self):
-        (self.incoming / "notes.txt").write_text("Hallo Max Mustermann", encoding="utf-8")
+        (self.incoming / "notes.md").write_text("Hallo Max Mustermann", encoding="utf-8")
         # A residual literal raises PrivacyValidationError inside anonymize();
         # simulate it on the public shared class instead of a mock.
         real = TargetedAnonymizer.from_config(
@@ -297,41 +308,14 @@ class QuarantineTests(unittest.TestCase):
             changed, failed = self.publish(real)
 
         self.assertEqual((changed, failed), (0, 1))
-        self.assertFalse((self.sanitized / ACTIVE_SYMLINK / "notes.txt").exists())
-        self.assertFalse((self.sanitized / "manifest.json").exists())
-
-    def test_reserved_manifest_name_is_quarantined(self):
-        (self.incoming / "manifest.json").write_text("upstream", encoding="utf-8")
-
-        changed, failed = self.publish()
-
-        self.assertEqual((changed, failed), (0, 1))
-        report = (self.quarantine / "manifest.json.error").read_text(encoding="utf-8")
-        self.assertIn("error_type=ReservedManifestName", report)
-        # The provider manifest is the only manifest in the source directory;
-        # the upstream file is never published under `current`.
-        self.assertFalse((self.sanitized / ACTIVE_SYMLINK / "manifest.json").exists())
-        self.assertFalse((self.sanitized / "manifest.json").exists())
-
-    def test_reserved_generation_metadata_name_is_quarantined(self):
-        (self.incoming / GENERATION_METADATA_FILENAME).write_text("upstream", encoding="utf-8")
-
-        changed, failed = self.publish()
-
-        self.assertEqual((changed, failed), (0, 1))
-        report = (self.quarantine / f"{GENERATION_METADATA_FILENAME}.error").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn("error_type=ReservedGenerationMetadataName", report)
-        # A candidate containing a reserved name is rejected as a whole.
-        self.assertIsNone(active_generation(self.sanitized))
+        self.assertFalse((self.sanitized / ACTIVE_SYMLINK / "notes.md").exists())
         self.assertFalse((self.sanitized / "manifest.json").exists())
 
     def test_reports_of_sources_that_are_gone_upstream_expire(self):
-        (self.incoming / "notes.txt").write_text("eins", encoding="utf-8")
+        (self.incoming / "notes.md").write_text("eins", encoding="utf-8")
         self.publish()
-        stale = self.quarantine / "gone.pdf.error"
-        stale.write_text("path=gone.pdf\ngeneration=old\nerror_type=UnicodeDecodeError\n")
+        stale = self.quarantine / "gone.md.error"
+        stale.write_text("path=gone.md\ngeneration=old\nerror_type=UnicodeDecodeError\n")
 
         self.publish()
 
@@ -350,7 +334,7 @@ class RedactionReloadTests(unittest.TestCase):
         self.incoming.mkdir()
 
     def test_redaction_change_regenerates_published_files(self):
-        (self.incoming / "notes.txt").write_text("Hallo Max Mustermann", encoding="utf-8")
+        (self.incoming / "notes.md").write_text("Hallo Max Mustermann", encoding="utf-8")
         self.redactions.write_text(json.dumps(ANONYMIZER_CONFIGURATION), encoding="utf-8")
         with mock.patch.dict(
             os.environ,
@@ -368,7 +352,7 @@ class RedactionReloadTests(unittest.TestCase):
             with mock.patch("karpathy_wiki_ingest_webdav.synchronize"):
                 run(once=True)
             self.assertEqual(
-                (self.sanitized / ACTIVE_SYMLINK / "notes.txt").read_text(encoding="utf-8"),
+                (self.sanitized / ACTIVE_SYMLINK / "notes.md").read_text(encoding="utf-8"),
                 "Hallo [ICH]",
             )
 
@@ -381,13 +365,13 @@ class RedactionReloadTests(unittest.TestCase):
             with mock.patch("karpathy_wiki_ingest_webdav.synchronize"):
                 run(once=True)
 
-        published = (self.sanitized / ACTIVE_SYMLINK / "notes.txt").read_text(encoding="utf-8")
+        published = (self.sanitized / ACTIVE_SYMLINK / "notes.md").read_text(encoding="utf-8")
         self.assertEqual(published, "Hallo [AUTOR]")
         first = json.loads((self.root / "health.json").read_text())
         self.assertEqual(first["failed"], 0)
 
     def test_changed_redaction_file_counts_all_changed_files(self):
-        (self.incoming / "notes.txt").write_text("Hallo Max Mustermann", encoding="utf-8")
+        (self.incoming / "notes.md").write_text("Hallo Max Mustermann", encoding="utf-8")
         changed, failed = publish_generation(
             self.incoming,
             self.sanitized,
@@ -405,7 +389,7 @@ class RedactionReloadTests(unittest.TestCase):
         )
         self.assertEqual((rotated, failed), (1, 0))
         self.assertEqual(
-            (self.sanitized / ACTIVE_SYMLINK / "notes.txt").read_text(encoding="utf-8"),
+            (self.sanitized / ACTIVE_SYMLINK / "notes.md").read_text(encoding="utf-8"),
             "Hallo [AUTOR]",
         )
 
@@ -418,7 +402,7 @@ class ConcurrentReadTests(unittest.TestCase):
             sanitized = root / "sanitized"
             quarantine = root / "quarantine"
             incoming.mkdir()
-            (incoming / "notes.txt").write_text("eins", encoding="utf-8")
+            (incoming / "notes.md").write_text("eins", encoding="utf-8")
             anonymizer_instance = anonymizer()
             publish_generation(incoming, sanitized, quarantine, anonymizer_instance)
             active = sanitized / ACTIVE_SYMLINK
@@ -428,7 +412,7 @@ class ConcurrentReadTests(unittest.TestCase):
             def reader():
                 while not stop.is_set():
                     try:
-                        observed.add((active / "notes.txt").read_text(encoding="utf-8"))
+                        observed.add((active / "notes.md").read_text(encoding="utf-8"))
                     except FileNotFoundError:
                         # A missing pointer or file is still a valid observation.
                         pass
@@ -437,7 +421,7 @@ class ConcurrentReadTests(unittest.TestCase):
             thread.start()
             try:
                 for content in ("zwei", "drei"):
-                    (incoming / "notes.txt").write_text(content, encoding="utf-8")
+                    (incoming / "notes.md").write_text(content, encoding="utf-8")
                     publish_generation(incoming, sanitized, quarantine, anonymizer_instance)
             finally:
                 stop.set()
@@ -468,22 +452,22 @@ class DurableStateTests(unittest.TestCase):
         )
 
     def test_cycle_key_is_stable_for_identical_content_and_redactions(self):
-        first = cycle_idempotency_key("fp", {"a.txt": "1" * 64})
-        second = cycle_idempotency_key("fp", {"a.txt": "1" * 64})
-        changed = cycle_idempotency_key("fp", {"a.txt": "2" * 64})
-        rotated = cycle_idempotency_key("other", {"a.txt": "1" * 64})
+        first = cycle_idempotency_key("fp", {"a.md": "1" * 64})
+        second = cycle_idempotency_key("fp", {"a.md": "1" * 64})
+        changed = cycle_idempotency_key("fp", {"a.md": "2" * 64})
+        rotated = cycle_idempotency_key("other", {"a.md": "1" * 64})
         self.assertEqual(first, second)
         self.assertNotEqual(first, changed)
         self.assertNotEqual(first, rotated)
         self.assertTrue(first.startswith("webdav-generation:"))
 
     def test_published_matches_detects_the_published_cycle(self):
-        (self.incoming / "notes.txt").write_text("Hallo Max Mustermann", encoding="utf-8")
+        (self.incoming / "notes.md").write_text("Hallo Max Mustermann", encoding="utf-8")
         instance = anonymizer()
         publish_generation(self.incoming, self.sanitized, self.quarantine, instance)
         inventory = upstream_inventory(self.incoming)
         self.assertTrue(published_matches(self.sanitized, instance, inventory))
-        self.assertFalse(published_matches(self.sanitized, instance, {"notes.txt": "1" * 64}))
+        self.assertFalse(published_matches(self.sanitized, instance, {"notes.md": "1" * 64}))
         rotated = TargetedAnonymizer.from_config(
             {"people": [{"replacement": "[AUTOR]", "values": ["Max Mustermann"]}]}
         )
@@ -491,7 +475,7 @@ class DurableStateTests(unittest.TestCase):
         self.assertFalse(published_matches(self.root / "missing", instance, inventory))
 
     def test_record_generation_records_manifest_identity_once(self):
-        (self.incoming / "notes.txt").write_text("Hallo Max Mustermann", encoding="utf-8")
+        (self.incoming / "notes.md").write_text("Hallo Max Mustermann", encoding="utf-8")
         instance = anonymizer()
         publish_generation(self.incoming, self.sanitized, self.quarantine, instance)
         generation = active_generation(self.sanitized)
@@ -507,7 +491,7 @@ class DurableStateTests(unittest.TestCase):
         self.assertEqual(metrics["source_generations"], 1)
 
     def test_durable_cycle_skips_unchanged_upstream(self):
-        (self.incoming / "notes.txt").write_text("Hallo Max Mustermann", encoding="utf-8")
+        (self.incoming / "notes.md").write_text("Hallo Max Mustermann", encoding="utf-8")
         instance = anonymizer()
         store = self.store()
         try:
@@ -530,7 +514,7 @@ class DurableStateTests(unittest.TestCase):
             store.close()
 
     def test_durable_cycle_records_retries_and_dead_jobs(self):
-        (self.incoming / "broken.txt").write_bytes(b"\xff")
+        (self.incoming / "broken.md").write_bytes(b"\xff")
         instance = anonymizer()
         store = self.store()
         try:
@@ -555,7 +539,7 @@ class DurableStateTests(unittest.TestCase):
             store.close()
 
     def test_interrupted_cycle_is_recovered_without_republishing(self):
-        (self.incoming / "notes.txt").write_text("Hallo Max Mustermann", encoding="utf-8")
+        (self.incoming / "notes.md").write_text("Hallo Max Mustermann", encoding="utf-8")
         instance = anonymizer()
         store = self.store()
         try:
@@ -584,7 +568,7 @@ class DurableStateTests(unittest.TestCase):
             store.close()
 
     def test_losing_the_published_generation_arms_the_job_again(self):
-        (self.incoming / "notes.txt").write_text("Hallo Max Mustermann", encoding="utf-8")
+        (self.incoming / "notes.md").write_text("Hallo Max Mustermann", encoding="utf-8")
         instance = anonymizer()
         store = self.store()
         try:
@@ -604,7 +588,7 @@ class DurableStateTests(unittest.TestCase):
             store.close()
 
     def test_an_unavailable_store_degrades_to_stateless_publishing(self):
-        (self.incoming / "notes.txt").write_text("Hallo Max Mustermann", encoding="utf-8")
+        (self.incoming / "notes.md").write_text("Hallo Max Mustermann", encoding="utf-8")
         instance = anonymizer()
         store = self.store()
         with mock.patch.object(
@@ -616,7 +600,7 @@ class DurableStateTests(unittest.TestCase):
         self.assertIsNotNone(active_generation(self.sanitized))
 
     def test_publication_renews_the_lease_while_the_work_runs(self):
-        (self.incoming / "notes.txt").write_text("Hallo Max Mustermann", encoding="utf-8")
+        (self.incoming / "notes.md").write_text("Hallo Max Mustermann", encoding="utf-8")
         instance = anonymizer()
         store = self.store()
         try:
@@ -640,7 +624,7 @@ class DurableStateTests(unittest.TestCase):
             store.close()
 
     def test_run_recovers_a_failed_state_store(self):
-        (self.incoming / "notes.txt").write_text("Hallo Max Mustermann", encoding="utf-8")
+        (self.incoming / "notes.md").write_text("Hallo Max Mustermann", encoding="utf-8")
         redactions = self.root / "redactions.json"
         redactions.write_text(json.dumps(ANONYMIZER_CONFIGURATION), encoding="utf-8")
         broken_path = self.root / "state-directory"
@@ -692,7 +676,7 @@ class DurableStateTests(unittest.TestCase):
                 idempotency_key="old",
                 now=100,
             )
-            (self.incoming / "notes.txt").write_text("Hallo Max Mustermann", encoding="utf-8")
+            (self.incoming / "notes.md").write_text("Hallo Max Mustermann", encoding="utf-8")
             changed, failed, degraded = self.cycle(instance, store, now=1000)
             self.assertEqual((changed, failed, degraded), (1, 0, False))
             superseded = store.job_by_idempotency_key("old")
@@ -702,7 +686,7 @@ class DurableStateTests(unittest.TestCase):
             store.close()
 
     def test_a_stale_manifest_forces_republication(self):
-        (self.incoming / "notes.txt").write_text("Hallo Max Mustermann", encoding="utf-8")
+        (self.incoming / "notes.md").write_text("Hallo Max Mustermann", encoding="utf-8")
         instance = anonymizer()
         store = self.store()
         try:
@@ -733,7 +717,7 @@ class DurableStateTests(unittest.TestCase):
         store = self.store()
         try:
             publish_generation(self.incoming, self.sanitized, self.quarantine, instance)
-            (self.incoming / "notes.txt").write_text("new", encoding="utf-8")
+            (self.incoming / "notes.md").write_text("new", encoding="utf-8")
             inventory = upstream_inventory(self.incoming)
             key = cycle_idempotency_key(instance.fingerprint, inventory)
             job, _ = store.enqueue("ingest", {"provider": "webdav"}, idempotency_key=key, now=1000)
@@ -748,13 +732,13 @@ class DurableStateTests(unittest.TestCase):
             self.assertEqual(self.cycle(instance, store, now=1100), (1, 0, False))
             self.assertNotEqual(active(self.sanitized), interrupted)
             manifest = json.loads((self.sanitized / "manifest.json").read_text())
-            self.assertEqual([item["source_key"] for item in manifest["items"]], ["notes.txt"])
+            self.assertEqual([item["source_key"] for item in manifest["items"]], ["notes.md"])
             self.assertEqual(store.job(job.id).state, JOB_SUCCEEDED)
         finally:
             store.close()
 
     def test_publication_exceptions_are_recorded_and_bounded(self):
-        (self.incoming / "notes.txt").write_text("new", encoding="utf-8")
+        (self.incoming / "notes.md").write_text("new", encoding="utf-8")
         instance = anonymizer()
         store = self.store()
         try:
@@ -776,7 +760,7 @@ class DurableStateTests(unittest.TestCase):
             store.close()
 
     def test_removed_lease_fences_and_joins_publication_worker(self):
-        (self.incoming / "notes.txt").write_text("new", encoding="utf-8")
+        (self.incoming / "notes.md").write_text("new", encoding="utf-8")
         instance = anonymizer()
         store = self.store()
         try:
@@ -818,7 +802,7 @@ class DurableStateTests(unittest.TestCase):
             store.close()
 
     def test_a_lost_lease_fences_the_publication(self):
-        (self.incoming / "notes.txt").write_text("Hallo Max Mustermann", encoding="utf-8")
+        (self.incoming / "notes.md").write_text("Hallo Max Mustermann", encoding="utf-8")
         instance = anonymizer()
         store = self.store()
         try:
@@ -849,7 +833,7 @@ class DurableStateTests(unittest.TestCase):
             store.close()
 
     def test_run_records_state_and_health_metrics(self):
-        (self.incoming / "notes.txt").write_text("Hallo Max Mustermann", encoding="utf-8")
+        (self.incoming / "notes.md").write_text("Hallo Max Mustermann", encoding="utf-8")
         redactions = self.root / "redactions.json"
         redactions.write_text(json.dumps(ANONYMIZER_CONFIGURATION), encoding="utf-8")
         environment_variables = {

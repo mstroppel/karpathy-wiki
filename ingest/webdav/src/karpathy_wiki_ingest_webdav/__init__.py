@@ -1,10 +1,10 @@
 """WebDAV ingest plugin: publish upstream files as coherent sanitized generations.
 
 Every synchronization cycle builds a complete generation in a private staging
-directory, anonymizes and validates every file with a freshly loaded redaction
-configuration, and only then exposes it to readers by atomically switching the
-``current`` symlink and rewriting the provider manifest. A failed cycle keeps
-the last successful generation active.
+directory, anonymizes and validates every Markdown file with a freshly loaded
+redaction configuration, and only then exposes it to readers by atomically
+switching the ``current`` symlink and rewriting the provider manifest. A failed
+cycle keeps the last successful generation active.
 """
 
 from __future__ import annotations
@@ -58,14 +58,6 @@ ACTIVE_SYMLINK = "current"
 GENERATION_METADATA_FILENAME = ".generation.json"
 STAGING_PREFIX = ".staging-"
 
-# Reserved source file names are never published into a generation: the
-# provider manifest contract reserves `manifest.json` at the root of every
-# source directory, and `.generation.json` is the generation's own metadata.
-RESERVED_SOURCE_FILENAMES = {
-    MANIFEST_FILENAME: "ReservedManifestName",
-    GENERATION_METADATA_FILENAME: "ReservedGenerationMetadataName",
-}
-
 
 @dataclass(frozen=True)
 class Settings:
@@ -99,6 +91,15 @@ class GenerationItem:
     revision: str
 
 
+def markdown_source_files(incoming: Path) -> set[Path]:
+    """Return relative paths for all Markdown files in the staging tree."""
+    return {
+        path.relative_to(incoming)
+        for path in incoming.rglob("*")
+        if path.is_file() and path.suffix.lower() == ".md"
+    }
+
+
 def upstream_inventory(incoming: Path) -> dict[str, str]:
     """Content hashes of the synchronized upstream tree.
 
@@ -106,9 +107,8 @@ def upstream_inventory(incoming: Path) -> dict[str, str]:
     generation metadata so every generation documents what it published.
     """
     return {
-        path.relative_to(incoming).as_posix(): file_revision(path)
-        for path in sorted(incoming.rglob("*"))
-        if path.is_file()
+        relative.as_posix(): file_revision(incoming / relative)
+        for relative in sorted(markdown_source_files(incoming))
     }
 
 
@@ -147,37 +147,18 @@ def sanitize_into_generation(
     anonymizer: TargetedAnonymizer,
     quarantine: Path,
 ) -> tuple[list[GenerationItem], list[dict[str, str]], int]:
-    """Anonymize every upstream file into the fresh generation directory.
+    """Anonymize every upstream Markdown file into the fresh generation directory.
 
     Files that cannot be decoded or that fail privacy validation never enter
     the generation; they are reported content-free and counted as failed.
     """
-    incoming_files = {path.relative_to(incoming) for path in incoming.rglob("*") if path.is_file()}
+    incoming_files = markdown_source_files(incoming)
     items: list[GenerationItem] = []
     errors: list[dict[str, str]] = []
     failed = 0
     for relative in sorted(incoming_files):
         source = incoming / relative
         target = staging / relative
-        reserved_error_type = RESERVED_SOURCE_FILENAMES.get(relative.as_posix())
-        if reserved_error_type is not None:
-            # Reserved names (`manifest.json`, `.generation.json`) never
-            # carry upstream content; the generation publishes only its own
-            # metadata and the provider manifest stays at the source root.
-            failed += 1
-            report_quarantine(quarantine, relative, reserved_error_type, generation_name)
-            errors.append(
-                {
-                    "path": f"{GENERATIONS_DIRECTORY}/{generation_name}/{relative.as_posix()}",
-                    "error": reserved_error_type,
-                }
-            )
-            LOG.error(
-                "WebDAV file %s uses the reserved name %s and was quarantined",
-                relative,
-                reserved_error_type,
-            )
-            continue
         try:
             content = source.read_text(encoding="utf-8")
             output, _ = anonymizer.anonymize(content)
