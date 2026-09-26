@@ -43,6 +43,18 @@ export default {
               maximum: 25,
               description: 'Maximale Zahl je Status auf einer Seite (Standard: 10)',
             },
+            record_chunk_offset: {
+              type: 'integer',
+              minimum: 0,
+              description:
+                'Zeichenoffset zum Abrufen eines großen Eintrags (mit adapter und source_key)',
+            },
+            record_chunk_bytes: {
+              type: 'integer',
+              minimum: 4,
+              maximum: 1536,
+              description: 'Maximale UTF-8-Bytezahl des Eintragschunks (Standard: 1536)',
+            },
           },
           additionalProperties: false,
         },
@@ -65,6 +77,8 @@ export default {
                 summaryOnly: args.summary_only,
                 offset: args.offset,
                 limit: args.limit,
+                recordChunkOffset: args.record_chunk_offset,
+                recordChunkBytes: args.record_chunk_bytes,
               }),
             ),
           }

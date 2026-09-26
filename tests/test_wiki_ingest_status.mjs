@@ -4,7 +4,11 @@ import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 
-import { scanIngestStatus, selectIngestStatus } from '../config/tools/wiki_ingest_status_core.mjs'
+import {
+  STATUS_OUTPUT_BUDGET_BYTES,
+  scanIngestStatus,
+  selectIngestStatus,
+} from '../config/tools/wiki_ingest_status_core.mjs'
 
 const REVISION = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
 const OTHER_REVISION = 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'
@@ -296,6 +300,73 @@ test('bounds diagnostics while retaining their global counts', async () => {
       ['third error'],
     )
     assert.deepEqual(second.page, { offset: 2, limit: 2, has_more: false, next_offset: null })
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('caps serialized multi-adapter pages and reduces the entry count', async () => {
+  const { root, sourceRoot, wikiSourceRoot } = await fixture()
+  try {
+    for (const source of ['alpha', 'beta', 'gamma']) {
+      await writeManifest(sourceRoot, source, {
+        wiki_root: source,
+        items: Array.from({ length: 12 }, (_, index) =>
+          item(`${source}-${index}`, `${index}.txt`, `${source}/${index}.md`, REVISION, {
+            source_revision: REVISION,
+            description: 'x'.repeat(1000),
+          }),
+        ),
+      })
+    }
+
+    const full = await scanIngestStatus({ sourceRoot, wikiSourceRoot })
+    const page = selectIngestStatus(full, { limit: 10 })
+
+    assert.ok(Buffer.byteLength(JSON.stringify(page), 'utf8') <= STATUS_OUTPUT_BUDGET_BYTES)
+    assert.ok(page.page.limit < 10)
+    assert.equal(page.page.has_more, true)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('blocks oversized records and retrieves them in bounded JSON chunks', async () => {
+  const { root, sourceRoot, wikiSourceRoot } = await fixture()
+  try {
+    const large = {
+      ...paperlessItem(42),
+      frontmatter: {
+        paperless_id: 42,
+        source_revision: REVISION,
+        description: 'x'.repeat(40_000),
+      },
+    }
+    await writeManifest(sourceRoot, 'paperless', { items: [large] })
+    const full = await scanIngestStatus({ sourceRoot, wikiSourceRoot })
+    const blocked = selectIngestStatus(full, { adapter: 'paperless', limit: 1 })
+
+    assert.equal(blocked.page.blocked, true)
+    assert.deepEqual(blocked.oversized_records, [
+      { adapter: 'paperless', state: 'new', source_key: '42' },
+    ])
+    assert.ok(Buffer.byteLength(JSON.stringify(blocked), 'utf8') <= STATUS_OUTPUT_BUDGET_BYTES)
+
+    const chunks = []
+    let offset = 0
+    while (true) {
+      const response = selectIngestStatus(full, {
+        adapter: 'paperless',
+        sourceKey: '42',
+        recordChunkOffset: offset,
+      })
+      assert.ok(Buffer.byteLength(JSON.stringify(response), 'utf8') <= STATUS_OUTPUT_BUDGET_BYTES)
+      chunks.push(response.record.json)
+      if (response.record.next_offset === null) break
+      offset = response.record.next_offset
+    }
+
+    assert.deepEqual(JSON.parse(chunks.join('')), full.adapters.paperless.new[0])
   } finally {
     await rm(root, { recursive: true, force: true })
   }

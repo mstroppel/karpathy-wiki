@@ -24,6 +24,8 @@ export const REVISION_RE = /^[0-9a-f]{64}$/
 const MANIFEST_CONTRACT = 'karpathy-wiki-provider-manifest'
 export const MANIFEST_VERSION = 1
 export const MANIFEST_FILENAME = 'manifest.json'
+export const STATUS_OUTPUT_BUDGET_BYTES = 12 * 1024
+export const RECORD_CHUNK_BYTES = 1536
 
 function errorMessage(error) {
   return error instanceof Error ? error.message : String(error)
@@ -464,7 +466,15 @@ export async function scanIngestStatus({ sourceRoot, wikiSourceRoot, includeCurr
 // filtered result must never hide a batch-wide blocker.
 export function selectIngestStatus(
   status,
-  { adapter, sourceKey, summaryOnly = false, offset = 0, limit = 10 } = {},
+  {
+    adapter,
+    sourceKey,
+    summaryOnly = false,
+    offset = 0,
+    limit = 10,
+    recordChunkOffset,
+    recordChunkBytes,
+  } = {},
 ) {
   if (sourceKey !== undefined && adapter === undefined) {
     throw new Error('source_key erfordert adapter')
@@ -478,7 +488,48 @@ export function selectIngestStatus(
   if (!Number.isInteger(limit) || limit < 1 || limit > 25) {
     throw new Error('limit muss eine Ganzzahl zwischen 1 und 25 sein')
   }
+  if (recordChunkOffset === undefined && recordChunkBytes !== undefined) {
+    throw new Error('record_chunk_bytes erfordert record_chunk_offset')
+  }
+  if (recordChunkOffset !== undefined) {
+    if (adapter === undefined || sourceKey === undefined || summaryOnly) {
+      throw new Error('record_chunk_offset erfordert adapter und source_key')
+    }
+    if (!Number.isInteger(recordChunkOffset) || recordChunkOffset < 0) {
+      throw new Error('record_chunk_offset muss eine nicht-negative Ganzzahl sein')
+    }
+    const chunkBytes = recordChunkBytes ?? RECORD_CHUNK_BYTES
+    if (!Number.isInteger(chunkBytes) || chunkBytes < 4 || chunkBytes > RECORD_CHUNK_BYTES) {
+      throw new Error('record_chunk_bytes muss eine Ganzzahl zwischen 4 und 1536 sein')
+    }
+    return selectIngestRecordChunk(status, {
+      adapter,
+      sourceKey,
+      offset: recordChunkOffset,
+      chunkBytes,
+    })
+  }
 
+  for (let pageLimit = limit; pageLimit > 0; pageLimit -= 1) {
+    const page = selectIngestStatusPage(status, {
+      adapter,
+      sourceKey,
+      summaryOnly,
+      offset,
+      limit: pageLimit,
+    })
+    if (Buffer.byteLength(JSON.stringify(page), 'utf8') <= STATUS_OUTPUT_BUDGET_BYTES) return page
+  }
+
+  return oversizedStatusResult(status, {
+    adapter,
+    sourceKey,
+    summaryOnly,
+    offset,
+  })
+}
+
+function selectIngestStatusPage(status, { adapter, sourceKey, summaryOnly, offset, limit }) {
   let hasMore = false
   const adapters = Object.fromEntries(
     Object.entries(status.adapters).map(([name, result]) => {
@@ -507,4 +558,77 @@ export function selectIngestStatus(
       next_offset: hasMore ? offset + limit : null,
     },
   }
+}
+
+function selectIngestRecordChunk(status, { adapter, sourceKey, offset, chunkBytes }) {
+  const result = status.adapters[adapter]
+  if (!result) throw new Error(`unbekannter Adapter: ${adapter}`)
+  const state = ['new', 'outdated', 'current'].find((name) =>
+    result[name].some((item) => item.source_key === sourceKey),
+  )
+  if (!state) throw new Error(`keine offene Quelle für source_key: ${sourceKey}`)
+
+  const record = result[state].find((item) => item.source_key === sourceKey)
+  const serialized = JSON.stringify(record)
+  const characters = Array.from(serialized)
+  if (offset > characters.length) throw new Error('record_chunk_offset liegt hinter dem Datensatz')
+  let end = offset
+  let size = 0
+  while (end < characters.length) {
+    const characterBytes = Buffer.byteLength(characters[end], 'utf8')
+    if (size + characterBytes > chunkBytes) break
+    size += characterBytes
+    end += 1
+  }
+  const chunk = characters.slice(offset, end).join('')
+  const response = {
+    summary: status.summary,
+    record: {
+      state,
+      offset,
+      next_offset: end < characters.length ? end : null,
+      total_characters: characters.length,
+      json: chunk,
+    },
+  }
+  if (Buffer.byteLength(JSON.stringify(response), 'utf8') > STATUS_OUTPUT_BUDGET_BYTES) {
+    throw new Error('record_chunk_bytes überschreitet das Status-Ausgabebudget')
+  }
+  return response
+}
+
+function oversizedStatusResult(status, { adapter, sourceKey, summaryOnly, offset }) {
+  const oversized_records = []
+  if (!summaryOnly) {
+    for (const [name, result] of Object.entries(status.adapters)) {
+      if (adapter !== undefined && name !== adapter) continue
+      for (const state of ['new', 'outdated', 'current']) {
+        const entries = result[state].filter(
+          (item) => sourceKey === undefined || item.source_key === sourceKey,
+        )
+        const item = entries[offset]
+        if (item && Buffer.byteLength(JSON.stringify(item), 'utf8') > 1024) {
+          oversized_records.push({
+            adapter: name,
+            state,
+            source_key: item.source_key,
+          })
+        }
+      }
+    }
+  }
+  const response = {
+    summary: status.summary,
+    page: { offset, limit: 0, has_more: true, next_offset: null, blocked: true },
+    error: {
+      code: 'status_output_budget_exceeded',
+      message:
+        'Statusdetails überschreiten das Ausgabebudget. Filtere nach adapter; große Einträge können mit record_chunk_offset stückweise abgerufen werden.',
+    },
+    oversized_records: oversized_records.slice(0, 8),
+  }
+  if (Buffer.byteLength(JSON.stringify(response), 'utf8') > STATUS_OUTPUT_BUDGET_BYTES) {
+    response.oversized_records = []
+  }
+  return response
 }

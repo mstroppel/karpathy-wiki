@@ -88,6 +88,15 @@ Arbeitsseiten nicht erhöht werden. Wiederhole dies, bis der Adapter keine
 Blättern in einer unveränderten Liste. Schreibe und committe die Wiki-Seiten
 nach der Prüfung; eine Status- oder Leseprüfung allein erledigt keine Quelle.
 
+Falls `page.blocked` gesetzt ist, wurde das Bytebudget selbst mit einer Quelle
+pro Status überschritten. Verarbeite keine ausgelassenen Einträge: hole die
+unter `oversized_records` genannten Datensätze mit `adapter`, `source_key` und
+`record_chunk_offset: 0` ab. Hänge die `record.json`-Fragmente exakt in
+Offset-Reihenfolge zusammen, bis `record.next_offset` null ist, und parse das
+JSON-Objekt. Danach starte die Adapterliste erneut bei Offset 0. Verwende
+niemals die OpenCode-Tool-Output-Datei als Ersatz. Ist `oversized_records` leer,
+grenze die Abfrage auf einen Adapter ein und wiederhole sie.
+
 Prüfe nach dem letzten Commit mit `summary_only: true` erneut und bearbeite
 weitere offene Einträge, bis `new=0` und `outdated=0` gelten. Gib nur dann
 vorher als unvollständig zurück, wenn ein konkreter Fehler die Fortsetzung
