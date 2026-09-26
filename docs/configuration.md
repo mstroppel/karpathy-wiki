@@ -115,9 +115,11 @@ rotating it regenerates every applicable file on the next cycle.
 The redaction fingerprint also includes a code-maintained algorithm version.
 When a code change alters redaction behavior, bump
 `REDACTION_ALGORITHM_VERSION` in `ingest/core/src/karpathy_wiki_ingest/shared.py`.
-The next ingest cycle then regenerates WebDAV output even when the upstream files
-and redactions configuration are unchanged. The shared fingerprint also causes
-Paperless to reprocess documents on its next cycle.
+The next cycle then reprocesses every current redaction-enabled source, even
+when its upstream content and redactions configuration are unchanged: WebDAV
+regenerates its published files, and Paperless reprocesses selected documents.
+Any future ingest provider that uses the shared anonymizer fingerprint will
+also participate.
 
 The published layout below `sources/webdav` is:
 

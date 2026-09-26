@@ -731,6 +731,29 @@ class DurablePaperlessTests(unittest.TestCase):
         health = json.loads(self.settings_with_state.health_path.read_text())
         self.assertEqual(health["metrics"]["last_source_generation"]["provider"], "paperless")
 
+    def test_algorithm_version_bump_reprocesses_paperless_documents(self):
+        configuration = {"people": [{"replacement": "[ICH]", "values": ["Max Mustermann"]}]}
+        self.document["content"] = "Hallo Max Mustermann"
+        self.ingestor.anonymizer = TargetedAnonymizer.from_config(configuration)
+
+        self.assertEqual(self.ingestor.run_once(), (1, 0))
+        first_generation = (self.root / "sanitized" / "current").resolve()
+
+        with mock.patch.object(
+            shared_module,
+            "REDACTION_ALGORITHM_VERSION",
+            shared_module.REDACTION_ALGORITHM_VERSION + 1,
+        ):
+            self.ingestor.anonymizer = TargetedAnonymizer.from_config(configuration)
+            result = self.ingestor.run_once()
+            second_generation = (self.root / "sanitized" / "current").resolve()
+
+        self.assertEqual(result, (1, 0))
+        self.assertNotEqual(first_generation, second_generation)
+        sanitized = source_document_path(self.root / "sanitized" / "current", 3246).read_text()
+        self.assertIn("[ICH]", sanitized)
+        self.assertNotIn("Max Mustermann", sanitized)
+
     def test_restart_finishes_published_job_without_new_generation(self):
         with mock.patch.object(StateStore, "complete", side_effect=StateError("interrupted")):
             with self.assertRaises(StateError):
