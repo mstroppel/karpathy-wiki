@@ -68,16 +68,34 @@ Paperless-Quellenseite, ergänze es bei der nächsten Aktualisierung.
 
 ## Stapelverarbeitung
 
-Rufe zuerst `wiki_ingest_status` auf. Bei `invalid` oder `conflict` in einem
-Adapter brich vor Änderungen ab; melde `revoked` und `orphaned`, ohne sie zu
-bereinigen. Bearbeite alle `new`- und `outdated`-Einträge in der gelieferten
+Rufe zuerst `wiki_ingest_status` mit `summary_only: true` auf. Bei `invalid`
+oder `conflict` brich vor Änderungen ab. Die Zähler sind global; Diagnosezeilen
+sind seitenweise begrenzt. Melde `revoked` und `orphaned`, ohne sie zu
+bereinigen; hole für ihre vollständige Liste weitere Seiten mit
+`summary_only: true` und `offset: page.next_offset` ab, bis
+`page.has_more` falsch ist.
+
+Rufe dann für jeden Adapter `wiki_ingest_status` mit `adapter`, `offset: 0` und
+`limit: 10` auf. Bearbeite die gelieferten `new`- und `outdated`-Einträge in
 Adapter- und Quellenreihenfolge, jeweils mit eigenem Commit. Die Statusliste
-enthält bereits die Quellpfade; suche sie nicht nochmals per `find` oder `glob`.
-Prüfe unmittelbar vor jeder Quelle ihren Status und ihre Revision mit `adapter`
-und `source_key` sowie die globalen `invalid`- und `conflict`-Zähler. Fehlt die
-Quelle oder ändert sich die Revision, hole die vollständige Liste erneut.
-Schreibe und committe die Wiki-Seiten nach der Prüfung; eine Status- oder
-Leseprüfung allein erledigt keine Quelle.
+enthält bereits die Quellpfade; suche sie nicht nochmals per `find` oder
+`glob`. Prüfe unmittelbar vor jeder Quelle ihren Status und ihre Revision mit
+`adapter` und `source_key` sowie die globalen `invalid`- und `conflict`-Zähler.
+Nach der Bearbeitung einer Seite rufe denselben Adapter erneut mit `offset: 0`
+auf: erledigte Quellen fallen aus der Liste, daher darf der Offset zwischen
+Arbeitsseiten nicht erhöht werden. Wiederhole dies, bis der Adapter keine
+`new`- oder `outdated`-Einträge mehr liefert. `page.next_offset` dient nur zum
+Blättern in einer unveränderten Liste. Schreibe und committe die Wiki-Seiten
+nach der Prüfung; eine Status- oder Leseprüfung allein erledigt keine Quelle.
+
+Falls `page.blocked` gesetzt ist, wurde das Bytebudget selbst mit einer Quelle
+pro Status überschritten. Verarbeite keine ausgelassenen Einträge: hole die
+unter `oversized_records` genannten Datensätze mit `adapter`, `source_key` und
+`record_chunk_offset: 0` ab. Hänge die `record.json`-Fragmente exakt in
+Offset-Reihenfolge zusammen, bis `record.next_offset` null ist, und parse das
+JSON-Objekt. Danach starte die Adapterliste erneut bei Offset 0. Verwende
+niemals die OpenCode-Tool-Output-Datei als Ersatz. Ist `oversized_records` leer,
+grenze die Abfrage auf einen Adapter ein und wiederhole sie.
 
 Prüfe nach dem letzten Commit mit `summary_only: true` erneut und bearbeite
 weitere offene Einträge, bis `new=0` und `outdated=0` gelten. Gib nur dann

@@ -70,6 +70,18 @@ JSON-compatible values, and `wiki_path` must be unique across every discovered
 source; collisions are reported as `conflict`. Provider manifests are data:
 nothing in a source directory is ever executed.
 
+Status details are returned in bounded pages (10 entries per status by default,
+maximum 25), including diagnostics. Use `adapter` by itself to list one source
+adapter, and `offset` and `limit` to page through a stable list. Global counts
+remain present on adapter-filtered pages. When ingesting a batch, restart at
+offset 0 after processing each page because completed sources leave the pending
+list. The serialized response is capped at 12 KiB; page size is reduced when
+needed. If the page still exceeds the cap at one entry per status,
+`page.blocked` is returned. `oversized_records` identifies large pending
+records; retrieve each JSON representation in bounded chunks with `adapter`,
+`source_key`, and `record_chunk_offset`, then append chunks by offset before
+parsing. If no pending record is listed, narrow the query to one adapter.
+
 ## Secrets
 
 WebDAV uses rclone's obscured password format. Obscuring is not encryption;

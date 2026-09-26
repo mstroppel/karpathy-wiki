@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The `wiki_ingest_status` tool now returns bounded, pageable source details and
+  supports adapter-only listing. Serialized output is capped at 12 KiB, and
+  oversized individual records can be retrieved as bounded JSON chunks. Ingest
+  batches no longer depend on reading OpenCode's external tool-output sidecar,
+  which is outside the wiki's allowed external directories.
+
 ## [0.2.1] - 2026-09-25
 
 ### Fixed
