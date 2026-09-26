@@ -124,7 +124,7 @@ class InstallTests(unittest.TestCase):
             self.assertIn("KARPATHY_WIKI_VERSION=1.2.3\n", environment)
             self.assertRegex(environment, r"OPENCODE_PASSWORD=[0-9a-f]{48}\n")
             self.assertTrue((directory / "karpathy-wiki.sh").exists())
-            self.assertEqual((directory / ".gitignore").read_text(), ".cache/\n")
+            self.assertEqual((directory / ".gitignore").read_text(), ".cache/\n.env.bak\n")
 
     def test_install_refuses_non_empty_directory_before_download(self):
         with tempfile.TemporaryDirectory() as parent:
