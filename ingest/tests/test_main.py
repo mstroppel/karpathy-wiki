@@ -199,14 +199,20 @@ class IngestTests(unittest.TestCase):
             }
         )
 
-        for text, expected in (("_Anton:", "[PERSON_1]:"), ("_Anton_:", "[PERSON_1]:")):
+        cases = (
+            ("_Anton:", "[PERSON_1]:"),
+            ("_Anton_:", "[PERSON_1]:"),
+            ("__Anton__:", "[PERSON_1]:"),
+            ("_Hello Anton_!", "_Hello [PERSON_1]_!"),
+        )
+        for text, expected in cases:
             with self.subTest(text=text):
                 self.assertTrue(anonymizer.contains_person_name(text))
                 result, counts = anonymizer.anonymize(text)
                 self.assertEqual(result, expected)
                 self.assertEqual(counts, Counter({"PERSON": 1}))
 
-        for text in ("foo_Anton", "_Antonym:", "_Anton_suffix"):
+        for text in ("foo_Anton", "_Antonym:", "_Anton_suffix", "Anton_suffix"):
             with self.subTest(text=text):
                 self.assertFalse(anonymizer.contains_person_name(text))
 
