@@ -92,7 +92,7 @@ esac
 
 
 class InstallTests(unittest.TestCase):
-    def run_installer(self, directory, **overrides):
+    def run_installer(self, directory, *arguments, **overrides):
         bin_dir = Path(directory).parent / "bin"
         bin_dir.mkdir(exist_ok=True)
         curl = bin_dir / "curl"
@@ -105,7 +105,7 @@ class InstallTests(unittest.TestCase):
             **overrides,
         }
         return subprocess.run(
-            ["sh", str(INSTALLER)],
+            ["sh", str(INSTALLER), *arguments],
             cwd=directory,
             env=environment,
             text=True,
@@ -131,6 +131,31 @@ class InstallTests(unittest.TestCase):
             self.assertTrue(export_script.exists())
             self.assertTrue(export_script.stat().st_mode & 0o100)
             self.assertEqual((directory / ".gitignore").read_text(), ".cache/\n")
+
+    def test_update_replaces_launcher_scripts_without_changing_install_config(self):
+        with tempfile.TemporaryDirectory() as parent:
+            directory = Path(parent) / "my-wiki"
+            directory.mkdir()
+            env_file = directory / ".env"
+            env_file.write_text("KARPATHY_WIKI_VERSION=0.8.0\nOPENCODE_PASSWORD=keep\n")
+            env_file.chmod(0o600)
+            (directory / "karpathy-wiki.sh").write_text("old launcher\n")
+            (directory / "compose.override.yaml").write_text("services: {}\n")
+
+            result = self.run_installer(directory, "update")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("configuration unchanged", result.stdout)
+            self.assertEqual(
+                env_file.read_text(),
+                "KARPATHY_WIKI_VERSION=0.8.0\nOPENCODE_PASSWORD=keep\n",
+            )
+            self.assertEqual(env_file.stat().st_mode & 0o777, 0o600)
+            self.assertEqual((directory / "compose.override.yaml").read_text(), "services: {}\n")
+            for filename in ("karpathy-wiki.sh", "export-opencode-sessions.sh"):
+                script = directory / filename
+                self.assertEqual(script.read_text(), "#!/bin/sh\n")
+                self.assertTrue(script.stat().st_mode & 0o100)
 
     def test_install_refuses_non_empty_directory_before_download(self):
         with tempfile.TemporaryDirectory() as parent:

@@ -124,6 +124,15 @@ data layout or generated policies. Local Compose changes belong in
 `compose.override.yaml` and survive updates. See [backup and restore](docs/backup-restore.md)
 for a consistent backup and a separate-instance restore check.
 
+To update the launcher and its helper scripts in an existing installation,
+run this from that installation directory. It preserves `.env`, Compose
+overrides, and image versions:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mstroppel/karpathy-wiki/main/install.sh \
+  | sh -s -- update
+```
+
 ## Session exports
 
 Export a session and any subagent sessions it created with:

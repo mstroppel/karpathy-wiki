@@ -2,9 +2,22 @@
 set -eu
 
 repository="mstroppel/karpathy-wiki"
+mode=${1:-install}
 install_dir=${INSTALL_DIR:-.}
 version=${KARPATHY_WIKI_VERSION:-}
 channel=${KARPATHY_WIKI_CHANNEL:-stable}
+
+[ "$#" -le 1 ] || {
+  printf 'usage: install.sh [update]\n' >&2
+  exit 2
+}
+case "$mode" in
+  install|update) ;;
+  *)
+    printf 'unsupported installer mode: %s (use install or update)\n' "$mode" >&2
+    exit 2
+    ;;
+esac
 
 case "$channel" in
   stable|pre) ;;
@@ -35,14 +48,26 @@ case "$wiki_id" in
     ;;
 esac
 
-for entry in "$install_dir"/* "$install_dir"/.[!.]* "$install_dir"/..?*; do
-  if [ -e "$entry" ] || [ -L "$entry" ]; then
-    printf '%s must be empty before installation\n' "$install_dir" >&2
+if [ "$mode" = update ]; then
+  if [ ! -f "$install_dir/.env" ]; then
+    printf 'missing %s/.env; update must run from an existing installation\n' \
+      "$install_dir" >&2
     exit 1
   fi
-done
+else
+  for entry in "$install_dir"/* "$install_dir"/.[!.]* "$install_dir"/..?*; do
+    if [ -e "$entry" ] || [ -L "$entry" ]; then
+      printf '%s must be empty before installation\n' "$install_dir" >&2
+      exit 1
+    fi
+  done
+fi
 
-if [ -z "$version" ]; then
+if [ "$mode" = update ]; then
+  # Update launcher tooling from main independently of the pinned app images.
+  version=main
+  tag=main
+elif [ -z "$version" ]; then
   if [ "$channel" = pre ]; then
     # Pre-releases do not appear under releases/latest; resolve the newest
     # v*-pre.* tag via the git provider API instead.
@@ -74,7 +99,6 @@ esac
 
 temporary_dir=$(mktemp -d)
 trap 'rm -rf "$temporary_dir"' EXIT HUP INT TERM
-opencode_password=$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')
 
 base_url="https://raw.githubusercontent.com/$repository/$tag"
 main_url="https://raw.githubusercontent.com/$repository/main"
@@ -88,6 +112,19 @@ curl -fsSL "$base_url/export-opencode-sessions.sh" \
   -o "$temporary_dir/export-opencode-sessions.sh" 2>/dev/null ||
   curl -fsSL "$main_url/export-opencode-sessions.sh" \
     -o "$temporary_dir/export-opencode-sessions.sh"
+
+if [ "$mode" = update ]; then
+  chmod 0755 "$temporary_dir/karpathy-wiki.sh"
+  chmod 0755 "$temporary_dir/export-opencode-sessions.sh"
+  mv -f "$temporary_dir/karpathy-wiki.sh" "$install_dir/karpathy-wiki.sh"
+  mv -f "$temporary_dir/export-opencode-sessions.sh" \
+    "$install_dir/export-opencode-sessions.sh"
+  printf 'Updated launcher scripts in %s (configuration unchanged)\n' \
+    "$install_dir"
+  exit 0
+fi
+
+opencode_password=$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')
 curl -fsSL "$base_url/.env.example" -o "$temporary_dir/.env"
 sed \
   -e "s/^COMPOSE_PROJECT_NAME=.*/COMPOSE_PROJECT_NAME=$wiki_id/" \
