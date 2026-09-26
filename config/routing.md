@@ -36,12 +36,11 @@ primäre Agenten; ein spezialisierter Agent führt seinen Auftrag selbst aus.
 Bei einem gescheiterten delegierten Auftrag zeige die genaue Fehlermeldung
 des spezialisierten Agenten in der Antwort.
 
-Bei einem Auftrag für **alle** neuen und geänderten Quellen ist ein Teilergebnis
-ohne konkreten Blocker kein Abschluss: Beauftrage `wiki-ingest` erneut mit den
-offenen Quellen, bis dessen abschließende Statusprüfung `new=0` und `outdated=0`
-meldet. Behalte die Reihenfolge der Statusliste bei. Bei einem konkreten Fehler
-nenne die genaue Fehlermeldung und alle noch offenen Quellen. Melde den Stapel
-niemals allein aufgrund von Commits oder einer Teilzusammenfassung als erledigt.
+Bei einem Auftrag für **alle** neuen und geänderten Quellen delegiere ein
+Teilergebnis ohne konkreten Blocker erneut an `wiki-ingest`, in Statusreihenfolge.
+Melde den Stapel erst nach dessen abschließender Prüfung mit `new=0` und
+`outdated=0` als erledigt; bei einem Blocker nenne die genaue Fehlermeldung
+und alle offenen Quellen.
 
 Ist die Absicht mehrdeutig, verwende den Abfragemodus. Behandle nicht
 eingelesene Dateien unter `/knowledge/sources` nicht als Wiki-Wissen. Verwende
