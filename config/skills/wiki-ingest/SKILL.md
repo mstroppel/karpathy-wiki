@@ -68,16 +68,47 @@ Paperless-Quellenseite, ergänze es bei der nächsten Aktualisierung.
 
 ## Stapelverarbeitung
 
-Rufe zuerst `wiki_ingest_status` auf. Bei `invalid` oder `conflict` in einem
-Adapter brich vor Änderungen ab; melde `revoked` und `orphaned`, ohne sie zu
-bereinigen. Bearbeite alle `new`- und `outdated`-Einträge in der gelieferten
+Rufe zuerst `wiki_ingest_status` mit `summary_only: true` auf. Die Zähler sind
+global; Diagnosezeilen sind seitenweise begrenzt. Bei `page.blocked` hole die
+unter `oversized_records` genannten Datensätze stückweise ab: verwende `adapter`, `record_chunk_state`,
+`record_chunk_offset: 0` sowie `record_chunk_index`, falls vorhanden, und
+`source_key`, falls vorhanden. Hänge die `record.json`-Fragmente exakt in
+Offset-Reihenfolge zusammen, bis `record.next_offset` null ist, und parse das
+JSON. Melde `revoked` und `orphaned`, ohne sie zu bereinigen; hole ihre vollständigen
+Listen mit getrennten Abfragen `status_state: "revoked"` und
+`status_state: "orphaned"` ab. Verwende dafür die jeweiligen
+`page.next_offset`-Werte; Statusarten werden unabhängig voneinander geblättert.
+
+Wenn die globalen Zähler `invalid>0` oder `conflict>0` anzeigen, melde die
+zugehörigen Diagnosen (bei Bedarf mit `status_state: "invalid"` oder
+`status_state: "conflict"`) und brich vor Wiki-Änderungen ab.
+
+Rufe dann für jeden Adapter `wiki_ingest_status` mit `adapter`, `offset: 0` und
+`limit: 10` auf. Bearbeite die gelieferten `new`- und `outdated`-Einträge in
 Adapter- und Quellenreihenfolge, jeweils mit eigenem Commit. Die Statusliste
-enthält bereits die Quellpfade; suche sie nicht nochmals per `find` oder `glob`.
-Prüfe unmittelbar vor jeder Quelle ihren Status und ihre Revision mit `adapter`
-und `source_key` sowie die globalen `invalid`- und `conflict`-Zähler. Fehlt die
-Quelle oder ändert sich die Revision, hole die vollständige Liste erneut.
-Schreibe und committe die Wiki-Seiten nach der Prüfung; eine Status- oder
-Leseprüfung allein erledigt keine Quelle.
+enthält bereits die Quellpfade; suche sie nicht nochmals per `find` oder
+`glob`. Prüfe unmittelbar vor jeder Quelle ihren Status und ihre Revision mit
+`adapter` und `source_key` sowie die globalen `invalid`- und `conflict`-Zähler.
+Nach der Bearbeitung einer Seite rufe denselben Adapter erneut mit `offset: 0`
+auf: erledigte Quellen fallen aus der Liste, daher darf der Offset zwischen
+Arbeitsseiten nicht erhöht werden. Wiederhole dies, bis der Adapter keine
+`new`- oder `outdated`-Einträge mehr liefert. `page.next_offset` dient nur zum
+Blättern in einer unveränderten Liste. Schreibe und committe die Wiki-Seiten
+nach der Prüfung; eine Status- oder Leseprüfung allein erledigt keine Quelle.
+
+Wenn eine Adapterliste `page.blocked` meldet, verarbeite jeden ausgelassenen
+`new`- oder `outdated`-Datensatz aus `oversized_records` wie einen normalen
+Quellenauftrag (einschließlich Status-/Revisionsprüfung und Commit). Danach
+starte die Adapterliste erneut bei Offset 0. Diagnosedatensätze werden nur
+gemeldet. Hole übrige Diagnosen mit `status_state` für die jeweilige Statusart
+separat ab, damit ein großer Eintrag keine anderen Statuslisten blockiert. Nach
+dem chunkweisen Abruf eines Diagnosedatensatzes fahre dieselbe Adapter- und
+Statusabfrage bei `offset: record.index + 1` fort; nutze danach wie üblich
+`page.next_offset`. Ein weiterer Blocker derselben Statusart wird so ebenfalls
+gemeldet. Bei `invalid` oder `conflict` bleiben keine Wiki-Änderungen offen.
+Verwende niemals die OpenCode-Tool-Output-Datei als Ersatz. Ist
+`oversized_records` leer, grenze die Abfrage auf einen Adapter ein und wiederhole
+sie.
 
 Prüfe nach dem letzten Commit mit `summary_only: true` erneut und bearbeite
 weitere offene Einträge, bis `new=0` und `outdated=0` gelten. Gib nur dann

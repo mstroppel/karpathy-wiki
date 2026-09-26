@@ -10,7 +10,7 @@ export default {
       tools.add({
         name: 'wiki_ingest_status',
         description:
-          'Vergleicht die vorhandenen Quellen über ihre Provider-Manifeste mit ihren Wiki-Quellenseiten und meldet den Status aller Quellen.',
+          'Vergleicht Quellen über ihre Provider-Manifeste mit den Wiki-Seiten. Gibt Statusdetails seitenweise aus; adapter kann allein zum Auflisten einer Quellenart verwendet werden.',
         input: {
           type: 'object',
           properties: {
@@ -20,16 +20,55 @@ export default {
             },
             adapter: {
               type: 'string',
-              description: 'Adapter für eine gezielte Revisionsprüfung (zusammen mit source_key)',
+              description:
+                'Adapter für eine gezielte Revisionsprüfung oder eine seitenweise Adapterliste',
             },
             source_key: {
               type: 'string',
               description:
                 'Quellschlüssel für eine gezielte Revisionsprüfung (zusammen mit adapter)',
             },
+            status_state: {
+              type: 'string',
+              enum: ['new', 'outdated', 'current', 'conflict', 'revoked', 'orphaned', 'invalid'],
+              description: 'Nur diesen Status ausgeben; ermöglicht unabhängiges Blättern je Status',
+            },
             summary_only: {
               type: 'boolean',
               description: 'Nur Zähler und Diagnoseeinträge ausgeben, keine Quellendetails',
+            },
+            offset: {
+              type: 'integer',
+              minimum: 0,
+              description: 'Eintragsposition der Statusseite (Standard: 0)',
+            },
+            limit: {
+              type: 'integer',
+              minimum: 1,
+              maximum: 25,
+              description: 'Maximale Zahl je Status auf einer Seite (Standard: 10)',
+            },
+            record_chunk_offset: {
+              type: 'integer',
+              minimum: 0,
+              description:
+                'Zeichenoffset zum Abrufen eines großen Eintrags (mit adapter und source_key)',
+            },
+            record_chunk_bytes: {
+              type: 'integer',
+              minimum: 4,
+              maximum: 1536,
+              description: 'Maximale UTF-8-Bytezahl des Eintragschunks (Standard: 1536)',
+            },
+            record_chunk_state: {
+              type: 'string',
+              enum: ['new', 'outdated', 'current', 'conflict', 'revoked', 'orphaned', 'invalid'],
+              description: 'Status des Eintrags, der stückweise abgerufen wird',
+            },
+            record_chunk_index: {
+              type: 'integer',
+              minimum: 0,
+              description: 'Eintragsposition innerhalb von adapter und record_chunk_state',
             },
           },
           additionalProperties: false,
@@ -51,6 +90,13 @@ export default {
                 adapter: args.adapter,
                 sourceKey: args.source_key,
                 summaryOnly: args.summary_only,
+                offset: args.offset,
+                limit: args.limit,
+                recordChunkOffset: args.record_chunk_offset,
+                recordChunkBytes: args.record_chunk_bytes,
+                recordChunkState: args.record_chunk_state,
+                recordChunkIndex: args.record_chunk_index,
+                statusState: args.status_state,
               }),
             ),
           }
