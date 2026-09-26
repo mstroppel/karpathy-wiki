@@ -101,8 +101,11 @@ Wenn eine Adapterliste `page.blocked` meldet, verarbeite jeden ausgelassenen
 Quellenauftrag (einschließlich Status-/Revisionsprüfung und Commit). Danach
 starte die Adapterliste erneut bei Offset 0. Diagnosedatensätze werden nur
 gemeldet. Hole übrige Diagnosen mit `status_state` für die jeweilige Statusart
-separat ab, damit ein großer Eintrag keine anderen Statuslisten blockiert. Bei
-`invalid` oder `conflict` bleiben keine Wiki-Änderungen offen.
+separat ab, damit ein großer Eintrag keine anderen Statuslisten blockiert. Nach
+dem chunkweisen Abruf eines Diagnosedatensatzes fahre dieselbe Adapter- und
+Statusabfrage bei `offset: record.index + 1` fort; nutze danach wie üblich
+`page.next_offset`. Ein weiterer Blocker derselben Statusart wird so ebenfalls
+gemeldet. Bei `invalid` oder `conflict` bleiben keine Wiki-Änderungen offen.
 Verwende niemals die OpenCode-Tool-Output-Datei als Ersatz. Ist
 `oversized_records` leer, grenze die Abfrage auf einen Adapter ein und wiederhole
 sie.

@@ -378,7 +378,10 @@ test('retrieves oversized diagnostics through state and index chunks', async () 
   const { root, sourceRoot, wikiSourceRoot } = await fixture()
   try {
     await writeManifest(sourceRoot, 'paperless', {
-      errors: [{ error: 'validation failed: '.padEnd(40_000, 'x') }],
+      errors: [
+        { error: 'validation failed: '.padEnd(40_000, 'x') },
+        { error: 'second validation error' },
+      ],
       revoked: [{ source_key: 'gone', claim: { paperless_id: 'gone' } }],
     })
     const full = await scanIngestStatus({ sourceRoot, wikiSourceRoot })
@@ -404,6 +407,15 @@ test('retrieves oversized diagnostics through state and index chunks', async () 
     ])
     assert.deepEqual(revoked.adapters.paperless.invalid, [])
     assert.equal(revoked.page.blocked, undefined)
+
+    const nextInvalid = selectIngestStatus(full, {
+      adapter: 'paperless',
+      statusState: 'invalid',
+      offset: 1,
+      limit: 1,
+    })
+    assert.equal(nextInvalid.adapters.paperless.invalid[0].error, 'second validation error')
+    assert.equal(nextInvalid.page.has_more, false)
 
     const chunks = []
     let offset = 0
