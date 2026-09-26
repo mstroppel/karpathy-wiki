@@ -156,12 +156,31 @@ class IngestTests(unittest.TestCase):
             {"people": [{"replacement": "[PERSON_1]", "first_name": "Anton", "last_name": "Hotz"}]}
         )
 
-        for source in ("AntonHotz", "HotzAnton", "Hotz"):
+        for source in ("AntonHotz", "HotzAnton", "Hotz", "_Hotz_", "__Hotz__:", "_Hotz:"):
             with self.subTest(source=source):
                 self.assertTrue(anonymizer.contains_person_name(source))
                 result, counts = anonymizer.anonymize(source)
-                self.assertEqual(result, "[PERSON_1]")
+                expected = ":" if source.endswith(":") else ""
+                self.assertEqual(result, f"[PERSON_1]{expected}")
                 self.assertEqual(counts, Counter({"PERSON": 1}))
+
+        for source in ("foo_Hotz", "Hotz_suffix"):
+            with self.subTest(source=source):
+                self.assertFalse(anonymizer.contains_person_name(source))
+
+    def test_shared_surnames_use_a_generic_standalone_replacement(self):
+        anonymizer = TargetedAnonymizer.from_config(
+            {
+                "people": [
+                    {"replacement": "[PERSON_1]", "first_name": "Anton", "last_name": "Hotz"},
+                    {"replacement": "[PERSON_2]", "first_name": "Maria", "last_name": "Hotz"},
+                ]
+            }
+        )
+
+        self.assertEqual(anonymizer.anonymize("Hotz")[0], "[PERSON]")
+        self.assertEqual(anonymizer.anonymize("AntonHotz")[0], "[PERSON_1]")
+        self.assertEqual(anonymizer.anonymize("MariaHotz")[0], "[PERSON_2]")
 
     def test_structured_first_names_are_redacted_in_signoffs(self):
         anonymizer = TargetedAnonymizer.from_config(

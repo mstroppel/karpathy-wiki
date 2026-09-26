@@ -190,7 +190,9 @@ forms are also covered. For first names ending in a sibilant letter such as `s`,
 A common first name elsewhere in a document is therefore also redacted. If two
 entries use the same first name with different replacements, the redaction
 configuration is rejected because a standalone name cannot identify which person
-it refers to.
+it refers to. If entries share a last name but use different replacements, the
+standalone last name is replaced with `[PERSON]`; full-name variants retain their
+configured replacements.
 
 ## Reverse Proxy
 
