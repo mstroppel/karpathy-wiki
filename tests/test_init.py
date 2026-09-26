@@ -149,6 +149,9 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(rules[("edit", "/knowledge/sources/**")], "deny")
         self.assertEqual(rules[("edit", "/knowledge/raw/**")], "deny")
         self.assertEqual(rules[("external_directory", "/knowledge/sources/**")], "allow")
+        tool_output = "/home/opencode/.local/share/opencode/tool-output/**"
+        self.assertEqual(rules[("external_directory", tool_output)], "allow")
+        self.assertEqual(rules[("edit", tool_output)], "deny")
         ingest_agent = config["agents"]["wiki-ingest"]
         ingest_shell_rules = {
             rule["resource"]: rule["effect"]
