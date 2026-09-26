@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
+from karpathy_wiki_ingest import shared as shared_module
 from karpathy_wiki_ingest.shared import atomic_write, canonical_phone
 from karpathy_wiki_ingest.state import (
     JOB_PENDING,
@@ -326,6 +327,19 @@ class IngestTests(unittest.TestCase):
             with self.subTest(message=message):
                 with self.assertRaisesRegex(ValueError, message):
                     TargetedAnonymizer.from_config(config)
+
+    def test_redaction_fingerprint_changes_with_algorithm_version(self):
+        configuration = {"people": [{"replacement": "[ICH]", "values": ["Max Mustermann"]}]}
+        first = TargetedAnonymizer.from_config(configuration).fingerprint
+
+        with mock.patch.object(
+            shared_module,
+            "REDACTION_ALGORITHM_VERSION",
+            shared_module.REDACTION_ALGORITHM_VERSION + 1,
+        ):
+            changed = TargetedAnonymizer.from_config(configuration).fingerprint
+
+        self.assertNotEqual(first, changed)
 
     def test_rendered_source_contains_metadata(self):
         result = render_document(
@@ -716,6 +730,29 @@ class DurablePaperlessTests(unittest.TestCase):
         self.assertEqual(store.metrics()["source_generations"], 1)
         health = json.loads(self.settings_with_state.health_path.read_text())
         self.assertEqual(health["metrics"]["last_source_generation"]["provider"], "paperless")
+
+    def test_algorithm_version_bump_reprocesses_paperless_documents(self):
+        configuration = {"people": [{"replacement": "[ICH]", "values": ["Max Mustermann"]}]}
+        self.document["content"] = "Hallo Max Mustermann"
+        self.ingestor.anonymizer = TargetedAnonymizer.from_config(configuration)
+
+        self.assertEqual(self.ingestor.run_once(), (1, 0))
+        first_generation = (self.root / "sanitized" / "current").resolve()
+
+        with mock.patch.object(
+            shared_module,
+            "REDACTION_ALGORITHM_VERSION",
+            shared_module.REDACTION_ALGORITHM_VERSION + 1,
+        ):
+            self.ingestor.anonymizer = TargetedAnonymizer.from_config(configuration)
+            result = self.ingestor.run_once()
+            second_generation = (self.root / "sanitized" / "current").resolve()
+
+        self.assertEqual(result, (1, 0))
+        self.assertNotEqual(first_generation, second_generation)
+        sanitized = source_document_path(self.root / "sanitized" / "current", 3246).read_text()
+        self.assertIn("[ICH]", sanitized)
+        self.assertNotIn("Max Mustermann", sanitized)
 
     def test_restart_finishes_published_job_without_new_generation(self):
         with mock.patch.object(StateStore, "complete", side_effect=StateError("interrupted")):

@@ -15,6 +15,11 @@ from typing import Any
 PHONE_CANDIDATE_RE = re.compile(r"(?<!\w)(?:\+|00)?\d(?:[\s()./-]*\d){5,}(?!\w)")
 PLACEHOLDER_RE = re.compile(r"^\[[A-Z][A-Z0-9_]*\]$")
 
+# Bump when a change alters which content is redacted or how it is transformed.
+# The fingerprint invalidates previously published sanitized output on the next
+# ingest cycle without requiring users to edit their redaction configuration.
+REDACTION_ALGORITHM_VERSION = 1
+
 
 class PrivacyValidationError(ValueError):
     """The candidate output is not safe to publish."""
@@ -233,7 +238,13 @@ class TargetedAnonymizer:
             )
         ]
         encoded = json.dumps(
-            configuration, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            {
+                "algorithm_version": REDACTION_ALGORITHM_VERSION,
+                "configuration": configuration,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
         ).encode("utf-8")
         person_name_patterns = [
             first_name_pattern(value)
