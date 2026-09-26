@@ -190,6 +190,26 @@ class IngestTests(unittest.TestCase):
 
         self.assertFalse(anonymizer.contains_person_name("Antonym House"))
 
+    def test_structured_first_names_allow_markdown_underscore_delimiters(self):
+        anonymizer = TargetedAnonymizer.from_config(
+            {
+                "people": [
+                    {"replacement": "[PERSON_1]", "first_name": "Anton", "last_name": "Muster"}
+                ]
+            }
+        )
+
+        for text, expected in (("_Anton:", "[PERSON_1]:"), ("_Anton_:", "[PERSON_1]:")):
+            with self.subTest(text=text):
+                self.assertTrue(anonymizer.contains_person_name(text))
+                result, counts = anonymizer.anonymize(text)
+                self.assertEqual(result, expected)
+                self.assertEqual(counts, Counter({"PERSON": 1}))
+
+        for text in ("foo_Anton", "_Antonym:", "_Anton_suffix"):
+            with self.subTest(text=text):
+                self.assertFalse(anonymizer.contains_person_name(text))
+
     def test_structured_first_name_ending_in_s_uses_apostrophe_only(self):
         anonymizer = TargetedAnonymizer.from_config(
             {
