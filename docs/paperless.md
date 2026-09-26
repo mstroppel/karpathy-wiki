@@ -55,6 +55,9 @@ Privacy validation failures are recorded as content-free errors and any
 previously published copy is revoked in the new generation. The redaction file
 is reloaded on each daemon cycle. Unchanged cycles retain the existing
 generation; completed replacements retain only the active generation.
+The shared redaction fingerprint includes a code-maintained algorithm version,
+so bumping that version for a behavior-changing redaction update reprocesses
+selected documents on the next cycle without editing `redactions.json`.
 
 After an interrupted cycle, the next run removes abandoned `.staging-*`
 directories. If the active pointer or manifest is corrupt, stop the importer,

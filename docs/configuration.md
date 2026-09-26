@@ -112,6 +112,13 @@ removed upstream files disappear only with the successfully published
 replacement generation. The redactions file is reloaded every cycle, so
 rotating it regenerates every applicable file on the next cycle.
 
+The redaction fingerprint also includes a code-maintained algorithm version.
+When a code change alters redaction behavior, bump
+`REDACTION_ALGORITHM_VERSION` in `ingest/core/src/karpathy_wiki_ingest/shared.py`.
+The next ingest cycle then regenerates WebDAV output even when the upstream files
+and redactions configuration are unchanged. The shared fingerprint also causes
+Paperless to reprocess documents on its next cycle.
+
 The published layout below `sources/webdav` is:
 
 ```text

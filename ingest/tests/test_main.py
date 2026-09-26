@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
+from karpathy_wiki_ingest import shared as shared_module
 from karpathy_wiki_ingest.shared import atomic_write, canonical_phone
 from karpathy_wiki_ingest.state import (
     JOB_PENDING,
@@ -326,6 +327,19 @@ class IngestTests(unittest.TestCase):
             with self.subTest(message=message):
                 with self.assertRaisesRegex(ValueError, message):
                     TargetedAnonymizer.from_config(config)
+
+    def test_redaction_fingerprint_changes_with_algorithm_version(self):
+        configuration = {"people": [{"replacement": "[ICH]", "values": ["Max Mustermann"]}]}
+        first = TargetedAnonymizer.from_config(configuration).fingerprint
+
+        with mock.patch.object(
+            shared_module,
+            "REDACTION_ALGORITHM_VERSION",
+            shared_module.REDACTION_ALGORITHM_VERSION + 1,
+        ):
+            changed = TargetedAnonymizer.from_config(configuration).fingerprint
+
+        self.assertNotEqual(first, changed)
 
     def test_rendered_source_contains_metadata(self):
         result = render_document(

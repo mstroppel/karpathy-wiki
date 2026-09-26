@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest import mock
 
 from karpathy_wiki_ingest import health as healthcheck
+from karpathy_wiki_ingest import shared as shared_module
 from karpathy_wiki_ingest.shared import TargetedAnonymizer
 from karpathy_wiki_ingest.state import (
     JOB_DEAD,
@@ -460,6 +461,30 @@ class DurableStateTests(unittest.TestCase):
         self.assertNotEqual(first, changed)
         self.assertNotEqual(first, rotated)
         self.assertTrue(first.startswith("webdav-generation:"))
+
+    def test_algorithm_version_bump_republishes_unchanged_upstream(self):
+        (self.incoming / "notes.md").write_text("Hallo Max Mustermann", encoding="utf-8")
+        store = self.store()
+        self.addCleanup(store.close)
+
+        self.cycle(anonymizer(), store, 100)
+        first_generation = active_generation(self.sanitized)
+        self.assertIsNotNone(first_generation)
+
+        with mock.patch.object(
+            shared_module,
+            "REDACTION_ALGORITHM_VERSION",
+            shared_module.REDACTION_ALGORITHM_VERSION + 1,
+        ):
+            updated = anonymizer()
+            _, failed, degraded = self.cycle(updated, store, 101)
+            second_generation = active_generation(self.sanitized)
+
+        self.assertEqual((failed, degraded), (0, False))
+        self.assertNotEqual(first_generation, second_generation)
+        self.assertTrue(
+            published_matches(self.sanitized, updated, upstream_inventory(self.incoming))
+        )
 
     def test_published_matches_detects_the_published_cycle(self):
         (self.incoming / "notes.md").write_text("Hallo Max Mustermann", encoding="utf-8")
