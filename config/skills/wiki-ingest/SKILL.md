@@ -68,12 +68,19 @@ Paperless-Quellenseite, ergänze es bei der nächsten Aktualisierung.
 
 ## Stapelverarbeitung
 
-Rufe zuerst `wiki_ingest_status` mit `summary_only: true` auf. Bei `invalid`
-oder `conflict` brich vor Änderungen ab. Die Zähler sind global; Diagnosezeilen
-sind seitenweise begrenzt. Melde `revoked` und `orphaned`, ohne sie zu
-bereinigen; hole für ihre vollständige Liste weitere Seiten mit
-`summary_only: true` und `offset: page.next_offset` ab, bis
-`page.has_more` falsch ist.
+Rufe zuerst `wiki_ingest_status` mit `summary_only: true` auf. Die Zähler sind
+global; Diagnosezeilen sind seitenweise begrenzt. Bei `page.blocked` hole die
+unter `oversized_records` genannten Datensätze stückweise ab: verwende `adapter`, `record_chunk_state`,
+`record_chunk_offset: 0` sowie `record_chunk_index`, falls vorhanden, und
+`source_key`, falls vorhanden. Hänge die `record.json`-Fragmente exakt in
+Offset-Reihenfolge zusammen, bis `record.next_offset` null ist, und parse das
+JSON. Melde
+`revoked` und `orphaned`, ohne sie zu bereinigen; hole für ihre vollständige
+Liste weitere Seiten mit `summary_only: true` und `offset: page.next_offset` ab,
+bis `page.has_more` falsch ist.
+
+Wenn die globalen Zähler `invalid>0` oder `conflict>0` anzeigen, melde die
+zugehörigen Diagnosen und brich vor Wiki-Änderungen ab.
 
 Rufe dann für jeden Adapter `wiki_ingest_status` mit `adapter`, `offset: 0` und
 `limit: 10` auf. Bearbeite die gelieferten `new`- und `outdated`-Einträge in
@@ -88,14 +95,14 @@ Arbeitsseiten nicht erhöht werden. Wiederhole dies, bis der Adapter keine
 Blättern in einer unveränderten Liste. Schreibe und committe die Wiki-Seiten
 nach der Prüfung; eine Status- oder Leseprüfung allein erledigt keine Quelle.
 
-Falls `page.blocked` gesetzt ist, wurde das Bytebudget selbst mit einer Quelle
-pro Status überschritten. Verarbeite keine ausgelassenen Einträge: hole die
-unter `oversized_records` genannten Datensätze mit `adapter`, `source_key` und
-`record_chunk_offset: 0` ab. Hänge die `record.json`-Fragmente exakt in
-Offset-Reihenfolge zusammen, bis `record.next_offset` null ist, und parse das
-JSON-Objekt. Danach starte die Adapterliste erneut bei Offset 0. Verwende
-niemals die OpenCode-Tool-Output-Datei als Ersatz. Ist `oversized_records` leer,
-grenze die Abfrage auf einen Adapter ein und wiederhole sie.
+Wenn eine Adapterliste `page.blocked` meldet, verarbeite jeden ausgelassenen
+`new`- oder `outdated`-Datensatz aus `oversized_records` wie einen normalen
+Quellenauftrag (einschließlich Status-/Revisionsprüfung und Commit). Danach
+starte die Adapterliste erneut bei Offset 0. Diagnosedatensätze werden nur
+gemeldet; bei `invalid` oder `conflict` bleiben keine Wiki-Änderungen offen.
+Verwende niemals die OpenCode-Tool-Output-Datei als Ersatz. Ist
+`oversized_records` leer, grenze die Abfrage auf einen Adapter ein und wiederhole
+sie.
 
 Prüfe nach dem letzten Commit mit `summary_only: true` erneut und bearbeite
 weitere offene Einträge, bis `new=0` und `outdated=0` gelten. Gib nur dann

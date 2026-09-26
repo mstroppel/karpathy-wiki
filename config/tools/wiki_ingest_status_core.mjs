@@ -474,6 +474,8 @@ export function selectIngestStatus(
     limit = 10,
     recordChunkOffset,
     recordChunkBytes,
+    recordChunkState,
+    recordChunkIndex,
   } = {},
 ) {
   if (sourceKey !== undefined && adapter === undefined) {
@@ -488,12 +490,28 @@ export function selectIngestStatus(
   if (!Number.isInteger(limit) || limit < 1 || limit > 25) {
     throw new Error('limit muss eine Ganzzahl zwischen 1 und 25 sein')
   }
-  if (recordChunkOffset === undefined && recordChunkBytes !== undefined) {
-    throw new Error('record_chunk_bytes erfordert record_chunk_offset')
+  if (recordChunkIndex !== undefined && recordChunkState === undefined) {
+    throw new Error('record_chunk_index erfordert record_chunk_state')
+  }
+  if (
+    recordChunkOffset === undefined &&
+    [recordChunkBytes, recordChunkState, recordChunkIndex].some((value) => value !== undefined)
+  ) {
+    throw new Error(
+      'record_chunk_state, record_chunk_index und record_chunk_bytes erfordern record_chunk_offset',
+    )
   }
   if (recordChunkOffset !== undefined) {
-    if (adapter === undefined || sourceKey === undefined || summaryOnly) {
-      throw new Error('record_chunk_offset erfordert adapter und source_key')
+    if (adapter === undefined || summaryOnly) {
+      throw new Error('record_chunk_offset erfordert adapter')
+    }
+    if (
+      sourceKey === undefined &&
+      (recordChunkState === undefined || recordChunkIndex === undefined)
+    ) {
+      throw new Error(
+        'record_chunk_offset erfordert source_key oder record_chunk_state und record_chunk_index',
+      )
     }
     if (!Number.isInteger(recordChunkOffset) || recordChunkOffset < 0) {
       throw new Error('record_chunk_offset muss eine nicht-negative Ganzzahl sein')
@@ -502,9 +520,20 @@ export function selectIngestStatus(
     if (!Number.isInteger(chunkBytes) || chunkBytes < 4 || chunkBytes > RECORD_CHUNK_BYTES) {
       throw new Error('record_chunk_bytes muss eine Ganzzahl zwischen 4 und 1536 sein')
     }
+    if (recordChunkState !== undefined && !RESULT_NAMES.includes(recordChunkState)) {
+      throw new Error('record_chunk_state ist ungültig')
+    }
+    if (
+      recordChunkIndex !== undefined &&
+      (!Number.isInteger(recordChunkIndex) || recordChunkIndex < 0)
+    ) {
+      throw new Error('record_chunk_index muss eine nicht-negative Ganzzahl sein')
+    }
     return selectIngestRecordChunk(status, {
       adapter,
       sourceKey,
+      state: recordChunkState,
+      index: recordChunkIndex,
       offset: recordChunkOffset,
       chunkBytes,
     })
@@ -560,15 +589,24 @@ function selectIngestStatusPage(status, { adapter, sourceKey, summaryOnly, offse
   }
 }
 
-function selectIngestRecordChunk(status, { adapter, sourceKey, offset, chunkBytes }) {
+function selectIngestRecordChunk(status, { adapter, sourceKey, state, index, offset, chunkBytes }) {
   const result = status.adapters[adapter]
   if (!result) throw new Error(`unbekannter Adapter: ${adapter}`)
-  const state = ['new', 'outdated', 'current'].find((name) =>
-    result[name].some((item) => item.source_key === sourceKey),
+  const candidates = state === undefined ? ['new', 'outdated', 'current'] : [state]
+  const useIndex =
+    index !== undefined &&
+    (sourceKey === undefined || !['new', 'outdated', 'current'].includes(state))
+  const foundState = candidates.find((name) =>
+    useIndex
+      ? result[name][index] !== undefined &&
+        (sourceKey === undefined || result[name][index].source_key === sourceKey)
+      : result[name].some((item) => item.source_key === sourceKey),
   )
-  if (!state) throw new Error(`keine offene Quelle für source_key: ${sourceKey}`)
+  if (!foundState) throw new Error(`kein Statusdatensatz für adapter: ${adapter}`)
 
-  const record = result[state].find((item) => item.source_key === sourceKey)
+  const record = useIndex
+    ? result[foundState][index]
+    : result[foundState].find((item) => item.source_key === sourceKey)
   const serialized = JSON.stringify(record)
   const characters = Array.from(serialized)
   if (offset > characters.length) throw new Error('record_chunk_offset liegt hinter dem Datensatz')
@@ -584,7 +622,8 @@ function selectIngestRecordChunk(status, { adapter, sourceKey, offset, chunkByte
   const response = {
     summary: status.summary,
     record: {
-      state,
+      state: foundState,
+      index: result[foundState].indexOf(record),
       offset,
       next_offset: end < characters.length ? end : null,
       total_characters: characters.length,
@@ -599,21 +638,24 @@ function selectIngestRecordChunk(status, { adapter, sourceKey, offset, chunkByte
 
 function oversizedStatusResult(status, { adapter, sourceKey, summaryOnly, offset }) {
   const oversized_records = []
-  if (!summaryOnly) {
-    for (const [name, result] of Object.entries(status.adapters)) {
-      if (adapter !== undefined && name !== adapter) continue
-      for (const state of ['new', 'outdated', 'current']) {
-        const entries = result[state].filter(
-          (item) => sourceKey === undefined || item.source_key === sourceKey,
-        )
-        const item = entries[offset]
-        if (item && Buffer.byteLength(JSON.stringify(item), 'utf8') > 1024) {
-          oversized_records.push({
-            adapter: name,
-            state,
-            source_key: item.source_key,
-          })
-        }
+  for (const [name, result] of Object.entries(status.adapters)) {
+    if (adapter !== undefined && name !== adapter) continue
+    for (const state of RESULT_NAMES) {
+      if (summaryOnly && ['new', 'outdated', 'current'].includes(state)) continue
+      const entries = result[state].filter(
+        (item) =>
+          sourceKey === undefined ||
+          !['new', 'outdated', 'current'].includes(state) ||
+          item.source_key === sourceKey,
+      )
+      const item = entries[offset]
+      if (item && Buffer.byteLength(JSON.stringify(item), 'utf8') > 1024) {
+        oversized_records.push({
+          adapter: name,
+          state,
+          index: result[state].indexOf(item),
+          ...(item.source_key === undefined ? {} : { source_key: item.source_key }),
+        })
       }
     }
   }

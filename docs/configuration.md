@@ -78,9 +78,10 @@ offset 0 after processing each page because completed sources leave the pending
 list. The serialized response is capped at 12 KiB; page size is reduced when
 needed. If the page still exceeds the cap at one entry per status,
 `page.blocked` is returned. `oversized_records` identifies large pending
-records; retrieve each JSON representation in bounded chunks with `adapter`,
-`source_key`, and `record_chunk_offset`, then append chunks by offset before
-parsing. If no pending record is listed, narrow the query to one adapter.
+records or diagnostics; retrieve each JSON representation in bounded chunks
+with `adapter`, `record_chunk_state`, and `record_chunk_offset`, plus
+`source_key` or `record_chunk_index`, then append chunks by offset before
+parsing. If no record is listed, narrow the query to one adapter.
 
 ## Secrets
 

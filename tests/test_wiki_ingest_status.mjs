@@ -348,7 +348,7 @@ test('blocks oversized records and retrieves them in bounded JSON chunks', async
 
     assert.equal(blocked.page.blocked, true)
     assert.deepEqual(blocked.oversized_records, [
-      { adapter: 'paperless', state: 'new', source_key: '42' },
+      { adapter: 'paperless', state: 'new', index: 0, source_key: '42' },
     ])
     assert.ok(Buffer.byteLength(JSON.stringify(blocked), 'utf8') <= STATUS_OUTPUT_BUDGET_BYTES)
 
@@ -358,6 +358,8 @@ test('blocks oversized records and retrieves them in bounded JSON chunks', async
       const response = selectIngestStatus(full, {
         adapter: 'paperless',
         sourceKey: '42',
+        recordChunkState: 'new',
+        recordChunkIndex: 0,
         recordChunkOffset: offset,
       })
       assert.ok(Buffer.byteLength(JSON.stringify(response), 'utf8') <= STATUS_OUTPUT_BUDGET_BYTES)
@@ -372,10 +374,53 @@ test('blocks oversized records and retrieves them in bounded JSON chunks', async
   }
 })
 
+test('retrieves oversized diagnostics through state and index chunks', async () => {
+  const { root, sourceRoot, wikiSourceRoot } = await fixture()
+  try {
+    await writeManifest(sourceRoot, 'paperless', {
+      errors: [{ error: 'validation failed: '.padEnd(40_000, 'x') }],
+    })
+    const full = await scanIngestStatus({ sourceRoot, wikiSourceRoot })
+    const blocked = selectIngestStatus(full, {
+      adapter: 'paperless',
+      summaryOnly: true,
+      limit: 1,
+    })
+
+    assert.equal(blocked.page.blocked, true)
+    assert.deepEqual(blocked.oversized_records, [
+      { adapter: 'paperless', state: 'invalid', index: 0 },
+    ])
+
+    const chunks = []
+    let offset = 0
+    while (true) {
+      const response = selectIngestStatus(full, {
+        adapter: 'paperless',
+        recordChunkState: 'invalid',
+        recordChunkIndex: 0,
+        recordChunkOffset: offset,
+      })
+      assert.ok(Buffer.byteLength(JSON.stringify(response), 'utf8') <= STATUS_OUTPUT_BUDGET_BYTES)
+      chunks.push(response.record.json)
+      if (response.record.next_offset === null) break
+      offset = response.record.next_offset
+    }
+
+    assert.deepEqual(JSON.parse(chunks.join('')), full.adapters.paperless.invalid[0])
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('bounds status page sizes and offsets', () => {
   const status = { summary: {}, adapters: {} }
   assert.throws(() => selectIngestStatus(status, { limit: 26 }), /zwischen 1 und 25/)
   assert.throws(() => selectIngestStatus(status, { offset: -1 }), /nicht-negative Ganzzahl/)
+  assert.throws(
+    () => selectIngestStatus(status, { recordChunkState: 'invalid', recordChunkIndex: 0 }),
+    /erfordern record_chunk_offset/,
+  )
 })
 
 test('preserves Paperless revision states and revocations', async () => {

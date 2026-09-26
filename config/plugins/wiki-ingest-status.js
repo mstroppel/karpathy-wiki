@@ -55,6 +55,16 @@ export default {
               maximum: 1536,
               description: 'Maximale UTF-8-Bytezahl des Eintragschunks (Standard: 1536)',
             },
+            record_chunk_state: {
+              type: 'string',
+              enum: ['new', 'outdated', 'current', 'conflict', 'revoked', 'orphaned', 'invalid'],
+              description: 'Status des Eintrags, der stückweise abgerufen wird',
+            },
+            record_chunk_index: {
+              type: 'integer',
+              minimum: 0,
+              description: 'Eintragsposition innerhalb von adapter und record_chunk_state',
+            },
           },
           additionalProperties: false,
         },
@@ -79,6 +89,8 @@ export default {
                 limit: args.limit,
                 recordChunkOffset: args.record_chunk_offset,
                 recordChunkBytes: args.record_chunk_bytes,
+                recordChunkState: args.record_chunk_state,
+                recordChunkIndex: args.record_chunk_index,
               }),
             ),
           }
