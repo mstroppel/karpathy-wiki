@@ -25,8 +25,9 @@ layout, make a backup you can restore.
    Keep the archive outside `DATA_ROOT`. Do not back up just `wiki/*.md` or
    omit `state/ingest.sqlite3`.
 
-3. Separately save the installation's `.env`, `karpathy-wiki.sh`, any
-   `compose.override.yaml`, and every secret file referenced by `.env`
+3. Separately save the installation's `.env`, `karpathy-wiki.sh`,
+   `export-opencode-sessions.sh`, any `compose.override.yaml`, and every secret
+   file referenced by `.env`
    (including `REDACTIONS_FILE` and `PAPERLESS_TOKEN_FILE` if configured).
    Secrets may be outside `DATA_ROOT`. Store the archives and configuration
    together in access-controlled, encrypted storage. Record the pinned release

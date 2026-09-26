@@ -84,6 +84,10 @@ main_url="https://raw.githubusercontent.com/$repository/main"
 # keeping errors from the fallback download visible.
 curl -fsSL "$base_url/karpathy-wiki.sh" -o "$temporary_dir/karpathy-wiki.sh" 2>/dev/null ||
   curl -fsSL "$main_url/karpathy-wiki.sh" -o "$temporary_dir/karpathy-wiki.sh"
+curl -fsSL "$base_url/export-opencode-sessions.sh" \
+  -o "$temporary_dir/export-opencode-sessions.sh" 2>/dev/null ||
+  curl -fsSL "$main_url/export-opencode-sessions.sh" \
+    -o "$temporary_dir/export-opencode-sessions.sh"
 curl -fsSL "$base_url/.env.example" -o "$temporary_dir/.env"
 sed \
   -e "s/^COMPOSE_PROJECT_NAME=.*/COMPOSE_PROJECT_NAME=$wiki_id/" \
@@ -94,9 +98,12 @@ sed \
 mv "$temporary_dir/.env.pinned" "$temporary_dir/.env"
 
 chmod 0755 "$temporary_dir/karpathy-wiki.sh"
+chmod 0755 "$temporary_dir/export-opencode-sessions.sh"
 chmod 0600 "$temporary_dir/.env"
 printf '.cache/\n' >"$temporary_dir/.gitignore"
 mv "$temporary_dir/karpathy-wiki.sh" "$install_dir/karpathy-wiki.sh"
+mv "$temporary_dir/export-opencode-sessions.sh" \
+  "$install_dir/export-opencode-sessions.sh"
 mv "$temporary_dir/.env" "$install_dir/.env"
 mv "$temporary_dir/.gitignore" "$install_dir/.gitignore"
 

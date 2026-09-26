@@ -124,6 +124,20 @@ data layout or generated policies. Local Compose changes belong in
 `compose.override.yaml` and survive updates. See [backup and restore](docs/backup-restore.md)
 for a consistent backup and a separate-instance restore check.
 
+## Session exports
+
+Export a session and any subagent sessions it created with:
+
+```bash
+./karpathy-wiki.sh export-sessions ses_<session-id> [output-directory]
+```
+
+The command requires `jq` on the host and a running OpenCode service. By
+default, JSON exports are written under `../temp/opencode-sessions/` next to the
+installation directory. Session exports may contain private prompts, tool
+results, and source excerpts; keep them in access-controlled storage and never
+commit them to this repository.
+
 ## Security
 
 - Never commit `.env`, tokens, redaction lists, source material, wiki content, or sessions.

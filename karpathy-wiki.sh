@@ -205,6 +205,8 @@ Usage:
                                        latest pre-release when the pre channel is
                                        set) in .env, back up .env, pull images,
                                        and restart (up -d)
+  karpathy-wiki.sh export-sessions <session-id> [output-directory]
+                                       Export a session and its subagent sessions
   karpathy-wiki.sh version             Print the resolved version
   karpathy-wiki.sh help                Show this help
 
@@ -230,6 +232,10 @@ case "$command" in
     shift
     [ $# -le 1 ] || die "usage: karpathy-wiki.sh update [version]"
     cmd_update "${1:-}"
+    ;;
+  export-sessions)
+    shift
+    "$script_dir/export-opencode-sessions.sh" "$@"
     ;;
   *)
     version=$(resolve_version)

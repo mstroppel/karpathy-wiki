@@ -15,7 +15,8 @@ for argument in "$@"; do
   previous=$argument
 done
 case "$out" in
-  *karpathy-wiki.sh) printf '%s\n' '#!/bin/sh' > "$out" ;;
+  *karpathy-wiki.sh|*export-opencode-sessions.sh)
+    printf '%s\n' '#!/bin/sh' > "$out" ;;
   *.env) printf '%s\n' \
     'COMPOSE_PROJECT_NAME=karpathy-wiki' \
     'STACK_ID=karpathy-wiki' \
@@ -44,7 +45,8 @@ for argument in "$@"; do
   previous=$argument
 done
 case "$out" in
-  *karpathy-wiki.sh) printf '%s\\n' '#!/bin/sh' > "$out" ;;
+  *karpathy-wiki.sh|*export-opencode-sessions.sh)
+    printf '%s\\n' '#!/bin/sh' > "$out" ;;
   *.env) printf '%s\\n' \
     'COMPOSE_PROJECT_NAME=karpathy-wiki' \
     'STACK_ID=karpathy-wiki' \
@@ -78,7 +80,8 @@ case "$url" in
     printf '%s\n' 'curl: (22) The requested URL returned error: 404' >&2
     exit 22
     ;;
-  */main/karpathy-wiki.sh) printf '%s\n' '#!/bin/sh' > "$out" ;;
+  */main/karpathy-wiki.sh|*/main/export-opencode-sessions.sh)
+    printf '%s\n' '#!/bin/sh' > "$out" ;;
   */v1.2.3/.env.example) printf '%s\n' \
     'COMPOSE_PROJECT_NAME=karpathy-wiki' \
     'STACK_ID=karpathy-wiki' \
@@ -124,6 +127,9 @@ class InstallTests(unittest.TestCase):
             self.assertIn("KARPATHY_WIKI_VERSION=1.2.3\n", environment)
             self.assertRegex(environment, r"OPENCODE_PASSWORD=[0-9a-f]{48}\n")
             self.assertTrue((directory / "karpathy-wiki.sh").exists())
+            export_script = directory / "export-opencode-sessions.sh"
+            self.assertTrue(export_script.exists())
+            self.assertTrue(export_script.stat().st_mode & 0o100)
             self.assertEqual((directory / ".gitignore").read_text(), ".cache/\n")
 
     def test_install_refuses_non_empty_directory_before_download(self):
