@@ -74,13 +74,14 @@ unter `oversized_records` genannten Datensätze stückweise ab: verwende `adapte
 `record_chunk_offset: 0` sowie `record_chunk_index`, falls vorhanden, und
 `source_key`, falls vorhanden. Hänge die `record.json`-Fragmente exakt in
 Offset-Reihenfolge zusammen, bis `record.next_offset` null ist, und parse das
-JSON. Melde
-`revoked` und `orphaned`, ohne sie zu bereinigen; hole für ihre vollständige
-Liste weitere Seiten mit `summary_only: true` und `offset: page.next_offset` ab,
-bis `page.has_more` falsch ist.
+JSON. Melde `revoked` und `orphaned`, ohne sie zu bereinigen; hole ihre vollständigen
+Listen mit getrennten Abfragen `status_state: "revoked"` und
+`status_state: "orphaned"` ab. Verwende dafür die jeweiligen
+`page.next_offset`-Werte; Statusarten werden unabhängig voneinander geblättert.
 
 Wenn die globalen Zähler `invalid>0` oder `conflict>0` anzeigen, melde die
-zugehörigen Diagnosen und brich vor Wiki-Änderungen ab.
+zugehörigen Diagnosen (bei Bedarf mit `status_state: "invalid"` oder
+`status_state: "conflict"`) und brich vor Wiki-Änderungen ab.
 
 Rufe dann für jeden Adapter `wiki_ingest_status` mit `adapter`, `offset: 0` und
 `limit: 10` auf. Bearbeite die gelieferten `new`- und `outdated`-Einträge in
@@ -99,7 +100,9 @@ Wenn eine Adapterliste `page.blocked` meldet, verarbeite jeden ausgelassenen
 `new`- oder `outdated`-Datensatz aus `oversized_records` wie einen normalen
 Quellenauftrag (einschließlich Status-/Revisionsprüfung und Commit). Danach
 starte die Adapterliste erneut bei Offset 0. Diagnosedatensätze werden nur
-gemeldet; bei `invalid` oder `conflict` bleiben keine Wiki-Änderungen offen.
+gemeldet. Hole übrige Diagnosen mit `status_state` für die jeweilige Statusart
+separat ab, damit ein großer Eintrag keine anderen Statuslisten blockiert. Bei
+`invalid` oder `conflict` bleiben keine Wiki-Änderungen offen.
 Verwende niemals die OpenCode-Tool-Output-Datei als Ersatz. Ist
 `oversized_records` leer, grenze die Abfrage auf einen Adapter ein und wiederhole
 sie.

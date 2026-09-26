@@ -379,6 +379,7 @@ test('retrieves oversized diagnostics through state and index chunks', async () 
   try {
     await writeManifest(sourceRoot, 'paperless', {
       errors: [{ error: 'validation failed: '.padEnd(40_000, 'x') }],
+      revoked: [{ source_key: 'gone', claim: { paperless_id: 'gone' } }],
     })
     const full = await scanIngestStatus({ sourceRoot, wikiSourceRoot })
     const blocked = selectIngestStatus(full, {
@@ -391,6 +392,18 @@ test('retrieves oversized diagnostics through state and index chunks', async () 
     assert.deepEqual(blocked.oversized_records, [
       { adapter: 'paperless', state: 'invalid', index: 0 },
     ])
+
+    const revoked = selectIngestStatus(full, {
+      adapter: 'paperless',
+      summaryOnly: true,
+      statusState: 'revoked',
+      limit: 1,
+    })
+    assert.deepEqual(revoked.adapters.paperless.revoked, [
+      { source_key: 'gone', source_path: null, wiki_paths: [] },
+    ])
+    assert.deepEqual(revoked.adapters.paperless.invalid, [])
+    assert.equal(revoked.page.blocked, undefined)
 
     const chunks = []
     let offset = 0

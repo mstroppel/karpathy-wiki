@@ -73,9 +73,11 @@ nothing in a source directory is ever executed.
 Status details are returned in bounded pages (10 entries per status by default,
 maximum 25), including diagnostics. Use `adapter` by itself to list one source
 adapter, and `offset` and `limit` to page through a stable list. Global counts
-remain present on adapter-filtered pages. When ingesting a batch, restart at
-offset 0 after processing each page because completed sources leave the pending
-list. The serialized response is capped at 12 KiB; page size is reduced when
+remain present on adapter-filtered pages. `status_state` filters to one status
+bucket so a large diagnostic cannot block retrieval of other status lists. When
+ingesting a batch, restart at offset 0 after processing each page because
+completed sources leave the pending list. The serialized response is capped at
+12 KiB; page size is reduced when
 needed. If the page still exceeds the cap at one entry per status,
 `page.blocked` is returned. `oversized_records` identifies large pending
 records or diagnostics; retrieve each JSON representation in bounded chunks

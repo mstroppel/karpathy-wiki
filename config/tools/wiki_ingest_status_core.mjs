@@ -476,6 +476,7 @@ export function selectIngestStatus(
     recordChunkBytes,
     recordChunkState,
     recordChunkIndex,
+    statusState,
   } = {},
 ) {
   if (sourceKey !== undefined && adapter === undefined) {
@@ -489,6 +490,9 @@ export function selectIngestStatus(
   }
   if (!Number.isInteger(limit) || limit < 1 || limit > 25) {
     throw new Error('limit muss eine Ganzzahl zwischen 1 und 25 sein')
+  }
+  if (statusState !== undefined && !RESULT_NAMES.includes(statusState)) {
+    throw new Error('status_state ist ungültig')
   }
   if (recordChunkIndex !== undefined && recordChunkState === undefined) {
     throw new Error('record_chunk_index erfordert record_chunk_state')
@@ -546,6 +550,7 @@ export function selectIngestStatus(
       summaryOnly,
       offset,
       limit: pageLimit,
+      statusState,
     })
     if (Buffer.byteLength(JSON.stringify(page), 'utf8') <= STATUS_OUTPUT_BUDGET_BYTES) return page
   }
@@ -555,16 +560,21 @@ export function selectIngestStatus(
     sourceKey,
     summaryOnly,
     offset,
+    statusState,
   })
 }
 
-function selectIngestStatusPage(status, { adapter, sourceKey, summaryOnly, offset, limit }) {
+function selectIngestStatusPage(
+  status,
+  { adapter, sourceKey, summaryOnly, offset, limit, statusState },
+) {
   let hasMore = false
   const adapters = Object.fromEntries(
     Object.entries(status.adapters).map(([name, result]) => {
       const selected = { ...result }
       for (const state of RESULT_NAMES) {
         let entries = result[state]
+        if (statusState !== undefined && state !== statusState) entries = []
         if (adapter !== undefined && name !== adapter) entries = []
         if (sourceKey !== undefined && ['new', 'outdated', 'current'].includes(state)) {
           entries = entries.filter((item) => item.source_key === sourceKey)
@@ -636,11 +646,12 @@ function selectIngestRecordChunk(status, { adapter, sourceKey, state, index, off
   return response
 }
 
-function oversizedStatusResult(status, { adapter, sourceKey, summaryOnly, offset }) {
+function oversizedStatusResult(status, { adapter, sourceKey, summaryOnly, offset, statusState }) {
   const oversized_records = []
   for (const [name, result] of Object.entries(status.adapters)) {
     if (adapter !== undefined && name !== adapter) continue
     for (const state of RESULT_NAMES) {
+      if (statusState !== undefined && state !== statusState) continue
       if (summaryOnly && ['new', 'outdated', 'current'].includes(state)) continue
       const entries = result[state].filter(
         (item) =>

@@ -28,6 +28,11 @@ export default {
               description:
                 'Quellschlüssel für eine gezielte Revisionsprüfung (zusammen mit adapter)',
             },
+            status_state: {
+              type: 'string',
+              enum: ['new', 'outdated', 'current', 'conflict', 'revoked', 'orphaned', 'invalid'],
+              description: 'Nur diesen Status ausgeben; ermöglicht unabhängiges Blättern je Status',
+            },
             summary_only: {
               type: 'boolean',
               description: 'Nur Zähler und Diagnoseeinträge ausgeben, keine Quellendetails',
@@ -91,6 +96,7 @@ export default {
                 recordChunkBytes: args.record_chunk_bytes,
                 recordChunkState: args.record_chunk_state,
                 recordChunkIndex: args.record_chunk_index,
+                statusState: args.status_state,
               }),
             ),
           }
