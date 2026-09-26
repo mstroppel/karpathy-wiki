@@ -70,6 +70,13 @@ JSON-compatible values, and `wiki_path` must be unique across every discovered
 source; collisions are reported as `conflict`. Provider manifests are data:
 nothing in a source directory is ever executed.
 
+Status details are returned in bounded pages (10 entries per status by default,
+maximum 25), including diagnostics. Use `adapter` by itself to list one source
+adapter, and `offset` and `limit` to page through a stable list. Global counts
+remain present on adapter-filtered pages. When ingesting a batch, restart at
+offset 0 after processing each page because completed sources leave the pending
+list.
+
 ## Secrets
 
 WebDAV uses rclone's obscured password format. Obscuring is not encryption;

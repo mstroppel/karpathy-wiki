@@ -10,7 +10,7 @@ export default {
       tools.add({
         name: 'wiki_ingest_status',
         description:
-          'Vergleicht die vorhandenen Quellen über ihre Provider-Manifeste mit ihren Wiki-Quellenseiten und meldet den Status aller Quellen.',
+          'Vergleicht Quellen über ihre Provider-Manifeste mit den Wiki-Seiten. Gibt Statusdetails seitenweise aus; adapter kann allein zum Auflisten einer Quellenart verwendet werden.',
         input: {
           type: 'object',
           properties: {
@@ -20,7 +20,8 @@ export default {
             },
             adapter: {
               type: 'string',
-              description: 'Adapter für eine gezielte Revisionsprüfung (zusammen mit source_key)',
+              description:
+                'Adapter für eine gezielte Revisionsprüfung oder eine seitenweise Adapterliste',
             },
             source_key: {
               type: 'string',
@@ -30,6 +31,17 @@ export default {
             summary_only: {
               type: 'boolean',
               description: 'Nur Zähler und Diagnoseeinträge ausgeben, keine Quellendetails',
+            },
+            offset: {
+              type: 'integer',
+              minimum: 0,
+              description: 'Eintragsposition der Statusseite (Standard: 0)',
+            },
+            limit: {
+              type: 'integer',
+              minimum: 1,
+              maximum: 25,
+              description: 'Maximale Zahl je Status auf einer Seite (Standard: 10)',
             },
           },
           additionalProperties: false,
@@ -51,6 +63,8 @@ export default {
                 adapter: args.adapter,
                 sourceKey: args.source_key,
                 summaryOnly: args.summary_only,
+                offset: args.offset,
+                limit: args.limit,
               }),
             ),
           }

@@ -196,7 +196,7 @@ test('scoped status retains global blockers and counts while narrowing pending w
     assert.deepEqual(scoped.adapters.paperless.summary, full.adapters.paperless.summary)
     assert.deepEqual(scoped.adapters.paperless.new, [full.adapters.paperless.new[0]])
     assert.deepEqual(scoped.adapters.webdav.new, [])
-    assert.deepEqual(scoped.adapters.webdav.invalid, full.adapters.webdav.invalid)
+    assert.deepEqual(scoped.adapters.webdav.invalid, [])
     assert.equal(scoped.adapters.webdav.summary.invalid, 1)
 
     const finalCheck = selectIngestStatus(full, { summaryOnly: true })
@@ -215,12 +215,96 @@ test('scoped status retains global blockers and counts while narrowing pending w
 
 test('scoped status rejects ambiguous filter combinations', () => {
   const status = { summary: {}, adapters: {} }
-  assert.throws(() => selectIngestStatus(status, { adapter: 'paperless' }), /zusammen/)
-  assert.throws(() => selectIngestStatus(status, { sourceKey: '42' }), /zusammen/)
+  assert.throws(() => selectIngestStatus(status, { sourceKey: '42' }), /erfordert adapter/)
   assert.throws(
     () => selectIngestStatus(status, { adapter: 'paperless', sourceKey: '42', summaryOnly: true }),
     /kombiniert/,
   )
+})
+
+test('returns adapter-only status pages with stable global counts', async () => {
+  const { root, sourceRoot, wikiSourceRoot } = await fixture()
+  try {
+    await writeManifest(sourceRoot, 'paperless', {
+      items: [paperlessItem(42), paperlessItem(43), paperlessItem(44)],
+    })
+    await writeManifest(sourceRoot, 'webdav', {
+      wiki_root: 'webdav',
+      items: [webdavItem('first.txt'), webdavItem('second.txt')],
+    })
+
+    const full = await scanIngestStatus({ sourceRoot, wikiSourceRoot })
+    const first = selectIngestStatus(full, { adapter: 'paperless', limit: 2 })
+    const second = selectIngestStatus(full, { adapter: 'paperless', offset: 2, limit: 2 })
+
+    assert.deepEqual(full.summary, {
+      new: 5,
+      outdated: 0,
+      current: 0,
+      conflict: 0,
+      revoked: 0,
+      orphaned: 0,
+      invalid: 0,
+    })
+    assert.deepEqual(first.summary, full.summary)
+    assert.deepEqual(
+      first.adapters.paperless.new.map((entry) => entry.source_key),
+      ['42', '43'],
+    )
+    assert.deepEqual(first.adapters.webdav.new, [])
+    assert.deepEqual(first.page, { offset: 0, limit: 2, has_more: true, next_offset: 2 })
+    assert.deepEqual(
+      second.adapters.paperless.new.map((entry) => entry.source_key),
+      ['44'],
+    )
+    assert.deepEqual(second.page, { offset: 2, limit: 2, has_more: false, next_offset: null })
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('bounds diagnostics while retaining their global counts', async () => {
+  const { root, sourceRoot, wikiSourceRoot } = await fixture()
+  try {
+    await writeManifest(sourceRoot, 'paperless', {
+      errors: [{ error: 'first error' }, { error: 'second error' }, { error: 'third error' }],
+    })
+    await writeManifest(sourceRoot, 'webdav', {
+      wiki_root: 'webdav',
+      errors: [{ error: 'webdav error' }],
+    })
+
+    const full = await scanIngestStatus({ sourceRoot, wikiSourceRoot })
+    const first = selectIngestStatus(full, { adapter: 'paperless', summaryOnly: true, limit: 2 })
+    const second = selectIngestStatus(full, {
+      adapter: 'paperless',
+      summaryOnly: true,
+      offset: 2,
+      limit: 2,
+    })
+
+    assert.equal(first.summary.invalid, 4)
+    assert.equal(first.adapters.paperless.summary.invalid, 3)
+    assert.deepEqual(
+      first.adapters.paperless.invalid.map((entry) => entry.error),
+      ['first error', 'second error'],
+    )
+    assert.deepEqual(first.adapters.webdav.invalid, [])
+    assert.deepEqual(first.page, { offset: 0, limit: 2, has_more: true, next_offset: 2 })
+    assert.deepEqual(
+      second.adapters.paperless.invalid.map((entry) => entry.error),
+      ['third error'],
+    )
+    assert.deepEqual(second.page, { offset: 2, limit: 2, has_more: false, next_offset: null })
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('bounds status page sizes and offsets', () => {
+  const status = { summary: {}, adapters: {} }
+  assert.throws(() => selectIngestStatus(status, { limit: 26 }), /zwischen 1 und 25/)
+  assert.throws(() => selectIngestStatus(status, { offset: -1 }), /nicht-negative Ganzzahl/)
 })
 
 test('preserves Paperless revision states and revocations', async () => {

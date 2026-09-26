@@ -460,38 +460,51 @@ export async function scanIngestStatus({ sourceRoot, wikiSourceRoot, includeCurr
   return { summary, adapters: results }
 }
 
-// Keep global diagnostics and counts even when narrowing the work items sent
-// to the model. A filtered result must never hide a batch-wide blocker.
-export function selectIngestStatus(status, { adapter, sourceKey, summaryOnly = false } = {}) {
-  if ((adapter === undefined) !== (sourceKey === undefined)) {
-    throw new Error('adapter und source_key müssen zusammen angegeben werden')
+// Keep global counts even when narrowing paged details sent to the model. A
+// filtered result must never hide a batch-wide blocker.
+export function selectIngestStatus(
+  status,
+  { adapter, sourceKey, summaryOnly = false, offset = 0, limit = 10 } = {},
+) {
+  if (sourceKey !== undefined && adapter === undefined) {
+    throw new Error('source_key erfordert adapter')
   }
-  if (summaryOnly && adapter !== undefined) {
-    throw new Error('summary_only und Quellfilter können nicht kombiniert werden')
+  if (summaryOnly && sourceKey !== undefined) {
+    throw new Error('summary_only und source_key können nicht kombiniert werden')
+  }
+  if (!Number.isInteger(offset) || offset < 0) {
+    throw new Error('offset muss eine nicht-negative Ganzzahl sein')
+  }
+  if (!Number.isInteger(limit) || limit < 1 || limit > 25) {
+    throw new Error('limit muss eine Ganzzahl zwischen 1 und 25 sein')
   }
 
+  let hasMore = false
   const adapters = Object.fromEntries(
-    Object.entries(status.adapters).map(([name, result]) => [
-      name,
-      {
-        ...result,
-        new: summaryOnly
-          ? []
-          : adapter === undefined
-            ? result.new
-            : result.new.filter((item) => name === adapter && item.source_key === sourceKey),
-        outdated: summaryOnly
-          ? []
-          : adapter === undefined
-            ? result.outdated
-            : result.outdated.filter((item) => name === adapter && item.source_key === sourceKey),
-        current: summaryOnly
-          ? []
-          : adapter === undefined
-            ? result.current
-            : result.current.filter((item) => name === adapter && item.source_key === sourceKey),
-      },
-    ]),
+    Object.entries(status.adapters).map(([name, result]) => {
+      const selected = { ...result }
+      for (const state of RESULT_NAMES) {
+        let entries = result[state]
+        if (adapter !== undefined && name !== adapter) entries = []
+        if (sourceKey !== undefined && ['new', 'outdated', 'current'].includes(state)) {
+          entries = entries.filter((item) => item.source_key === sourceKey)
+        }
+        if (summaryOnly && ['new', 'outdated', 'current'].includes(state)) entries = []
+        selected[state] = entries.slice(offset, offset + limit)
+        if (entries.length > offset + limit) hasMore = true
+      }
+      return [name, selected]
+    }),
   )
-  return { summary: status.summary, adapters }
+
+  return {
+    summary: status.summary,
+    adapters,
+    page: {
+      offset,
+      limit,
+      has_more: hasMore,
+      next_offset: hasMore ? offset + limit : null,
+    },
+  }
 }
