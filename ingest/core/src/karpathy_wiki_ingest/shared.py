@@ -104,6 +104,8 @@ class TargetedAnonymizer:
         seen_literals: dict[str, str] = {}
         person_names: set[str] = set()
         structured_first_names: set[str] = set()
+        structured_last_names: set[str] = set()
+        standalone_surnames: dict[str, tuple[str, str]] = {}
 
         def add_literal(category: str, replacement: str, value: str) -> None:
             normalized = " ".join(value.lower().split())
@@ -113,6 +115,14 @@ class TargetedAnonymizer:
             if previous is None:
                 seen_literals[normalized] = replacement
                 literals.append((category, replacement, value.strip()))
+
+        def add_standalone_surname(value: str, replacement: str) -> None:
+            normalized = " ".join(value.lower().split())
+            previous = standalone_surnames.get(normalized)
+            if previous is None:
+                standalone_surnames[normalized] = (value, replacement)
+            elif previous[1] != replacement:
+                standalone_surnames[normalized] = (value, "[PERSON]")
 
         for section, category in cls.CATEGORIES.items():
             entries = configuration.get(section, [])
@@ -172,11 +182,13 @@ class TargetedAnonymizer:
                         (*first_name_variants(first_name), *last_names, *middle_names)
                     )
                     structured_first_names.add(first_name)
+                    structured_last_names.update(last_names)
                     for configured_last_name in last_names:
-                        for variant in name_variants(
-                            first_name, middle_names, configured_last_name
-                        ):
+                        variants = name_variants(first_name, middle_names, configured_last_name)
+                        person_names.update(variants)
+                        for variant in variants:
                             add_literal(category, replacement, variant)
+                        add_standalone_surname(configured_last_name, replacement)
                     for variant in first_name_variants(first_name):
                         add_literal(category, replacement, variant)
                     has_structured_fields = True
@@ -200,6 +212,10 @@ class TargetedAnonymizer:
                 if section != "phones" and not values and not has_structured_fields:
                     raise ValueError(f"entries in {section} require structured fields or values")
 
+        for surname, replacement in standalone_surnames.values():
+            if " ".join(surname.lower().split()) not in seen_literals:
+                add_literal(cls.CATEGORIES["people"], replacement, surname)
+
         if not literals and not phone_replacements:
             raise ValueError("at least one redaction value must be configured")
         literal_rules = [
@@ -208,6 +224,8 @@ class TargetedAnonymizer:
                 replacement,
                 first_name_pattern(value)
                 if value in structured_first_names
+                else surname_pattern(value)
+                if value in structured_last_names
                 else literal_pattern(value),
             )
             for category, replacement, value in sorted(
@@ -218,7 +236,11 @@ class TargetedAnonymizer:
             configuration, ensure_ascii=False, sort_keys=True, separators=(",", ":")
         ).encode("utf-8")
         person_name_patterns = [
-            first_name_pattern(value) if value in structured_first_names else literal_pattern(value)
+            first_name_pattern(value)
+            if value in structured_first_names
+            else surname_pattern(value)
+            if value in structured_last_names
+            else literal_pattern(value)
             for value in sorted(person_names, key=len, reverse=True)
         ]
         return cls(
@@ -282,6 +304,14 @@ def first_name_pattern(value: str) -> re.Pattern[str]:
     return re.compile(r"(?:" + markdown + r"|" + standard + r")", re.IGNORECASE)
 
 
+def surname_pattern(value: str) -> re.Pattern[str]:
+    name = re.escape(value)
+    end = r"(?![^\W_]|_(?=\w))"
+    standard = r"(?<!\w)" + name + end
+    markdown = r"(?<!\w)_{1,2}" + name + r"(?:_{1,2}(?!\w))?" + end
+    return re.compile(r"(?:" + markdown + r"|" + standard + r")", re.IGNORECASE)
+
+
 def required_entry_text(entry: dict[str, Any], key: str, section: str) -> str:
     value = entry.get(key)
     if not isinstance(value, str) or not value.strip():
@@ -316,6 +346,8 @@ def name_variants(first_name: str, middle_names: list[str], last_name: str) -> s
             f"{given_names} {last_name}",
             f"{last_name} {given_names}",
             f"{last_name}, {given_names}",
+            f"{given_names.replace(' ', '')}{last_name}",
+            f"{last_name}{given_names.replace(' ', '')}",
         )
     }
 
