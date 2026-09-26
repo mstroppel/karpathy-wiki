@@ -11,6 +11,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: write
   contents: write
   pull-requests: write
 
@@ -43,10 +44,118 @@ jobs:
             printf 'cannot resolve the latest OpenCode version\n' >&2
             exit 1
           fi
+
+          auto_merge=false
+          if [[ "$current" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            current_major=${BASH_REMATCH[1]}
+            current_minor=${BASH_REMATCH[2]}
+            current_patch=${BASH_REMATCH[3]}
+            if [[ "$latest" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+              latest_major=${BASH_REMATCH[1]}
+              latest_minor=${BASH_REMATCH[2]}
+              latest_patch=${BASH_REMATCH[3]}
+              if (( latest_major == current_major && latest_minor > current_minor )) || \
+                (( latest_major == current_major && latest_minor == current_minor && latest_patch > current_patch )); then
+                auto_merge=true
+              fi
+            fi
+          fi
+
           if [ "$latest" = "$current" ]; then
             printf 'OpenCode %s is up to date\n' "$current"
             exit 0
           fi
+
+          verify_ci_and_maybe_merge() {
+            local pr_url=$1
+            local pr_number
+            local head_sha
+            local run_info
+            local run_id
+            local run_status
+            local run_conclusion
+            local current_head_sha
+            local previous_run_id=0
+            local attempt=0
+            pr_number=$(gh pr view "$pr_url" --json number --jq '.number')
+            head_sha=$(gh pr view "$pr_url" --json headRefOid --jq '.headRefOid')
+
+            run_info=$(gh run list --workflow ci.yml --branch opencode-update \
+              --json databaseId,headSha,status,conclusion,event,displayTitle \
+              --jq "[.[] | select(.headSha == \"${head_sha}\" and .event == \"workflow_dispatch\" and .displayTitle == \"CI (PR #${pr_number} preview)\")] | sort_by(.databaseId) | last // empty")
+            run_id=''
+            if [ -n "$run_info" ]; then
+              run_id=$(printf '%s' "$run_info" | jq -r '.databaseId')
+              run_status=$(printf '%s' "$run_info" | jq -r '.status')
+              run_conclusion=$(printf '%s' "$run_info" | jq -r '.conclusion // empty')
+              if [ "$run_status" = completed ] && [ "$run_conclusion" != success ]; then
+                previous_run_id=$run_id
+                run_id=''
+              fi
+            fi
+
+            if [ -z "$run_id" ]; then
+              # GITHUB_TOKEN-created PRs do not trigger pull_request workflows.
+              # Dispatch the same CI, including the PR preview image build.
+              gh workflow run ci.yml --ref opencode-update \
+                --field "pull_request_number=${pr_number}"
+              while [ "$attempt" -lt 30 ]; do
+                run_info=$(gh run list --workflow ci.yml --branch opencode-update \
+                  --json databaseId,headSha,event,displayTitle \
+                  --jq "[.[] | select(.headSha == \"${head_sha}\" and .event == \"workflow_dispatch\" and .displayTitle == \"CI (PR #${pr_number} preview)\")] | sort_by(.databaseId) | last // empty")
+                if [ -n "$run_info" ]; then
+                  run_id=$(printf '%s' "$run_info" | jq -r '.databaseId')
+                  if [ "$run_id" -gt "$previous_run_id" ]; then
+                    break
+                  fi
+                  run_id=''
+                fi
+                sleep 2
+                attempt=$((attempt + 1))
+              done
+            fi
+
+            if [ -z "$run_id" ]; then
+              printf 'could not find CI run for %s\n' "$head_sha" >&2
+              return 1
+            fi
+
+            # Do not queue auto-merge until the run for this exact PR head is green.
+            gh run watch "$run_id" --exit-status
+            current_head_sha=$(gh pr view "$pr_url" --json headRefOid --jq '.headRefOid')
+            if [ "$current_head_sha" != "$head_sha" ]; then
+              printf 'PR head changed while CI was running (%s -> %s)\n' \
+                "$head_sha" "$current_head_sha" >&2
+              return 1
+            fi
+            if [ "$auto_merge" = true ]; then
+              gh pr merge --auto --squash --match-head-commit "$head_sha" "$pr_url"
+            fi
+          }
+
+          existing_pr_url=$(gh pr list --head opencode-update --state open \
+            --repo "$GITHUB_REPOSITORY" --json url --jq '.[0].url // empty')
+          if [ -n "$existing_pr_url" ] && [ "$auto_merge" = false ]; then
+            auto_merge_enabled=$(gh pr view "$existing_pr_url" \
+              --json autoMergeRequest --jq '.autoMergeRequest != null')
+            if [ "$auto_merge_enabled" = true ]; then
+              gh pr merge --disable-auto "$existing_pr_url"
+            fi
+          fi
+          if [ -n "$existing_pr_url" ] && \
+            git ls-remote --exit-code --heads origin opencode-update >/dev/null 2>&1; then
+            git fetch --no-tags origin opencode-update
+            branch_version=$(git show FETCH_HEAD:opencode/Dockerfile \
+              | sed -n 's/^ARG OPENCODE_VERSION=\(.*\)$/\1/p')
+            branch_base=$(git rev-parse FETCH_HEAD^)
+            current_base=$(git rev-parse HEAD)
+            if [ "$branch_version" = "$latest" ] && [ "$branch_base" = "$current_base" ]; then
+              verify_ci_and_maybe_merge "$existing_pr_url"
+              printf 'OpenCode update PR already targets %s\n' "$latest"
+              exit 0
+            fi
+          fi
+
           download() {
             curl --fail --location --retry 3 \
               "https://registry.npmjs.org/@opencode/cli-$1/-/cli-$1-${latest}.tgz" \
@@ -71,10 +180,12 @@ jobs:
           git checkout -B opencode-update
           git commit -am "chore(deps): bump opencode to ${latest}"
           git push --force origin opencode-update
-          if ! gh pr list --head opencode-update --state open \
-            --repo "$GITHUB_REPOSITORY" --json number --jq 'length' | grep -q '^1$'; then
+          if [ -z "$existing_pr_url" ]; then
             gh pr create \
               --head opencode-update \
               --title "chore(deps): bump opencode to ${latest}" \
               --body "Bumps the pinned OpenCode version and the sha512 checksums of its npm tarballs from ${current} to ${latest}. Verified automatically by the digest and checksum tests; the images job builds the image before merge."
+            existing_pr_url=$(gh pr list --head opencode-update --state open \
+              --repo "$GITHUB_REPOSITORY" --json url --jq '.[0].url // empty')
           fi
+          verify_ci_and_maybe_merge "$existing_pr_url"
