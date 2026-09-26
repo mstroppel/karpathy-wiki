@@ -173,10 +173,11 @@ class TargetedAnonymizer:
                     )
                     structured_first_names.add(first_name)
                     for configured_last_name in last_names:
-                        for variant in name_variants(
-                            first_name, middle_names, configured_last_name
-                        ):
+                        variants = name_variants(first_name, middle_names, configured_last_name)
+                        person_names.update(variants)
+                        for variant in variants:
                             add_literal(category, replacement, variant)
+                        add_literal(category, replacement, configured_last_name)
                     for variant in first_name_variants(first_name):
                         add_literal(category, replacement, variant)
                     has_structured_fields = True
@@ -316,6 +317,8 @@ def name_variants(first_name: str, middle_names: list[str], last_name: str) -> s
             f"{given_names} {last_name}",
             f"{last_name} {given_names}",
             f"{last_name}, {given_names}",
+            f"{given_names.replace(' ', '')}{last_name}",
+            f"{last_name}{given_names.replace(' ', '')}",
         )
     }
 

@@ -151,6 +151,18 @@ class IngestTests(unittest.TestCase):
                 self.assertEqual(result, expected)
                 self.assertEqual(counts, Counter({category: 1}))
 
+    def test_structured_redactions_cover_concatenated_full_names(self):
+        anonymizer = TargetedAnonymizer.from_config(
+            {"people": [{"replacement": "[PERSON_1]", "first_name": "Anton", "last_name": "Hotz"}]}
+        )
+
+        for source in ("AntonHotz", "HotzAnton", "Hotz"):
+            with self.subTest(source=source):
+                self.assertTrue(anonymizer.contains_person_name(source))
+                result, counts = anonymizer.anonymize(source)
+                self.assertEqual(result, "[PERSON_1]")
+                self.assertEqual(counts, Counter({"PERSON": 1}))
+
     def test_structured_first_names_are_redacted_in_signoffs(self):
         anonymizer = TargetedAnonymizer.from_config(
             {
