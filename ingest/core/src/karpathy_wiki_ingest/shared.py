@@ -267,10 +267,19 @@ def literal_pattern(value: str) -> re.Pattern[str]:
 
 
 def first_name_pattern(value: str) -> re.Pattern[str]:
-    pattern = literal_pattern(value)
-    if not value.casefold().endswith(("s", "x", "z", "ß")):
-        return pattern
-    return re.compile(r"(?<!\w)" + re.escape(value) + r"(?!\w|['’]s\b)", re.IGNORECASE)
+    name = re.escape(value)
+    end = r"(?![^\W_]|_(?=\w))"
+    if value.casefold().endswith(("s", "x", "z", "ß")):
+        end = r"(?![^\W_]|_(?=\w)|['’]s\b)"
+
+    # Underscores are word characters to Python's regex engine, but a leading
+    # underscore can be Markdown emphasis syntax. Consume that delimiter only
+    # when it starts at a real boundary, so identifiers such as ``foo_Anton``
+    # remain untouched. A closing emphasis delimiter is allowed after a name,
+    # including when the emphasis began before other words in the phrase.
+    standard = r"(?<!\w)" + name + end
+    markdown = r"(?<!\w)_{1,2}" + name + r"(?:_{1,2}(?!\w))?" + end
+    return re.compile(r"(?:" + markdown + r"|" + standard + r")", re.IGNORECASE)
 
 
 def required_entry_text(entry: dict[str, Any], key: str, section: str) -> str:
