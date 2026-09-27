@@ -8,9 +8,12 @@ plain HTML file inside the wiki space.
 ## Save an Analysis
 
 Run a scientific analysis first, for example with the `/analyse` command, or
-bring your own analysis text into the conversation. Then either ask OpenCode to
-save the analysis (for example "Speichere diese Analyse im Wiki") or invoke the
-`/analyse-save` command with the analysis text as its argument.
+bring your own analysis text into the conversation. Then run `/analyse-save`
+without arguments to save the latest finished analysis in the same conversation,
+including subsequent corrections. You can also pass the complete analysis text
+as the command argument to save that text instead, or ask OpenCode to save the
+analysis (for example "Speichere diese Analyse im Wiki"). If there is no
+finished analysis in the conversation or the command argument, nothing is saved.
 
 The `wiki-analysis-save` skill then performs one focused commit that:
 

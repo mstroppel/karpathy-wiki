@@ -82,8 +82,8 @@ OpenCode to import `/knowledge/sources/webdav`. Generated pages are written to
 
 ## Analyses
 
-Scientific analyses (`/analyse`) can be saved into the wiki with
-`/analyse-save`: the analysis becomes a linked page at `WIKI_PUBLIC_URL/analyses/<slug>`
+Scientific analyses (`/analyse`) can be saved from the same conversation with
+`/analyse-save` (no arguments required): the analysis becomes a linked page at `WIKI_PUBLIC_URL/analyses/<slug>`
 and a print-optimized HTML view at `WIKI_PUBLIC_URL/.fs/assets/analyses/<slug>.html`,
 from which the browser's print dialog produces a shareable PDF. See
 [analysis export](docs/analysis-export.md).

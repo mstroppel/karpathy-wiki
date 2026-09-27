@@ -175,9 +175,10 @@ class ConfigTests(unittest.TestCase):
         self.assertIn("/knowledge/sources", ingest_new["template"])
         analyse_save = config["commands"]["analyse-save"]
         self.assertEqual(analyse_save["agent"], "wiki-analysis-save")
-        self.assertTrue(analyse_save["subagent"])
+        self.assertFalse(analyse_save["subagent"])
+        self.assertIn("letzte fertige Analyse", analyse_save["template"])
         save_agent = config["agents"]["wiki-analysis-save"]
-        self.assertEqual(save_agent["mode"], "subagent")
+        self.assertEqual(save_agent["mode"], "all")
         self.assertEqual(
             [rule["effect"] for rule in save_agent["permissions"] if rule["action"] == "subagent"],
             ["deny"],

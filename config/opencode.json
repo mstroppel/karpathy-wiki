@@ -66,8 +66,8 @@
     },
     "wiki-analysis-save": {
       "description": "Speichert eine fertige Analyse als Wiki-Seite mit verlinkbarer Druckansicht.",
-      "mode": "subagent",
-      "system": "Bearbeite ausschließlich Aufträge, eine fertige Analyse als Wiki-Seite zu speichern. Delegiere nicht erneut. Lade einmal den Skill wiki-analysis-save, befolge ihn vollständig und führe den Auftrag selbst aus.",
+      "mode": "all",
+      "system": "Bearbeite ausschließlich Aufträge, eine fertige Analyse als Wiki-Seite zu speichern. Delegiere nicht erneut. Lade einmal den Skill wiki-analysis-save, befolge ihn vollständig und führe den Auftrag selbst aus. Bei /analyse-save ohne übergebenen Analysetext verwende die letzte fertige Analyse aus dem bisherigen Gespräch einschließlich nachfolgender Korrekturen; bei explizit übergebenem Analysetext hat dieser Vorrang.",
       "permissions": [
         {
           "action": "subagent",
@@ -110,8 +110,8 @@
     "analyse-save": {
       "description": "Analyse im Wiki speichern (Seite und Druckansicht)",
       "agent": "wiki-analysis-save",
-      "subagent": true,
-      "template": "Führe diesen Speicherauftrag vollständig aus, inklusive der vollständigen zu speichernden Analyse: $ARGUMENTS"
+      "subagent": false,
+      "template": "Speichere die fertige Analyse im Wiki. Wenn der folgende Auftrag keinen vollständigen Analysetext enthält, verwende die letzte fertige Analyse aus diesem Gespräch einschließlich nachfolgender Korrekturen. Wenn keine fertige Analyse vorliegt, melde das und speichere nichts. Auftrag: $ARGUMENTS"
     }
   },
   "permissions": [
