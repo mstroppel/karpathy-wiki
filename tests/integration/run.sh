@@ -61,6 +61,16 @@ wiki_git() {
   git -c safe.directory="$scratch_dir/data/wiki" -C "$scratch_dir/data/wiki" "$@"
 }
 
+wait_for_webdav_fixture() {
+  i=0
+  until compose exec -T opencode curl -fsS -u fixture:integration-only \
+    -X PROPFIND http://webdav-fixture:8080/ >/dev/null 2>&1; do
+    i=$((i + 1))
+    [ "$i" -lt 30 ] || fail "WebDAV fixture did not become ready"
+    sleep 2
+  done
+}
+
 # ---------------------------------------------------------------- fixtures
 mkdir -p "$scratch_dir/data" "$scratch_dir/secrets" "$scratch_dir/fixture/Wiki Sources"
 cp tests/integration/fixtures/redactions.json "$scratch_dir/secrets/redactions.json"
@@ -139,13 +149,7 @@ printf 'compose-integration: startup OK\n'
 # ----------------------------------------------------- successful publication
 printf 'compose-integration: syncing a disposable WebDAV source\n'
 compose up -d webdav-fixture || fail "cannot start WebDAV fixture"
-i=0
-until compose exec -T opencode curl -fsS -u fixture:integration-only \
-  -X PROPFIND http://webdav-fixture:8080/ >/dev/null 2>&1; do
-  i=$((i + 1))
-  [ "$i" -lt 30 ] || fail "WebDAV fixture did not become ready"
-  sleep 2
-done
+wait_for_webdav_fixture
 compose run --rm webdav-ingest webdav --once || fail "WebDAV initial sync failed"
 share_wiki_with_host || fail "cannot access the wiki after initial synchronization"
 node tests/integration/publication.mjs "$scratch_dir/data" new publish \
@@ -154,6 +158,10 @@ wiki_git add sources/webdav/notes.md/index.md
 wiki_git -c commit.gpgsign=false commit -m "docs(wiki): import integration source" \
   || fail "cannot commit the first wiki source page"
 printf '# Meeting\n\nMax Mustermann approved the revised draft.\n' >"$scratch_dir/fixture/Wiki Sources/notes.md"
+# rclone serve caches directory entries and size metadata. Restart the
+# disposable server so a host-side fixture edit is visible to the next sync.
+compose restart webdav-fixture || fail "cannot restart WebDAV fixture after the update"
+wait_for_webdav_fixture
 compose run --rm webdav-ingest webdav --once || fail "WebDAV update sync failed"
 share_wiki_with_host || fail "cannot access the wiki after the update"
 node tests/integration/publication.mjs "$scratch_dir/data" outdated publish \
