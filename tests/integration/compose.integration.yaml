@@ -12,3 +12,9 @@ services:
     image: kw-ingest-webdav:integration
   paperless-ingest:
     image: kw-ingest-paperless:integration
+  webdav-fixture:
+    image: kw-ingest-webdav:integration
+    entrypoint: ["rclone"]
+    command: ["serve", "webdav", "/fixture", "--addr", ":8080", "--user", "fixture", "--pass", "integration-only"]
+    volumes:
+      - ${INTEGRATION_FIXTURE_ROOT:?}:/fixture:ro

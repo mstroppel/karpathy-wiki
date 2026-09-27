@@ -1,6 +1,7 @@
-# Pinned Python quality-check tooling.
+# Pinned Python quality-check tooling and test dependencies.
 # CI installs exactly this file; keep local versions identical to CI.
 ruff==0.16.8
 mypy==2.3.1
+coverage==7.13.4
 Markdown==3.8.1
 bleach==6.4.0

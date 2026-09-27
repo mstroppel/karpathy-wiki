@@ -143,19 +143,30 @@ Run the same checks CI runs:
 python3 -m pip install -r requirements-dev.txt
 python3 -m pip install -e ingest/core -e ingest/webdav -e ingest/paperless
 npm ci
+scripts/install-shellcheck.sh  # add ~/.local/bin to PATH if needed; Linux x86_64
 scripts/lint.sh
-python3 -m unittest discover -s tests -v
+scripts/test-python.sh
 node --test tests/test_wiki_ingest_status.mjs tests/test_contract_fixtures.mjs
-(cd ingest && python3 -m unittest discover -s tests -v)
 tests/integration/run.sh  # requires Docker; disposable Compose stack test
 ```
+
+The integration runner builds local images and starts a temporary Compose
+project with a disposable WebDAV upstream. It verifies redaction, manifest
+publication, the status scanner's `new → current → outdated → current` path,
+and restart/failure health behavior. A deterministic test page exercises the
+source-to-wiki contract; model-driven wiki publication and the future
+publisher/worker pipeline are not part of this suite yet. It also checks that
+one-shot Paperless fails against an unreachable disposable endpoint. The
+runner removes its project, network, and data on exit.
 
 `scripts/lint.sh` performs the formatting, linting, and type checks: ruff
 (format, lint) and mypy for Python, oxfmt and ESLint for the repository
 JavaScript, ShellCheck plus `sh -n` for shell scripts, and `node --check` for
 the shipped JavaScript. Tool versions are pinned: Python tooling in
-`requirements-dev.txt`, JavaScript tooling in `package-lock.json`; CI runs
-the ShellCheck version preinstalled on the runner image. Formatting applies
+`requirements-dev.txt`, JavaScript tooling in `package-lock.json`, and
+ShellCheck 0.11.0 in `scripts/install-shellcheck.sh` (verified SHA-256). The
+Python test script prints branch coverage and writes `coverage.xml`, which CI
+uploads as an artifact. Formatting applies
 to JavaScript, JSON, and TOML, and intentionally excludes Markdown, YAML
 workflows, and Compose files.
 
