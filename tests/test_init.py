@@ -146,35 +146,29 @@ class ConfigTests(unittest.TestCase):
             (rule["action"], rule["resource"]): rule["effect"] for rule in config["permissions"]
         }
         self.assertEqual(rules[("*", "*")], "deny")
+        self.assertEqual(rules[("read", "*.env")], "deny")
+        self.assertEqual(rules[("read", "*.env.*")], "deny")
+        self.assertEqual(rules[("read", "*.env.example")], "allow")
         self.assertEqual(rules[("edit", "/knowledge/sources/**")], "deny")
-        self.assertEqual(rules[("edit", "/knowledge/raw/**")], "deny")
         self.assertEqual(rules[("external_directory", "/knowledge/sources/**")], "allow")
+        self.assertNotIn(("external_directory", "/knowledge/raw/**"), rules)
         tool_output = "/home/opencode/.local/share/opencode/tool-output/**"
         self.assertEqual(rules[("external_directory", tool_output)], "allow")
         self.assertEqual(rules[("edit", tool_output)], "deny")
-        ingest_agent = config["agents"]["wiki-ingest"]
-        ingest_shell_rules = {
-            rule["resource"]: rule["effect"]
-            for rule in ingest_agent["permissions"]
-            if rule["action"] == "shell"
-        }
-        self.assertEqual(
-            ingest_shell_rules,
-            dict.fromkeys(
-                (
-                    "git status*",
-                    "git diff*",
-                    "git log*",
-                    "git show*",
-                    "git rev-parse*",
-                    "git add *",
-                    "git mv *",
-                    "git rm *",
-                    "git commit *",
-                ),
-                "allow",
-            ),
-        )
+        template_dir = "/etc/opencode/skills/wiki-analysis-save/**"
+        self.assertEqual(rules[("external_directory", template_dir)], "allow")
+        self.assertEqual(rules[("edit", "/etc/opencode/skills/**")], "deny")
+        self.assertFalse(any(rule["action"] == "shell" for rule in config["permissions"]))
+        for agent in ("wiki-ingest", "wiki-lint", "wiki-analysis-save"):
+            shell_rules = {
+                rule["resource"]: rule["effect"]
+                for rule in config["agents"][agent]["permissions"]
+                if rule["action"] == "shell"
+            }
+            self.assertEqual(shell_rules, {"*": "allow"}, agent)
+        analysis_rules = config["agents"]["wiki-analysis"]["permissions"]
+        self.assertIn({"action": "shell", "resource": "*", "effect": "deny"}, analysis_rules)
+        self.assertIn({"action": "edit", "resource": "*", "effect": "deny"}, analysis_rules)
         ingest_new = config["commands"]["ingest-new"]
         self.assertNotIn("WebDAV", ingest_new["description"] + ingest_new["template"])
         self.assertNotIn("Paperless", ingest_new["description"] + ingest_new["template"])
@@ -211,9 +205,13 @@ class ConfigTests(unittest.TestCase):
             self.assertIn(f"name: {directory}\n", text)
             self.assertIn("description: ", text)
         save_skill = (skills / "wiki-analysis-save" / "SKILL.md").read_text()
-        self.assertIn("wiki/assets/analyses/", save_skill)
-        self.assertIn("{{inhalt}}", save_skill)
+        self.assertIn("assets/analyses/", save_skill)
         self.assertIn(".fs/assets/analyses/", save_skill)
+        template = (skills / "wiki-analysis-save" / "print-template.html").read_text()
+        self.assertIn("{{inhalt}}", template)
+        self.assertIn('lang="de"', template)
+        dockerfile = (ROOT / "opencode" / "Dockerfile").read_text()
+        self.assertIn("COPY config/skills /etc/opencode/skills", dockerfile)
 
     def test_compose_passes_profiles_to_init(self):
         compose = (ROOT / "compose.yaml").read_text()
