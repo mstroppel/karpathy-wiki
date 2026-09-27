@@ -12,5 +12,5 @@ python3 -m coverage run --branch --source="$sources" \
   -m unittest discover -s tests -v
 (cd ingest && python3 -m coverage run --append --branch --source="$sources" \
   -m unittest discover -s tests -v)
-python3 -m coverage report
+python3 -m coverage report --fail-under=80
 python3 -m coverage xml -o coverage.xml

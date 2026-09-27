@@ -165,8 +165,8 @@ JavaScript, ShellCheck plus `sh -n` for shell scripts, and `node --check` for
 the shipped JavaScript. Tool versions are pinned: Python tooling in
 `requirements-dev.txt`, JavaScript tooling in `package-lock.json`, and
 ShellCheck 0.11.0 in `scripts/install-shellcheck.sh` (verified SHA-256). The
-Python test script prints branch coverage and writes `coverage.xml`, which CI
-uploads as an artifact. Formatting applies
+Python test script requires at least 80% aggregate branch-aware coverage and
+writes `coverage.xml`, which CI uploads as an artifact. Formatting applies
 to JavaScript, JSON, and TOML, and intentionally excludes Markdown, YAML
 workflows, and Compose files.
 
