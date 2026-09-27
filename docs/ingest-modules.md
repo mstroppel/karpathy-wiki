@@ -180,8 +180,8 @@ explicitly in Compose.
 
 The OpenCode wiki importer records each source transaction's base commit and
 the hashes of the Markdown files it writes in Git's private metadata directory.
-It stages only those recorded paths and removes the journal after verifying the
-per-source commit. If an import is interrupted, run `/ingest-recover`; recovery
+It stages only changed, recorded paths and removes the journal after verifying
+the per-source commit. If an import is interrupted, run `/ingest-recover`; recovery
 rolls back only when `HEAD`, the staged content, and every affected file still
 match the journal. A commit that completed before the interruption is finalized
 instead of rolled back. Any unrelated or changed content is preserved and stops

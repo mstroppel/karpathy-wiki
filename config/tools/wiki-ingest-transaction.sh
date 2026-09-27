@@ -244,7 +244,9 @@ verify_only_transaction_paths_changed() {
 transaction_paths() {
   for path_entry in "$state"/entries/*; do
     [ -d "$path_entry" ] || continue
-    cat "$path_entry/path"
+    path_before=$(entry_meta_value "$path_entry" before)
+    path_after=$(sed -n 's/^state=//p' "$path_entry/meta" | tail -n 1)
+    [ "$path_before" = "$path_after" ] || cat "$path_entry/path"
   done | LC_ALL=C sort
 }
 
@@ -349,6 +351,7 @@ write_file() {
   } > "$write_meta_temp"
   verify_current_files
   mv -f -- "$write_meta_temp" "$write_entry/meta"
+  verify_current_files
   mv -f -- "$write_temp" "$write_target"
   trap - EXIT HUP INT TERM
   printf 'Wrote %s (%s)\n' "$write_relative" "$write_hash"
@@ -402,9 +405,14 @@ commit_transaction() {
     | grep -Eq '^(feat|fix|docs|style|refactor|perf|test|build|ci|chore)(\([^()]+\))?: .+' \
     || die 'commit message must follow Conventional Commits'
   validate_commit_state
+  [ -n "$(transaction_paths)" ] \
+    || die 'source transaction contains no Git changes; no commit was created'
   for commit_entry in "$state"/entries/*; do
     [ -d "$commit_entry" ] || continue
-    git add -- "$(literal_pathspec "$(cat "$commit_entry/path")")"
+    commit_before=$(entry_meta_value "$commit_entry" before)
+    commit_after=$(sed -n 's/^state=//p' "$commit_entry/meta" | tail -n 1)
+    [ "$commit_before" = "$commit_after" ] \
+      || git add -- "$(literal_pathspec "$(cat "$commit_entry/path")")"
   done
   git -c commit.gpgsign=false commit -m "$commit_message"
   commit_hash=$(git rev-parse HEAD)
@@ -448,6 +456,12 @@ recover_transaction() {
       [ -d "$incomplete_entry" ] || continue
       die 'incomplete transaction contains file entries; preserving it'
     done
+    if [ -f "$state/baseline" ]; then
+      [ "$(git rev-parse HEAD)" = "$(cat "$state/baseline")" ] \
+        || die 'repository advanced during incomplete transaction setup; preserving its journal'
+    fi
+    [ -z "$(git status --porcelain=v1 --untracked-files=all)" ] \
+      || die 'incomplete transaction has wiki changes; preserving its journal'
     rm -rf -- "$state"
     printf 'Removed incomplete transaction setup; no wiki changes were made.\n'
     return 0
@@ -466,8 +480,12 @@ recover_transaction() {
     recover_has_entries=true
   done
   if [ "$recover_has_entries" = false ]; then
+    [ "$(git rev-parse HEAD)" = "$recover_baseline" ] \
+      || die 'repository advanced during an empty transaction; preserving its journal'
+    [ -z "$(git status --porcelain=v1 --untracked-files=all)" ] \
+      || die 'empty transaction has wiki changes; preserving its journal'
     rm -rf -- "$state"
-    printf 'Cleared empty source transaction journal; no files were rolled back.\n'
+    printf 'Cleared empty source transaction; no wiki files were written.\n'
     return 0
   fi
   load_paths
@@ -483,6 +501,8 @@ recover_transaction() {
     "$(cat "$state/source-revision")"
   for recover_entry in "$state"/entries/*; do
     [ -d "$recover_entry" ] || continue
+    verify_only_transaction_paths_changed
+    verify_current_files
     recover_relative=$(cat "$recover_entry/path")
     recover_before=$(entry_meta_value "$recover_entry" before)
     recover_target="$root/$recover_relative"
@@ -492,6 +512,7 @@ recover_transaction() {
     else
       git restore --source="$recover_baseline" --staged --worktree \
         -- "$(literal_pathspec "$recover_relative")"
+      chmod "$(entry_meta_value "$recover_entry" mode)" -- "$recover_target"
     fi
   done
   rm -rf -- "$state"
