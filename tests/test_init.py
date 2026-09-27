@@ -214,6 +214,7 @@ class ConfigTests(unittest.TestCase):
         save_skill = (skills / "wiki-analysis-save" / "SKILL.md").read_text()
         self.assertIn("assets/analyses/", save_skill)
         self.assertIn(".fs/assets/analyses/", save_skill)
+        self.assertIn("render-analysis", save_skill)
         template = (skills / "wiki-analysis-save" / "print-template.html").read_text()
         self.assertIn("{{inhalt}}", template)
         self.assertIn('lang="de"', template)

@@ -33,7 +33,16 @@ The `wiki-analysis-save` skill then performs one focused commit that:
 - updates `index.md`, `log.md`, and optionally `overview.md`.
 
 Saving an existing slug updates the same page and its print view instead of
-creating a duplicate.
+creating a duplicate. The agent writes Markdown with a `# Title` first line and
+`Erstellt: YYYY-MM-DD` second line, then runs `render-analysis` on that file
+from the wiki checkout. The installed renderer uses the existing print template,
+converts headings, links, citations, tables and wiki links, and sanitizes HTML.
+Run the renderer again after updating a saved analysis; commit the Markdown and
+HTML together. For example:
+
+```sh
+render-analysis analyses/example.md --wiki-url 'https://wiki.example.com'
+```
 
 ## Links
 

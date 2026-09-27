@@ -5,15 +5,6 @@ independently deployable PRs.
 
 ## Supporting work
 
-### [#108](https://github.com/mstroppel/karpathy-wiki/issues/108): Isolate wiki-agent shell execution
-
-Run compound Git and inspection commands for writing wiki agents in an isolated
-runner with only the wiki checkout, read-only sanitized sources and scratch
-space mounted. Keep OpenCode credentials, sessions, state, server environment
-and the Docker socket inaccessible; restrict network access and bound runtime
-and output. Verify credential isolation, read-only sources, focused commits and
-accurate command failures in an integration test.
-
 ### [#26](https://github.com/mstroppel/karpathy-wiki/issues/26): Finish operational test coverage
 
 Report coverage in CI and exercise successful ingest-to-wiki publication in a
@@ -81,6 +72,15 @@ resulting HTML and print workflow.
    retention and deletion behavior.
 
 ## After the first stable 1.0 release
+
+### [#108](https://github.com/mstroppel/karpathy-wiki/issues/108): Isolate wiki-agent shell execution
+
+Run compound Git and inspection commands for writing wiki agents in an isolated
+runner with only the wiki checkout, read-only sanitized sources and scratch
+space mounted. Keep OpenCode credentials, sessions, state, server environment
+and the Docker socket inaccessible; restrict network access and bound runtime
+and output. Verify credential isolation, read-only sources, focused commits and
+accurate command failures in an integration test.
 
 ### [#46](https://github.com/mstroppel/karpathy-wiki/issues/46): Version and migrate generated security policy
 
