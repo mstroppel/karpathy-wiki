@@ -24,7 +24,7 @@ share_wiki_with_host() {
   # root and can reset permissions when Compose restarts the dependency.
   docker run --rm --user 0:0 --entrypoint sh \
     -v "$scratch_dir/data:/data" kw-opencode:integration \
-    -c 'chgrp -R "$1" /data/wiki && chmod -R g+rwX /data/wiki' sh "$(id -g)"
+    -c 'chgrp -R "$1" /data/wiki /data/sources/webdav && chmod -R g+rwX /data/wiki && chmod -R g+rX /data/sources/webdav' sh "$(id -g)"
 }
 
 teardown() {
