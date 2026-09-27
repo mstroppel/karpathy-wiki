@@ -179,6 +179,7 @@ class ConfigTests(unittest.TestCase):
         self.assertFalse(analysis_save["subagent"])
         self.assertIn("letzte vollständige Analyse", analysis_save["template"])
         self.assertIn("vollständigen zu speichernden Text", analysis_save["template"])
+        self.assertIn("Index, Log und Druckansicht", analysis_save["template"])
         self.assertIn("wiki-analysis-save", analysis_save["template"])
         save_agent = config["agents"]["wiki-analysis-save"]
         self.assertEqual(save_agent["mode"], "subagent")

@@ -16,6 +16,9 @@ analysis (for example "Speichere diese Analyse im Wiki"). If there is no
 finished analysis in the conversation or the command argument, nothing is saved.
 The command asks the main agent to pass the complete text to the save subagent,
 just like a natural-language save request.
+This also adds the analysis to the wiki index and log, making it available as
+wiki knowledge. It does not need a separate source-ingest pass: `wiki-ingest`
+handles external files under `/knowledge/sources`, not saved analyses.
 
 The `wiki-analysis-save` skill then performs one focused commit that:
 
