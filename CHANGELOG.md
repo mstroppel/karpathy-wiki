@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Per-source wiki ingests now journal their Markdown writes and expose
+  `/ingest-recover` to roll back only an interrupted transaction whose Git base
+  and working/index hashes still match. Existing unjournaled changes remain
+  untouched and require manual review.
+
 ### Fixed
 
 - The `wiki_ingest_status` tool now returns bounded, pageable source details and

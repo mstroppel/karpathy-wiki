@@ -95,6 +95,12 @@
       "subagent": true,
       "template": "Lies alle neuen und geänderten Quellen unter /knowledge/sources strikt nacheinander ein. Arbeite alle Adapter und Einträge der Statusliste ab; beende den Auftrag erst nach einer abschließenden Statusprüfung mit new=0 und outdated=0 oder benenne einen konkreten Blocker und die offenen Quellen."
     },
+    "ingest-recover": {
+      "description": "Unterbrochenen Wiki-Import sicher zurücksetzen",
+      "agent": "wiki-ingest",
+      "subagent": true,
+      "template": "Führe /etc/opencode/tools/wiki-ingest-transaction.sh recover aus. Das Werkzeug darf nur eine exakt belegte, unterbrochene Quellentransaktion zurücksetzen. Berichte, ob sie sicher wiederhergestellt wurde oder warum die Prüfung abgebrochen hat. Verändere bei fehlendem oder abweichendem Journal nichts."
+    },
     "lint": {
       "description": "Wiki prüfen",
       "agent": "wiki-lint",

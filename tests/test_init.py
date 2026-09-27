@@ -173,6 +173,10 @@ class ConfigTests(unittest.TestCase):
         self.assertNotIn("WebDAV", ingest_new["description"] + ingest_new["template"])
         self.assertNotIn("Paperless", ingest_new["description"] + ingest_new["template"])
         self.assertIn("/knowledge/sources", ingest_new["template"])
+        ingest_recover = config["commands"]["ingest-recover"]
+        self.assertEqual(ingest_recover["agent"], "wiki-ingest")
+        self.assertTrue(ingest_recover["subagent"])
+        self.assertIn("wiki-ingest-transaction.sh recover", ingest_recover["template"])
         analyse_save = config["commands"]["analyse-save"]
         self.assertEqual(analyse_save["agent"], "wiki-analysis-save")
         self.assertTrue(analyse_save["subagent"])
@@ -212,6 +216,10 @@ class ConfigTests(unittest.TestCase):
         self.assertIn('lang="de"', template)
         dockerfile = (ROOT / "opencode" / "Dockerfile").read_text()
         self.assertIn("COPY config/skills /etc/opencode/skills", dockerfile)
+        self.assertIn("wiki-ingest-transaction.sh", dockerfile)
+        ingest_skill = (skills / "wiki-ingest" / "SKILL.md").read_text()
+        self.assertIn("Transaktionsschutz", ingest_skill)
+        self.assertIn("/ingest-recover", ingest_skill)
 
     def test_compose_passes_profiles_to_init(self):
         compose = (ROOT / "compose.yaml").read_text()

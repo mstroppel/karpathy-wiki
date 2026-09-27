@@ -175,3 +175,16 @@ A module must guarantee the same properties the built-ins provide:
 The core image provides the environment; a module must not require extra
 services reachable from the wiki network. Attach any needed network
 explicitly in Compose.
+
+## Interrupted wiki imports
+
+The OpenCode wiki importer records each source transaction's base commit and
+the hashes of the Markdown files it writes in Git's private metadata directory.
+It stages only those recorded paths and removes the journal after verifying the
+per-source commit. If an import is interrupted, run `/ingest-recover`; recovery
+rolls back only when `HEAD`, the staged content, and every affected file still
+match the journal. A commit that completed before the interruption is finalized
+instead of rolled back. Any unrelated or changed content is preserved and stops
+recovery for manual review. Older uncommitted changes without a journal are
+never cleaned up automatically; review or back them up and resolve them
+explicitly before starting `/ingest-new`.
