@@ -49,6 +49,16 @@ lint gate and CI run the same version.
 
 ## User-facing extensions
 
+### [#111](https://github.com/mstroppel/karpathy-wiki/issues/111): Interactive wiki gap review and answer ingestion
+
+Add an explicit, read-only wiki review for missing information, unsupported
+claims, contradictions and stale syntheses. Present evidence-linked, numbered
+questions; track answers, skips and deferrals across turns without treating
+uncertainty as fact. After user confirmation, create a Markdown Q&A source that
+maps answers to findings and wiki pages. Submit it through a supported provider
+intake path, not directly to `/knowledge/sources`, and use the normal tracked
+ingest flow to update wiki pages and report unresolved questions or conflicts.
+
 ### [#106](https://github.com/mstroppel/karpathy-wiki/issues/106): Generate analysis print views programmatically
 
 Render saved analysis Markdown into the existing print template with a script
