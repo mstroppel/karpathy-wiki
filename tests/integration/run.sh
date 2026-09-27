@@ -1,12 +1,13 @@
 #!/bin/sh
-# Disposable Compose integration test for startup, restart, health, and
-# failure behavior of the composed stack.
+# Disposable Compose integration test for successful WebDAV ingestion,
+# source-to-wiki status/publication, restart, health, and failure behavior.
 #
 # Runs against locally built images in an isolated project with a temporary
 # data root; every artifact is removed afterwards. Requires Docker with
-# Compose v2. Intentionally no external backend: the WebDAV and Paperless
-# ingests fail fast against unreachable test endpoints, which exercises the
-# daemon retry, health, and failure behavior.
+# Compose v2. A disposable rclone WebDAV upstream serves the success fixture;
+# the failure phase switches to refused local endpoints. No model credentials
+# are needed: publication is deterministic test code using the real manifest
+# and status scanner, not an automated production publisher.
 set -eu
 
 # shellcheck disable=SC1007 # CDPATH is intentionally cleared for this command only
@@ -17,6 +18,15 @@ network_name="${project_name}-net"
 
 cd "$repository_root"
 
+share_wiki_with_host() {
+  # Keep the image's UID (1000) for OpenCode, while letting the host runner
+  # publish and commit test pages. init writes the wiki Git repository as
+  # root and can reset permissions when Compose restarts the dependency.
+  docker run --rm --user 0:0 --entrypoint sh \
+    -v "$scratch_dir/data:/data" kw-opencode:integration \
+    -c 'chgrp -R "$1" /data/wiki /data/sources/webdav && chmod -R g+rwX /data/wiki && chmod -R g+rX /data/sources/webdav' sh "$(id -g)"
+}
+
 teardown() {
   status=$?
   set +e
@@ -24,6 +34,9 @@ teardown() {
     -f tests/integration/compose.integration.yaml \
     down -v --remove-orphans --timeout 30 >/dev/null 2>&1
   docker network rm "$network_name" >/dev/null 2>&1
+  docker run --rm --user 0:0 --entrypoint chown \
+    -v "$scratch_dir/data:/data" kw-opencode:integration \
+    -R "$(id -u):$(id -g)" /data >/dev/null 2>&1
   rm -rf "$scratch_dir"
   if [ "$status" -eq 0 ]; then
     printf 'compose-integration: OK\n'
@@ -44,10 +57,25 @@ compose() {
     -f tests/integration/compose.integration.yaml "$@"
 }
 
+wiki_git() {
+  git -c safe.directory="$scratch_dir/data/wiki" -C "$scratch_dir/data/wiki" "$@"
+}
+
+wait_for_webdav_fixture() {
+  i=0
+  until compose exec -T opencode curl -fsS -u fixture:integration-only \
+    -X PROPFIND http://webdav-fixture:8080/ >/dev/null 2>&1; do
+    i=$((i + 1))
+    [ "$i" -lt 30 ] || fail "WebDAV fixture did not become ready"
+    sleep 2
+  done
+}
+
 # ---------------------------------------------------------------- fixtures
-mkdir -p "$scratch_dir/data" "$scratch_dir/secrets"
+mkdir -p "$scratch_dir/data" "$scratch_dir/secrets" "$scratch_dir/fixture/Wiki Sources"
 cp tests/integration/fixtures/redactions.json "$scratch_dir/secrets/redactions.json"
 printf 'integration-token\n' >"$scratch_dir/secrets/paperless-token"
+printf '# Meeting\n\nMax Mustermann approved the first draft.\n' >"$scratch_dir/fixture/Wiki Sources/notes.md"
 
 password=$(od -An -N24 -tx1 </dev/urandom | tr -d ' \n')
 env_file="$scratch_dir/env"
@@ -58,17 +86,18 @@ WIKI_NAME=Integration Wiki
 WIKI_PUBLIC_URL=https://wiki.invalid
 OPENCODE_PASSWORD=$password
 DATA_ROOT=$scratch_dir/data
+INTEGRATION_FIXTURE_ROOT=$scratch_dir/fixture
+PUID=1000
+PGID=$(id -g)
 WEBPROXY_NETWORK=$network_name
 KARPATHY_WIKI_VERSION=integration
-COMPOSE_PROFILES=webdav,paperless
+COMPOSE_PROFILES=webdav
 PAPERLESS_TOKEN_FILE=$scratch_dir/secrets/paperless-token
 REDACTIONS_FILE=$scratch_dir/secrets/redactions.json
 PAPERLESS_SOURCE_TAG_ID=5
-# Unreachable, fast-failing local endpoints for the failure test: the WebDAV
-# and Paperless URLs point at the refused TCP discard port instead of an
-# external hostname whose DNS behavior would make the assertions slow or
-# nondeterministic.
-WEBDAV_URL=https://127.0.0.1:9/
+WEBDAV_URL=http://webdav-fixture:8080/
+WEBDAV_VENDOR=other
+WEBDAV_USERNAME=fixture
 PAPERLESS_PUBLIC_URL=https://127.0.0.1:9
 EOF
 
@@ -81,6 +110,9 @@ docker build -q -t kw-ingest-webdav:integration --target webdav ingest/ \
   || fail "cannot build the webdav ingest image"
 docker build -q -t kw-ingest-paperless:integration --target paperless ingest/ \
   || fail "cannot build the paperless ingest image"
+obscured_password=$(docker run --rm --entrypoint rclone kw-ingest-webdav:integration obscure integration-only) \
+  || fail "cannot obscure the WebDAV test password"
+printf 'WEBDAV_PASSWORD_OBSCURED=%s\n' "$obscured_password" >>"$env_file"
 
 # ---------------------------------------------------------------- startup
 printf 'compose-integration: starting the stack\n'
@@ -89,9 +121,14 @@ compose up -d --wait --wait-timeout 240 opencode silverbullet \
 
 init_exit=$(docker inspect -f '{{.State.ExitCode}}' "$project_name-init-1" 2>/dev/null || true)
 [ "$init_exit" = "0" ] || fail "init did not complete successfully (exit: $init_exit)"
+share_wiki_with_host || fail "cannot give the host runner access to initialized wiki files"
 
-compose exec -T opencode curl -sS -o /dev/null http://127.0.0.1:4096/ \
-  || fail "opencode does not answer HTTP on port 4096"
+i=0
+until compose exec -T opencode curl -sS -o /dev/null http://127.0.0.1:4096/ 2>/dev/null; do
+  i=$((i + 1))
+  [ "$i" -lt 30 ] || fail "opencode does not answer HTTP on port 4096"
+  sleep 2
+done
 
 i=0
 until compose exec -T opencode curl -sS -o /dev/null http://silverbullet:3000/ 2>/dev/null; do
@@ -109,9 +146,54 @@ if [ -e "$scratch_dir/data/wiki/.integration-write-check" ]; then
 fi
 printf 'compose-integration: startup OK\n'
 
+# ----------------------------------------------------- successful publication
+printf 'compose-integration: syncing a disposable WebDAV source\n'
+compose up -d webdav-fixture || fail "cannot start WebDAV fixture"
+wait_for_webdav_fixture
+compose run --rm webdav-ingest webdav --once || fail "WebDAV initial sync failed"
+share_wiki_with_host || fail "cannot access the wiki after initial synchronization"
+node tests/integration/publication.mjs "$scratch_dir/data" new publish \
+  || fail "new source was not published as a current wiki page"
+wiki_git add sources/webdav/notes.md/index.md
+wiki_git -c commit.gpgsign=false commit -m "docs(wiki): import integration source" \
+  || fail "cannot commit the first wiki source page"
+printf '# Meeting\n\nMax Mustermann approved the revised draft.\n' >"$scratch_dir/fixture/Wiki Sources/notes.md"
+# rclone serve caches directory entries and size metadata. Restart the
+# disposable server so a host-side fixture edit is visible to the next sync.
+compose restart webdav-fixture || fail "cannot restart WebDAV fixture after the update"
+wait_for_webdav_fixture
+compose run --rm webdav-ingest webdav --once || fail "WebDAV update sync failed"
+share_wiki_with_host || fail "cannot access the wiki after the update"
+node tests/integration/publication.mjs "$scratch_dir/data" outdated publish \
+  || fail "updated source was not republished"
+wiki_git add sources/webdav/notes.md/index.md
+wiki_git -c commit.gpgsign=false commit -m "docs(wiki): update integration source" \
+  || fail "cannot commit the updated wiki source page"
+node tests/integration/publication.mjs "$scratch_dir/data" current \
+  || fail "wiki status was not current"
+commit_count=$(wiki_git rev-list --count HEAD)
+[ "$commit_count" -eq 3 ] || fail "expected an initial and two source commits (got $commit_count)"
+if grep -R -F 'Max Mustermann' "$scratch_dir/data/sources" "$scratch_dir/data/wiki/sources"; then
+  fail "raw upstream name escaped into published data"
+fi
+printf 'compose-integration: publication OK\n'
+
 # ------------------------------------------------------------- webdav health
 printf 'compose-integration: checking ingest daemon lifecycle and health\n'
 compose up -d webdav-ingest || fail "cannot start webdav-ingest"
+i=0
+until compose exec -T webdav-ingest test -f /tmp/health.json 2>/dev/null; do
+  i=$((i + 1))
+  [ "$i" -lt 60 ] || fail "healthy webdav-ingest never wrote its health record"
+  sleep 2
+done
+compose exec -T webdav-ingest python -m karpathy_wiki_ingest.health \
+  || fail "successful synchronization was not healthy"
+# Refused local port exercises the failed sync without relying on DNS or an
+# external service. Recreate the daemon with the new endpoint after success.
+sed 's|^WEBDAV_URL=.*|WEBDAV_URL=https://127.0.0.1:9/|' "$env_file" >"$env_file.next"
+mv "$env_file.next" "$env_file"
+compose up -d --force-recreate webdav-ingest || fail "cannot recreate webdav-ingest"
 
 i=0
 until docker inspect -f '{{.State.Running}}' "$project_name-webdav-ingest-1" 2>/dev/null | grep -q true; do
@@ -131,6 +213,8 @@ done
 if compose exec -T webdav-ingest python -m karpathy_wiki_ingest.health; then
   fail "healthcheck passed despite a failed synchronization"
 fi
+node tests/integration/publication.mjs "$scratch_dir/data" current \
+  || fail "failed upstream sync changed the published source or wiki status"
 
 # ----------------------------------------------------------------- restart
 printf 'compose-integration: restarting opencode\n'
@@ -142,11 +226,19 @@ until compose exec -T opencode curl -sS -o /dev/null http://127.0.0.1:4096/ 2>/d
   sleep 2
 done
 printf 'compose-integration: restart OK\n'
+node tests/integration/publication.mjs "$scratch_dir/data" current \
+  || fail "publication did not survive opencode restart"
+[ "$(wiki_git rev-list --count HEAD)" -eq 3 ] \
+  || fail "wiki Git history changed after opencode restart"
 
 # ----------------------------------------------------------------- failure
 printf 'compose-integration: checking one-shot failure exits\n'
 compose run --rm webdav-ingest webdav --once >/dev/null 2>&1 &&
   fail "webdav --once unexpectedly succeeded without an upstream"
+docker run --rm --user 0:0 --entrypoint sh \
+  -v "$scratch_dir/data:/data" kw-opencode:integration \
+  -c 'mkdir -p /data/sources/paperless /data/quarantine/paperless && chown -R "1000:$1" /data/sources/paperless /data/quarantine/paperless' sh "$(id -g)" \
+  || fail "cannot prepare disposable Paperless directories"
 compose run --rm paperless-ingest paperless --once >/dev/null 2>&1 &&
   fail "paperless --once unexpectedly succeeded without an upstream"
 printf 'compose-integration: failure exits OK\n'

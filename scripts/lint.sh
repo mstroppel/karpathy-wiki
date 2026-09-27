@@ -14,6 +14,11 @@ fail_missing() {
 command -v python3 >/dev/null 2>&1 || fail_missing python3
 command -v node >/dev/null 2>&1 || fail_missing node
 command -v shellcheck >/dev/null 2>&1 || fail_missing shellcheck
+shellcheck_version=$(shellcheck --version | sed -n 's/^version: //p')
+if [ "$shellcheck_version" != 0.11.0 ]; then
+  printf 'lint: ShellCheck 0.11.0 required (found %s); run scripts/install-shellcheck.sh\n' "$shellcheck_version" >&2
+  exit 1
+fi
 python3 -m ruff --version >/dev/null 2>&1 || fail_missing "ruff (requirements-dev.txt)"
 python3 -m mypy --version >/dev/null 2>&1 || fail_missing "mypy (requirements-dev.txt)"
 
