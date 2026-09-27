@@ -5,27 +5,21 @@ independently deployable PRs.
 
 ## Transactional ingestion and publishing — [#44](https://github.com/mstroppel/karpathy-wiki/issues/44)
 
-1. Keep the durable source-job contract available to future providers.
-   WebDAV and Paperless record accepted work and coherent source generations;
-   the shared state store enforces an exclusive publisher-job lease and exposes
-   queue depth, oldest pending age, last recorded source generation and
-   committed publication, and failed/retried job counts in ingest health.
-2. Add a serialized publisher using isolated Git worktrees. Validate patch
+1. Add a serialized publisher using isolated Git worktrees. Validate patch
    paths, provenance, schema and content; reject or explicitly rebase and
    revalidate stale-base patches. Record the source generation, wiki base,
    model/job identity, validation result and resulting commit for each
    publication.
-3. Move model work to restricted workers that read immutable source generations
+2. Move model work to restricted workers that read immutable source generations
    and wiki base revisions and return patches. Workers must not commit,
    publish, contact source systems or make arbitrary outbound requests; route
    model traffic through an allowlisted gateway with size, timeout and spend
    limits.
-4. Atomically serve complete published wiki revisions and mount them read-only
-   in SilverBullet.
-5. Put application services on private networks, expose only an authenticated
+3. Atomically serve complete published wiki revisions in SilverBullet.
+4. Put application services on private networks, expose only an authenticated
    gateway on the external proxy network, and use service credentials for
    internal API calls.
-6. Test concurrent and duplicate jobs, worker and validation failures, stale
+5. Test concurrent and duplicate jobs, worker and validation failures, stale
    bases, publisher restart and recovery, publication, serving and rollback.
    Document backup and restore for state, Git, manifests, configuration and
    credentials; verify a restore. Document manual upgrade and rollback steps
@@ -33,11 +27,14 @@ independently deployable PRs.
 
 ## Supporting work
 
-### [#42](https://github.com/mstroppel/karpathy-wiki/issues/42): Verify external provider deployment
+### [#108](https://github.com/mstroppel/karpathy-wiki/issues/108): Isolate wiki-agent shell execution
 
-Provide a buildable third-party example in a separate repository or fixture
-that installs the plugin, publishes its manifest and is enabled without
-modifying or rebuilding the core OpenCode image. Test this deployment path.
+Run compound Git and inspection commands for writing wiki agents in an isolated
+runner with only the wiki checkout, read-only sanitized sources and scratch
+space mounted. Keep OpenCode credentials, sessions, state, server environment
+and the Docker socket inaccessible; restrict network access and bound runtime
+and output. Verify credential isolation, read-only sources, focused commits and
+accurate command failures in an integration test.
 
 ### [#26](https://github.com/mstroppel/karpathy-wiki/issues/26): Finish operational test coverage
 
@@ -50,16 +47,25 @@ the publisher and worker boundaries are introduced.
 Pin and validate the ShellCheck version used in CI so the documented local
 lint gate and CI run the same version.
 
-### [#68](https://github.com/mstroppel/karpathy-wiki/issues/68): Automate non-major OpenCode updates
-
-Extend the scheduled OpenCode updater so compatible minor, patch and build
-updates are validated by CI and merged automatically, including the pinned
-download checksums. Require manual approval for major version changes. Test the
-version classification, auto-merge conditions and failure behavior; document
-how installations receive the resulting release through the existing update
-mechanism.
-
 ## User-facing extensions
+
+### [#111](https://github.com/mstroppel/karpathy-wiki/issues/111): Interactive wiki gap review and answer ingestion
+
+Add an explicit, read-only wiki review for missing information, unsupported
+claims, contradictions and stale syntheses. Present evidence-linked, numbered
+questions; track answers, skips and deferrals across turns without treating
+uncertainty as fact. After user confirmation, create a Markdown Q&A source that
+maps answers to findings and wiki pages. Submit it through a supported provider
+intake path, not directly to `/knowledge/sources`, and use the normal tracked
+ingest flow to update wiki pages and report unresolved questions or conflicts.
+
+### [#106](https://github.com/mstroppel/karpathy-wiki/issues/106): Generate analysis print views programmatically
+
+Render saved analysis Markdown into the existing print template with a script
+or SilverBullet integration instead of asking the model to convert it to HTML.
+Preserve headings, citations, links and wiki links; escape untrusted content,
+keep the printable view in sync when an analysis is updated, and test the
+resulting HTML and print workflow.
 
 ### [#18](https://github.com/mstroppel/karpathy-wiki/issues/18): Multi-language support
 
