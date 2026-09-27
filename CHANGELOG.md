@@ -105,7 +105,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   version and its sha512 download checksums when the npm registry publishes
   a new OpenCode release.
 - The installer creates a `.gitignore` that ignores the `.cache` directory.
-- The `/analyse-save` command and `wiki-analysis-save` skill store a finished
+- The `/analysis-save` command and `wiki-analysis-save` skill store a finished
   analysis as a wiki page under `analyses/` with a print-optimized HTML view
   under `assets/analyses/` that the browser can print or save as a PDF.
 - The WebDAV ingest publishes each synchronization as a coherent sanitized

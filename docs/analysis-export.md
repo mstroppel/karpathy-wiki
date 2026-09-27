@@ -7,8 +7,8 @@ plain HTML file inside the wiki space.
 
 ## Save an Analysis
 
-Run a scientific analysis first, for example with the `/analyse` command, or
-bring your own analysis text into the conversation. Then run `/analyse-save`
+Run a scientific analysis first, for example with the `/analysis` command, or
+bring your own analysis text into the conversation. Then run `/analysis-save`
 without arguments to save the latest finished analysis in the same conversation,
 including subsequent corrections. You can also pass the complete analysis text
 as the command argument to save that text instead, or ask OpenCode to save the

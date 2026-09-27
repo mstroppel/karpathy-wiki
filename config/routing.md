@@ -31,7 +31,7 @@ primäre Agenten; ein spezialisierter Agent führt seinen Auftrag selbst aus.
   übernimm ihren vollständigen Text einschließlich späterer Korrekturen in
   den Auftrag an `wiki-analysis-save`; übergib niemals nur einen Verweis auf
   das Gespräch. Liegt keine fertige Analyse vor, erstelle keine und verweise
-  auf `/analyse`.
+  auf `/analysis`.
 - **Abfrage** für jede andere Anfrage. Beginne mit `index.md`, lies nur relevante
   Wiki-Seiten und verändere das Wiki nicht.
 

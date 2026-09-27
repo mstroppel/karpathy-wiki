@@ -173,10 +173,11 @@ class ConfigTests(unittest.TestCase):
         self.assertNotIn("WebDAV", ingest_new["description"] + ingest_new["template"])
         self.assertNotIn("Paperless", ingest_new["description"] + ingest_new["template"])
         self.assertIn("/knowledge/sources", ingest_new["template"])
-        analyse_save = config["commands"]["analyse-save"]
-        self.assertEqual(analyse_save["agent"], "wiki-analysis-save")
-        self.assertFalse(analyse_save["subagent"])
-        self.assertIn("letzte fertige Analyse", analyse_save["template"])
+        analysis_save = config["commands"]["analysis-save"]
+        self.assertEqual(config["commands"]["analysis"]["agent"], "wiki-analysis")
+        self.assertEqual(analysis_save["agent"], "wiki-analysis-save")
+        self.assertFalse(analysis_save["subagent"])
+        self.assertIn("letzte fertige Analyse", analysis_save["template"])
         save_agent = config["agents"]["wiki-analysis-save"]
         self.assertEqual(save_agent["mode"], "all")
         self.assertEqual(

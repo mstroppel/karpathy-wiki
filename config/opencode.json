@@ -67,7 +67,7 @@
     "wiki-analysis-save": {
       "description": "Speichert eine fertige Analyse als Wiki-Seite mit verlinkbarer Druckansicht.",
       "mode": "all",
-      "system": "Bearbeite ausschließlich Aufträge, eine fertige Analyse als Wiki-Seite zu speichern. Delegiere nicht erneut. Lade einmal den Skill wiki-analysis-save, befolge ihn vollständig und führe den Auftrag selbst aus. Bei /analyse-save ohne übergebenen Analysetext verwende die letzte fertige Analyse aus dem bisherigen Gespräch einschließlich nachfolgender Korrekturen; bei explizit übergebenem Analysetext hat dieser Vorrang.",
+      "system": "Bearbeite ausschließlich Aufträge, eine fertige Analyse als Wiki-Seite zu speichern. Delegiere nicht erneut. Lade einmal den Skill wiki-analysis-save, befolge ihn vollständig und führe den Auftrag selbst aus. Bei /analysis-save ohne übergebenen Analysetext verwende die letzte fertige Analyse aus dem bisherigen Gespräch einschließlich nachfolgender Korrekturen; bei explizit übergebenem Analysetext hat dieser Vorrang.",
       "permissions": [
         {
           "action": "subagent",
@@ -101,13 +101,13 @@
       "subagent": true,
       "template": "Führe diesen Prüfauftrag vollständig aus: $ARGUMENTS"
     },
-    "analyse": {
+    "analysis": {
       "description": "Wissenschaftliche Analyse mit Internetquellen",
       "agent": "wiki-analysis",
       "subagent": false,
       "template": "$ARGUMENTS"
     },
-    "analyse-save": {
+    "analysis-save": {
       "description": "Analyse im Wiki speichern (Seite und Druckansicht)",
       "agent": "wiki-analysis-save",
       "subagent": false,
