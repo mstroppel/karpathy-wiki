@@ -14,10 +14,12 @@ auf. Lies `AGENTS.md` und vor Änderungen Git-Status und Historie sowie `index.m
 ## Jede Quelle
 
 1. Ermittle mit `wiki_ingest_status` den Status. Bei `new` oder `outdated`
-   verwende ausschließlich dessen `source_path`, `source_revision`, `wiki_path`
-   und `frontmatter`; prüfe Status und Revision unmittelbar vor der Bearbeitung.
-   Bei `current` ändere nichts. Brich bei unlesbarem Format oder mehrdeutiger
-   Auswahl ab.
+   verwende ausschließlich dessen `adapter`, `source_key`, `source_path`,
+   `source_revision`, `wiki_path` und `frontmatter`. Rufe unmittelbar vor jeder
+   Änderung `wiki_ingest_status` mit `adapter` und `source_key` erneut auf:
+   Bearbeite nur dieselbe `new`- oder `outdated`-Revision und stoppe, wenn die
+   globalen Zähler `invalid` oder `conflict` ungleich null sind. Bei `current`
+   ändere nichts. Brich bei unlesbarem Format oder mehrdeutiger Auswahl ab.
 2. Lies die vollständige Quelle. Schreibe das gelieferte Frontmatter unverändert
    als YAML; erhalte bestehende Felder. Nenne den exakten Quellpfad und
    Fundstellen. Bei `paperless_url`: HTTPS-Feld erhalten und im Seitentext als
