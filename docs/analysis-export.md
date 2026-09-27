@@ -14,6 +14,8 @@ including subsequent corrections. You can also pass the complete analysis text
 as the command argument to save that text instead, or ask OpenCode to save the
 analysis (for example "Speichere diese Analyse im Wiki"). If there is no
 finished analysis in the conversation or the command argument, nothing is saved.
+The command asks the main agent to pass the complete text to the save subagent,
+just like a natural-language save request.
 
 The `wiki-analysis-save` skill then performs one focused commit that:
 
