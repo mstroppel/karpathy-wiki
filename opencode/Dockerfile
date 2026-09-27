@@ -12,7 +12,7 @@ ARG APP_UID=1000
 ARG APP_GID=100
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl git ripgrep tzdata \
+    && apt-get install -y --no-install-recommends ca-certificates curl git ripgrep tzdata python3 python3-markdown python3-bleach \
     && rm -rf /var/lib/apt/lists/*
 
 RUN arch="${TARGETARCH:-$(dpkg --print-architecture)}" \
@@ -41,10 +41,11 @@ COPY config/init.sh /etc/opencode/init.sh
 COPY config/opencode.json /etc/opencode/opencode.json
 COPY config/routing.md /etc/opencode/routing.md
 COPY config/skills /etc/opencode/skills
+COPY opencode/render_analysis.py /usr/local/bin/render-analysis
 COPY config/plugins /etc/opencode/plugins
 COPY config/tools /etc/opencode/tools
 COPY opencode/entrypoint.sh /usr/local/bin/karpathy-wiki-entrypoint
-RUN chmod 0755 /etc/opencode/init.sh /usr/local/bin/karpathy-wiki-entrypoint
+RUN chmod 0755 /etc/opencode/init.sh /usr/local/bin/karpathy-wiki-entrypoint /usr/local/bin/render-analysis
 
 ENV HOME=/home/opencode
 USER app
