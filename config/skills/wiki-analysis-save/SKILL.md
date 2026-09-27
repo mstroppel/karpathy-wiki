@@ -7,6 +7,12 @@ description: Speichert eine fertige Analyse als Wiki-Seite und druckoptimierte H
 
 Arbeite und berichte auf Deutsch. Speichere nur eine bereits fertige Analyse;
 verändere keine Quellen und veröffentliche keine internen Systempfade.
+Ist im Auftrag kein vollständiger Analysetext enthalten, speichere nichts und
+melde den fehlenden Text. Erfinde keine fehlenden Aussagen oder Quellen.
+Enthält der übergebene Text einen Kürzungsmarker aus einer Tool-Ausgabe
+(`[showing ...; full output saved to ...]`) oder erkennbare Auslassungen,
+speichere nichts und melde, dass der vollständige Text erneut übergeben werden
+muss.
 
 1. Lies `AGENTS.md`, `index.md`, `log.md`, Git-Status und Historie. Erhalte
    fremde Änderungen. Wähle einen eindeutigen ASCII-Kebab-Case-Slug; wenn

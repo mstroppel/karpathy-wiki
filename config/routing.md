@@ -27,9 +27,15 @@ primäre Agenten; ein spezialisierter Agent führt seinen Auftrag selbst aus.
   nur die konkrete Frage an `wiki-analysis`.
 - **Analyse speichern** nur bei einer ausdrücklichen Aufforderung, eine fertige
   Analyse im Wiki abzulegen, zu speichern, zu exportieren oder als PDF
-  verfügbar zu machen. Übergib den vollständigen Analysetext unverändert an
-  `wiki-analysis-save`; liegt keine fertige Analyse vor, erstelle keine und
-  verweise auf `/analyse`.
+  verfügbar zu machen. Steht die fertige Analyse im bisherigen Gespräch,
+  übernimm ihren vollständigen Text einschließlich späterer Korrekturen in
+  den Auftrag an `wiki-analysis-save`; übergib niemals nur einen Verweis auf
+  das Gespräch. Prüfe bei Analysen aus einem Subagenten-Ergebnis, ob die
+  Tool-Ausgabe einen Kürzungsmarker `[showing ...; full output saved to ...]`
+  enthält. Lies dann die vollständige Tool-Ausgabe stückweise mit `read` nach;
+  wenn sie nicht vollständig wiederherstellbar ist, speichere nichts und melde
+  den Grund. Liegt keine fertige Analyse vor, erstelle keine und verweise auf
+  `/analysis`.
 - **Abfrage** für jede andere Anfrage. Beginne mit `index.md`, lies nur relevante
   Wiki-Seiten und verändere das Wiki nicht.
 

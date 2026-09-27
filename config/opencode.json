@@ -101,17 +101,17 @@
       "subagent": true,
       "template": "Führe diesen Prüfauftrag vollständig aus: $ARGUMENTS"
     },
-    "analyse": {
+    "analysis": {
       "description": "Wissenschaftliche Analyse mit Internetquellen",
       "agent": "wiki-analysis",
       "subagent": false,
       "template": "$ARGUMENTS"
     },
-    "analyse-save": {
-      "description": "Analyse im Wiki speichern (Seite und Druckansicht)",
-      "agent": "wiki-analysis-save",
-      "subagent": true,
-      "template": "Führe diesen Speicherauftrag vollständig aus, inklusive der vollständigen zu speichernden Analyse: $ARGUMENTS"
+    "analysis-save": {
+      "description": "Analyse ins Wiki aufnehmen (Seite, Index, Log und Druckansicht)",
+      "agent": "build",
+      "subagent": false,
+      "template": "Nimm die fertige Analyse ins Wiki auf (Seite, Index, Log und Druckansicht): Finde im bisherigen Gespräch die letzte vollständige Analyse einschließlich späterer Korrekturen. Falls der folgende Auftrag selbst einen vollständigen Analysetext enthält, verwende stattdessen diesen. Prüfe bei einer Analyse aus einem Subagenten-Ergebnis auf Kürzungsmarker ([showing ...; full output saved to ...]). Lies in diesem Fall die vollständige gespeicherte Tool-Ausgabe stückweise über den read-Befehl; wenn sie nicht vollständig wiederherstellbar ist, speichere nichts und melde den Grund. Übergib nur den vollständigen zu speichernden Text an den Subagenten wiki-analysis-save, nicht nur einen Verweis auf das Gespräch. Ist keine fertige Analyse vorhanden, speichere nichts und melde das. Auftrag: $ARGUMENTS"
     }
   },
   "permissions": [

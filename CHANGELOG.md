@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `/analysis-save` can now save the latest finished analysis and subsequent
+  corrections from the current conversation without pasted arguments. It passes
+  the complete text through the main agent and refuses truncated tool results.
 - The `wiki_ingest_status` tool now returns bounded, pageable source details and
   supports adapter-only listing. Serialized output is capped at 12 KiB, and
   oversized individual records can be retrieved as bounded JSON chunks. Ingest
@@ -105,7 +108,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   version and its sha512 download checksums when the npm registry publishes
   a new OpenCode release.
 - The installer creates a `.gitignore` that ignores the `.cache` directory.
-- The `/analyse-save` command and `wiki-analysis-save` skill store a finished
+- The `/analysis-save` command and `wiki-analysis-save` skill store a finished
   analysis as a wiki page under `analyses/` with a print-optimized HTML view
   under `assets/analyses/` that the browser can print or save as a PDF.
 - The WebDAV ingest publishes each synchronization as a coherent sanitized
