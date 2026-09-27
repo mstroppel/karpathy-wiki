@@ -227,7 +227,10 @@ node tests/integration/publication.mjs "$scratch_dir/data" current \
 printf 'compose-integration: checking one-shot failure exits\n'
 compose run --rm webdav-ingest webdav --once >/dev/null 2>&1 &&
   fail "webdav --once unexpectedly succeeded without an upstream"
-mkdir -p "$scratch_dir/data/sources/paperless" "$scratch_dir/data/quarantine/paperless"
+docker run --rm --user 0:0 --entrypoint sh \
+  -v "$scratch_dir/data:/data" kw-opencode:integration \
+  -c 'mkdir -p /data/sources/paperless /data/quarantine/paperless && chown -R "1000:$1" /data/sources/paperless /data/quarantine/paperless' sh "$(id -g)" \
+  || fail "cannot prepare disposable Paperless directories"
 compose run --rm paperless-ingest paperless --once >/dev/null 2>&1 &&
   fail "paperless --once unexpectedly succeeded without an upstream"
 printf 'compose-integration: failure exits OK\n'
