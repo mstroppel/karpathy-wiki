@@ -18,12 +18,13 @@ network_name="${project_name}-net"
 
 cd "$repository_root"
 
-restore_host_ownership() {
-  # init writes generated wiki files and Git history as root after chowning
-  # the data root. The host test runner needs to publish and commit pages.
-  docker run --rm --user 0:0 --entrypoint chown \
+share_wiki_with_host() {
+  # Keep the image's UID (1000) for OpenCode, while letting the host runner
+  # publish and commit test pages. init writes the wiki Git repository as
+  # root and can reset permissions when Compose restarts the dependency.
+  docker run --rm --user 0:0 --entrypoint sh \
     -v "$scratch_dir/data:/data" kw-opencode:integration \
-    -R "$(id -u):$(id -g)" /data
+    -c 'chgrp -R "$1" /data/wiki && chmod -R g+rwX /data/wiki' sh "$(id -g)"
 }
 
 teardown() {
@@ -33,7 +34,9 @@ teardown() {
     -f tests/integration/compose.integration.yaml \
     down -v --remove-orphans --timeout 30 >/dev/null 2>&1
   docker network rm "$network_name" >/dev/null 2>&1
-  restore_host_ownership >/dev/null 2>&1
+  docker run --rm --user 0:0 --entrypoint chown \
+    -v "$scratch_dir/data:/data" kw-opencode:integration \
+    -R "$(id -u):$(id -g)" /data >/dev/null 2>&1
   rm -rf "$scratch_dir"
   if [ "$status" -eq 0 ]; then
     printf 'compose-integration: OK\n'
@@ -54,6 +57,10 @@ compose() {
     -f tests/integration/compose.integration.yaml "$@"
 }
 
+wiki_git() {
+  git -c safe.directory="$scratch_dir/data/wiki" -C "$scratch_dir/data/wiki" "$@"
+}
+
 # ---------------------------------------------------------------- fixtures
 mkdir -p "$scratch_dir/data" "$scratch_dir/secrets" "$scratch_dir/fixture/Wiki Sources"
 cp tests/integration/fixtures/redactions.json "$scratch_dir/secrets/redactions.json"
@@ -70,7 +77,7 @@ WIKI_PUBLIC_URL=https://wiki.invalid
 OPENCODE_PASSWORD=$password
 DATA_ROOT=$scratch_dir/data
 INTEGRATION_FIXTURE_ROOT=$scratch_dir/fixture
-PUID=$(id -u)
+PUID=1000
 PGID=$(id -g)
 WEBPROXY_NETWORK=$network_name
 KARPATHY_WIKI_VERSION=integration
@@ -104,7 +111,7 @@ compose up -d --wait --wait-timeout 240 opencode silverbullet \
 
 init_exit=$(docker inspect -f '{{.State.ExitCode}}' "$project_name-init-1" 2>/dev/null || true)
 [ "$init_exit" = "0" ] || fail "init did not complete successfully (exit: $init_exit)"
-restore_host_ownership || fail "cannot give the host runner access to initialized wiki files"
+share_wiki_with_host || fail "cannot give the host runner access to initialized wiki files"
 
 i=0
 until compose exec -T opencode curl -sS -o /dev/null http://127.0.0.1:4096/ 2>/dev/null; do
@@ -140,21 +147,23 @@ until compose exec -T opencode curl -fsS -u fixture:integration-only \
   sleep 2
 done
 compose run --rm webdav-ingest webdav --once || fail "WebDAV initial sync failed"
+share_wiki_with_host || fail "cannot access the wiki after initial synchronization"
 node tests/integration/publication.mjs "$scratch_dir/data" new publish \
   || fail "new source was not published as a current wiki page"
-git -C "$scratch_dir/data/wiki" add sources/webdav/notes.md/index.md
-git -C "$scratch_dir/data/wiki" -c commit.gpgsign=false commit -m "docs(wiki): import integration source" \
+wiki_git add sources/webdav/notes.md/index.md
+wiki_git -c commit.gpgsign=false commit -m "docs(wiki): import integration source" \
   || fail "cannot commit the first wiki source page"
 printf '# Meeting\n\nMax Mustermann approved the revised draft.\n' >"$scratch_dir/fixture/Wiki Sources/notes.md"
 compose run --rm webdav-ingest webdav --once || fail "WebDAV update sync failed"
+share_wiki_with_host || fail "cannot access the wiki after the update"
 node tests/integration/publication.mjs "$scratch_dir/data" outdated publish \
   || fail "updated source was not republished"
-git -C "$scratch_dir/data/wiki" add sources/webdav/notes.md/index.md
-git -C "$scratch_dir/data/wiki" -c commit.gpgsign=false commit -m "docs(wiki): update integration source" \
+wiki_git add sources/webdav/notes.md/index.md
+wiki_git -c commit.gpgsign=false commit -m "docs(wiki): update integration source" \
   || fail "cannot commit the updated wiki source page"
 node tests/integration/publication.mjs "$scratch_dir/data" current \
   || fail "wiki status was not current"
-commit_count=$(git -C "$scratch_dir/data/wiki" rev-list --count HEAD)
+commit_count=$(wiki_git rev-list --count HEAD)
 [ "$commit_count" -eq 3 ] || fail "expected an initial and two source commits (got $commit_count)"
 if grep -R -F 'Max Mustermann' "$scratch_dir/data/sources" "$scratch_dir/data/wiki/sources"; then
   fail "raw upstream name escaped into published data"
@@ -211,7 +220,7 @@ done
 printf 'compose-integration: restart OK\n'
 node tests/integration/publication.mjs "$scratch_dir/data" current \
   || fail "publication did not survive opencode restart"
-[ "$(git -C "$scratch_dir/data/wiki" rev-list --count HEAD)" -eq 3 ] \
+[ "$(wiki_git rev-list --count HEAD)" -eq 3 ] \
   || fail "wiki Git history changed after opencode restart"
 
 # ----------------------------------------------------------------- failure
