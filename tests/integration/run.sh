@@ -18,6 +18,14 @@ network_name="${project_name}-net"
 
 cd "$repository_root"
 
+restore_host_ownership() {
+  # init writes generated wiki files and Git history as root after chowning
+  # the data root. The host test runner needs to publish and commit pages.
+  docker run --rm --user 0:0 --entrypoint chown \
+    -v "$scratch_dir/data:/data" kw-opencode:integration \
+    -R "$(id -u):$(id -g)" /data
+}
+
 teardown() {
   status=$?
   set +e
@@ -25,6 +33,7 @@ teardown() {
     -f tests/integration/compose.integration.yaml \
     down -v --remove-orphans --timeout 30 >/dev/null 2>&1
   docker network rm "$network_name" >/dev/null 2>&1
+  restore_host_ownership >/dev/null 2>&1
   rm -rf "$scratch_dir"
   if [ "$status" -eq 0 ]; then
     printf 'compose-integration: OK\n'
@@ -95,9 +104,14 @@ compose up -d --wait --wait-timeout 240 opencode silverbullet \
 
 init_exit=$(docker inspect -f '{{.State.ExitCode}}' "$project_name-init-1" 2>/dev/null || true)
 [ "$init_exit" = "0" ] || fail "init did not complete successfully (exit: $init_exit)"
+restore_host_ownership || fail "cannot give the host runner access to initialized wiki files"
 
-compose exec -T opencode curl -sS -o /dev/null http://127.0.0.1:4096/ \
-  || fail "opencode does not answer HTTP on port 4096"
+i=0
+until compose exec -T opencode curl -sS -o /dev/null http://127.0.0.1:4096/ 2>/dev/null; do
+  i=$((i + 1))
+  [ "$i" -lt 30 ] || fail "opencode does not answer HTTP on port 4096"
+  sleep 2
+done
 
 i=0
 until compose exec -T opencode curl -sS -o /dev/null http://silverbullet:3000/ 2>/dev/null; do
