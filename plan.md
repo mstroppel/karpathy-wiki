@@ -3,28 +3,6 @@
 This plan lists only work that remains to be done. Deliver changes in small,
 independently deployable PRs.
 
-## Transactional ingestion and publishing — [#44](https://github.com/mstroppel/karpathy-wiki/issues/44)
-
-1. Add a serialized publisher using isolated Git worktrees. Validate patch
-   paths, provenance, schema and content; reject or explicitly rebase and
-   revalidate stale-base patches. Record the source generation, wiki base,
-   model/job identity, validation result and resulting commit for each
-   publication.
-2. Move model work to restricted workers that read immutable source generations
-   and wiki base revisions and return patches. Workers must not commit,
-   publish, contact source systems or make arbitrary outbound requests; route
-   model traffic through an allowlisted gateway with size, timeout and spend
-   limits.
-3. Atomically serve complete published wiki revisions in SilverBullet.
-4. Put application services on private networks, expose only an authenticated
-   gateway on the external proxy network, and use service credentials for
-   internal API calls.
-5. Test concurrent and duplicate jobs, worker and validation failures, stale
-   bases, publisher restart and recovery, publication, serving and rollback.
-   Document backup and restore for state, Git, manifests, configuration and
-   credentials; verify a restore. Document manual upgrade and rollback steps
-   for installations whose data layout changes.
-
 ## Supporting work
 
 ### [#108](https://github.com/mstroppel/karpathy-wiki/issues/108): Isolate wiki-agent shell execution
@@ -39,8 +17,7 @@ accurate command failures in an integration test.
 ### [#26](https://github.com/mstroppel/karpathy-wiki/issues/26): Finish operational test coverage
 
 Report coverage in CI and exercise successful ingest-to-wiki publication in a
-disposable-service integration test. Expand failure and restart scenarios as
-the publisher and worker boundaries are introduced.
+disposable-service integration test.
 
 ### [#28](https://github.com/mstroppel/karpathy-wiki/issues/28): Pin the shell toolchain
 
