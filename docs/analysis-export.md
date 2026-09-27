@@ -19,6 +19,11 @@ just like a natural-language save request.
 This also adds the analysis to the wiki index and log, making it available as
 wiki knowledge. It does not need a separate source-ingest pass: `wiki-ingest`
 handles external files under `/knowledge/sources`, not saved analyses.
+If a previous analysis came from a subagent and its tool result was shortened,
+the main agent must recover the complete saved tool output before delegating
+the save. If the full text cannot be recovered, saving stops instead of
+publishing an incomplete analysis. `/analysis` runs in the current conversation
+and avoids this subagent-result limit.
 
 The `wiki-analysis-save` skill then performs one focused commit that:
 
