@@ -20,47 +20,7 @@
         },
         {
           "action": "shell",
-          "resource": "git status*",
-          "effect": "allow"
-        },
-        {
-          "action": "shell",
-          "resource": "git diff*",
-          "effect": "allow"
-        },
-        {
-          "action": "shell",
-          "resource": "git log*",
-          "effect": "allow"
-        },
-        {
-          "action": "shell",
-          "resource": "git show*",
-          "effect": "allow"
-        },
-        {
-          "action": "shell",
-          "resource": "git rev-parse*",
-          "effect": "allow"
-        },
-        {
-          "action": "shell",
-          "resource": "git add *",
-          "effect": "allow"
-        },
-        {
-          "action": "shell",
-          "resource": "git mv *",
-          "effect": "allow"
-        },
-        {
-          "action": "shell",
-          "resource": "git rm *",
-          "effect": "allow"
-        },
-        {
-          "action": "shell",
-          "resource": "git commit *",
+          "resource": "*",
           "effect": "allow"
         }
       ]
@@ -74,13 +34,17 @@
           "action": "subagent",
           "resource": "*",
           "effect": "deny"
+        },
+        {
+          "action": "shell",
+          "resource": "*",
+          "effect": "allow"
         }
       ]
     },
     "wiki-analysis": {
       "description": "Analysiert Fragen anhand des Wikis und aktueller wissenschaftlicher Internetquellen.",
       "mode": "subagent",
-      "steps": 10,
       "system": "Bearbeite ausschließlich ausdrücklich angeforderte wissenschaftliche Analysen. Delegiere nicht erneut. Lade einmal den Skill wiki-analysis, befolge ihn vollständig und führe den Auftrag selbst aus.",
       "permissions": [
         {
@@ -109,6 +73,11 @@
           "action": "subagent",
           "resource": "*",
           "effect": "deny"
+        },
+        {
+          "action": "shell",
+          "resource": "*",
+          "effect": "allow"
         }
       ]
     }
@@ -157,6 +126,21 @@
       "effect": "allow"
     },
     {
+      "action": "read",
+      "resource": "*.env",
+      "effect": "deny"
+    },
+    {
+      "action": "read",
+      "resource": "*.env.*",
+      "effect": "deny"
+    },
+    {
+      "action": "read",
+      "resource": "*.env.example",
+      "effect": "allow"
+    },
+    {
       "action": "edit",
       "resource": "*",
       "effect": "allow"
@@ -178,12 +162,12 @@
     },
     {
       "action": "edit",
-      "resource": "/knowledge/raw/**",
+      "resource": "/home/opencode/.local/share/opencode/tool-output/**",
       "effect": "deny"
     },
     {
       "action": "edit",
-      "resource": "/home/opencode/.local/share/opencode/tool-output/**",
+      "resource": "/etc/opencode/skills/**",
       "effect": "deny"
     },
     {
@@ -248,107 +232,12 @@
     },
     {
       "action": "external_directory",
-      "resource": "/knowledge/raw/**",
-      "effect": "allow"
-    },
-    {
-      "action": "external_directory",
       "resource": "/home/opencode/.local/share/opencode/tool-output/**",
       "effect": "allow"
     },
     {
-      "action": "shell",
-      "resource": "stat *",
-      "effect": "allow"
-    },
-    {
-      "action": "shell",
-      "resource": "git status*",
-      "effect": "allow"
-    },
-    {
-      "action": "shell",
-      "resource": "git diff*",
-      "effect": "allow"
-    },
-    {
-      "action": "shell",
-      "resource": "git log*",
-      "effect": "allow"
-    },
-    {
-      "action": "shell",
-      "resource": "git show*",
-      "effect": "allow"
-    },
-    {
-      "action": "shell",
-      "resource": "git rev-parse*",
-      "effect": "allow"
-    },
-    {
-      "action": "shell",
-      "resource": "git add *",
-      "effect": "allow"
-    },
-    {
-      "action": "shell",
-      "resource": "git mv *",
-      "effect": "allow"
-    },
-    {
-      "action": "shell",
-      "resource": "git rm *",
-      "effect": "allow"
-    },
-    {
-      "action": "shell",
-      "resource": "git commit *",
-      "effect": "allow"
-    },
-    {
-      "action": "shell",
-      "resource": "git -C /knowledge/wiki status*",
-      "effect": "allow"
-    },
-    {
-      "action": "shell",
-      "resource": "git -C /knowledge/wiki diff*",
-      "effect": "allow"
-    },
-    {
-      "action": "shell",
-      "resource": "git -C /knowledge/wiki log*",
-      "effect": "allow"
-    },
-    {
-      "action": "shell",
-      "resource": "git -C /knowledge/wiki show*",
-      "effect": "allow"
-    },
-    {
-      "action": "shell",
-      "resource": "git -C /knowledge/wiki rev-parse*",
-      "effect": "allow"
-    },
-    {
-      "action": "shell",
-      "resource": "git -C /knowledge/wiki add *",
-      "effect": "allow"
-    },
-    {
-      "action": "shell",
-      "resource": "git -C /knowledge/wiki mv *",
-      "effect": "allow"
-    },
-    {
-      "action": "shell",
-      "resource": "git -C /knowledge/wiki rm *",
-      "effect": "allow"
-    },
-    {
-      "action": "shell",
-      "resource": "git -C /knowledge/wiki commit *",
+      "action": "external_directory",
+      "resource": "/etc/opencode/skills/wiki-analysis-save/**",
       "effect": "allow"
     }
   ]
