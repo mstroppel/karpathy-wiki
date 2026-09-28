@@ -46,7 +46,10 @@ jobs:
           node-version: "24"
       - name: Install pinned Python tooling
         run: python -m pip install -r requirements-dev.txt
-      # ShellCheck is preinstalled on the runner image; no archive download.
+      - name: Install pinned ShellCheck
+        run: |
+          scripts/install-shellcheck.sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Run lint and formatting checks
         run: scripts/lint.sh
 
