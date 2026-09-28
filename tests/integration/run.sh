@@ -123,6 +123,12 @@ compose up -d --wait --wait-timeout 240 opencode silverbullet answers-ingest \
 
 init_exit=$(docker inspect -f '{{.State.ExitCode}}' "$project_name-init-1" 2>/dev/null || true)
 [ "$init_exit" = "0" ] || fail "init did not complete successfully (exit: $init_exit)"
+compose exec -T opencode sh -c '
+  for file in index.md overview.md log.md .git/index; do
+    test -w "/knowledge/wiki/$file" || exit 1
+  done
+  test -w /knowledge/wiki/.git
+' || fail "opencode cannot write initialized wiki files or Git metadata"
 share_wiki_with_host || fail "cannot give the host runner access to initialized wiki files"
 
 i=0
