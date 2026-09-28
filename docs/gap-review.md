@@ -18,12 +18,16 @@ The confirmed Markdown Q&A is saved in
 its finding, affected pages, evidence, and attribution to the user. Unanswered
 questions and unresolved conflicts remain marked as open. The provider reads
 this inbox read-only, applies the configured local redaction rules, and writes
-immutable source revisions plus a versioned manifest under
+complete source revisions plus a versioned manifest under
 `${DATA_ROOT}/sources/answers`. The source tree is read-only to OpenCode;
 never copy or edit files there directly. The draft inbox remains private and
 is not served by SilverBullet or the raw-files profile. Like other deny-list
 redaction, unknown private values can remain; review the sanitized source
 before sending it to an external model provider.
+When a draft or the redaction rules change, the provider switches the manifest
+to the new revision and retires the old published revision; the original stays
+only in the private inbox. Published files and the manifest are readable by
+the configured instance group, not by other host users.
 
 The agent checks `wiki_ingest_status` for its submitted filename and passes
 the published source to `wiki-ingest`; only a completed wiki commit and

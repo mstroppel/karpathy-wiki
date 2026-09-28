@@ -23,6 +23,9 @@ def publish(inbox: Path, source_root: Path, redactions: Path) -> int:
     revisions = source_root / "revisions"
     revisions.mkdir(exist_ok=True)
     items: list[ManifestItem] = []
+    # Validate and redact the entire inbox in memory before exposing any new
+    # source file. A bad later draft cannot leak a valid earlier draft.
+    staged: dict[str, bytes] = {}
     for entry in sorted(inbox.iterdir()):
         if entry.is_symlink():
             raise ValueError("answer inbox contains a symlink")
@@ -41,20 +44,7 @@ def publish(inbox: Path, source_root: Path, redactions: Path) -> int:
         # Never mutate a published revision. A redaction change yields new bytes
         # and therefore a new immutable source path.
         relative = f"revisions/{entry.stem}-{revision}.md"
-        destination = revisions / f"{entry.stem}-{revision}.md"
-        if destination.exists():
-            if destination.is_symlink() or destination.read_bytes() != data:
-                raise ValueError("published answer revision differs from its hash")
-        else:
-            temporary = None
-            try:
-                with tempfile.NamedTemporaryFile(dir=revisions, delete=False) as output:
-                    temporary = Path(output.name)
-                    output.write(data)
-                os.link(temporary, destination)
-            finally:
-                if temporary is not None:
-                    temporary.unlink(missing_ok=True)
+        staged[f"{entry.stem}-{revision}.md"] = data
         items.append(
             ManifestItem(
                 source_key=entry.name,
@@ -77,7 +67,42 @@ def publish(inbox: Path, source_root: Path, redactions: Path) -> int:
         previous_keys = {item["source_key"] for item in previous["items"]}
         if previous_keys - {item.source_key for item in items}:
             raise ValueError("published answer is missing from the inbox")
-    write_manifest(manifest_path, build_manifest("answers", items, wiki_root="answers"))
+    manifest = build_manifest("answers", items, wiki_root="answers")
+    added: list[Path] = []
+    try:
+        for filename, data in staged.items():
+            destination = revisions / filename
+            if destination.exists():
+                if destination.is_symlink() or destination.read_bytes() != data:
+                    raise ValueError("published answer revision differs from its hash")
+                continue
+            temporary = None
+            try:
+                with tempfile.NamedTemporaryFile(dir=revisions, delete=False) as output:
+                    temporary = Path(output.name)
+                    os.fchmod(output.fileno(), 0o640)
+                    output.write(data)
+                os.link(temporary, destination)
+                added.append(destination)
+            finally:
+                if temporary is not None:
+                    temporary.unlink(missing_ok=True)
+        # The manifest is the commit point; every item is already complete.
+        # Group read access is installed before the atomic rename so the
+        # status scanner can read every newly published manifest.
+        write_manifest(manifest_path, manifest, mode=0o640)
+    except Exception:
+        for destination in added:
+            destination.unlink(missing_ok=True)
+        raise
+
+    # Retire superseded revisions only after the manifest switch. In
+    # particular, a later redaction update removes the old, less-redacted
+    # bytes from the published tree; the original remains in the private inbox.
+    active = set(staged)
+    for entry in revisions.iterdir():
+        if entry.name not in active:
+            entry.unlink()
     return len(items)
 
 

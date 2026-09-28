@@ -1,9 +1,11 @@
 """Answer inbox publication and source-tracking boundary."""
 
 import json
+import stat
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from karpathy_wiki_ingest.answers import publish
 from karpathy_wiki_ingest.manifest import validate_manifest
@@ -34,6 +36,8 @@ class AnswerPublicationTests(unittest.TestCase):
         self.assertEqual(item["source_key"], "review-1.md")
         self.assertEqual(item["wiki_path"], "answers/review-1/index.md")
         self.assertEqual(self.manifest()["wiki_root"], "answers")
+        self.assertEqual(stat.S_IMODE((self.sources / "manifest.json").stat().st_mode), 0o640)
+        self.assertEqual(stat.S_IMODE((self.sources / item["source_path"]).stat().st_mode), 0o640)
         source = (self.sources / item["source_path"]).read_text()
         self.assertIn("[PERSON]", source)
         self.assertNotIn("Ada Lovelace", source)
@@ -46,7 +50,7 @@ class AnswerPublicationTests(unittest.TestCase):
         publish(self.inbox, self.sources, self.redactions)
         updated = self.manifest()["items"][0]
         self.assertNotEqual(updated["source_revision"], item["source_revision"])
-        self.assertTrue((self.sources / item["source_path"]).exists())
+        self.assertFalse((self.sources / item["source_path"]).exists())
 
     def test_rejected_draft_and_missing_draft_keep_last_publication(self):
         draft = self.inbox / "review-1.md"
@@ -57,6 +61,7 @@ class AnswerPublicationTests(unittest.TestCase):
         with self.assertRaises(UnicodeError):
             publish(self.inbox, self.sources, self.redactions)
         self.assertEqual(previous, (self.sources / "manifest.json").read_bytes())
+        self.assertEqual(len(list((self.sources / "revisions").iterdir())), 1)
         (self.inbox / "bad.md").unlink()
         draft.unlink()
         with self.assertRaisesRegex(ValueError, "missing"):
@@ -72,6 +77,7 @@ class AnswerPublicationTests(unittest.TestCase):
         )
         publish(self.inbox, self.sources, self.redactions)
         self.assertNotEqual(self.manifest()["items"][0]["source_revision"], previous)
+        self.assertEqual(len(list((self.sources / "revisions").iterdir())), 1)
         (self.inbox / "review-2.md").symlink_to(self.inbox / "review-1.md")
         with self.assertRaisesRegex(ValueError, "symlink"):
             publish(self.inbox, self.sources, self.redactions)
@@ -81,6 +87,26 @@ class AnswerPublicationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "incomplete"):
             publish(self.inbox, self.sources, self.redactions)
         self.assertFalse((self.sources / "manifest.json").exists())
+
+    def test_later_invalid_draft_does_not_expose_earlier_valid_revision(self):
+        (self.inbox / "b.md").write_text("Private reply\n<!-- END CONFIRMED ANSWERS -->")
+        (self.inbox / "z.md").write_text("Unfinished reply")
+        with self.assertRaisesRegex(ValueError, "incomplete"):
+            publish(self.inbox, self.sources, self.redactions)
+        self.assertEqual(list((self.sources / "revisions").iterdir()), [])
+        self.assertFalse((self.sources / "manifest.json").exists())
+
+    def test_manifest_write_failure_rolls_back_new_revision(self):
+        draft = self.inbox / "review-1.md"
+        draft.write_text("First reply\n<!-- END CONFIRMED ANSWERS -->")
+        publish(self.inbox, self.sources, self.redactions)
+        previous = self.manifest()["items"][0]
+        draft.write_text("Revised reply\n<!-- END CONFIRMED ANSWERS -->")
+        with patch("karpathy_wiki_ingest.answers.write_manifest", side_effect=OSError("disk")):
+            with self.assertRaises(OSError):
+                publish(self.inbox, self.sources, self.redactions)
+        self.assertEqual(self.manifest()["items"][0], previous)
+        self.assertEqual(len(list((self.sources / "revisions").iterdir())), 1)
 
 
 if __name__ == "__main__":

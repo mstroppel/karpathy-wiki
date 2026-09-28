@@ -41,8 +41,9 @@ Voraussetzung: Das Compose-Profil `answers` ist aktiv und der lokale Anbieter
 `answers-ingest` läuft. Wenn nicht, erkläre das Aktivieren
 (`COMPOSE_PROFILES=answers`, optional neben anderen Profilen) und halte den
 bestätigten Gesprächsstand fest, statt einen alternativen Quellenpfad zu
-beschreiben. Lies vorhandene Dateien im Eingang, bevor du einen neuen Namen
-wählst; ändere oder lösche nie vorhandene Entwürfe. Lege **nur nach Bestätigung**
+beschreiben. Liste im Eingang nur Dateinamen mit `glob` auf; lies niemals
+vorhandene Antwortentwürfe oder deren Inhalt. Wähle einen kollisionsarmen,
+eindeutigen Namen und ändere oder lösche nie vorhandene Entwürfe. Lege **nur nach Bestätigung**
 eine neue Markdown-Datei mit eindeutigem kleingeschriebenem Kebab-Case-Namen
 unter `/knowledge/incoming/answers/<name>.md` an. Der Eingang ist privat und
 kein Wiki-Inhalt. Nenne pro beantworteter Frage die Nummer, den Befund, die

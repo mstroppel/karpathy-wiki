@@ -54,6 +54,7 @@ test('confirmed answer travels through the provider manifest and wiki status', a
     status = await scan()
     assert.equal(status.adapters.answers.outdated.length, 1)
     assert.equal(status.summary.invalid, 0)
+    await assert.rejects(readFile(record.source_path, 'utf8'), { code: 'ENOENT' })
   } finally {
     await rm(root, { recursive: true, force: true })
   }
