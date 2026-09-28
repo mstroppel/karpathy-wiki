@@ -217,3 +217,7 @@ if ! wiki_git rev-parse --verify HEAD >/dev/null 2>&1; then
   wiki_git add -A
   wiki_git -c commit.gpgsign=false commit -m "chore(wiki): wiki initialisieren"
 fi
+
+# The bootstrap files and Git metadata above are created by root. Hand the
+# finished wiki back to the identity used by the OpenCode service.
+chown -R "$PUID:$PGID" "$wiki"
