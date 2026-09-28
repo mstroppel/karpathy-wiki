@@ -55,6 +55,39 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  answers-ingest:
+    image: ghcr.io/mstroppel/karpathy-wiki-ingest:${KARPATHY_WIKI_VERSION:-latest}
+    profiles: ["answers"]
+    user: "${PUID:-1000}:${PGID:-1000}"
+    restart: unless-stopped
+    entrypoint: ["python", "-m", "karpathy_wiki_ingest.answers"]
+    environment:
+      REDACTIONS_FILE: /run/secrets/redactions
+      HEALTH_PATH: /tmp/health.json
+      ANSWERS_SYNC_INTERVAL: ${ANSWERS_SYNC_INTERVAL:-15}
+      SYNC_INTERVAL_SECONDS: ${ANSWERS_SYNC_INTERVAL:-15}
+    volumes:
+      - ${DATA_ROOT:-./data}/incoming/answers:/data/incoming/answers:ro
+      - ${DATA_ROOT:-./data}/sources/answers:/data/sanitized/answers:rw
+    secrets:
+      - redactions
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    read_only: true
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test: ["CMD", "python", "-m", "karpathy_wiki_ingest.health"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
+      start_period: 1m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
   paperless-ingest:
     image: ghcr.io/mstroppel/karpathy-wiki-ingest-paperless:${KARPATHY_WIKI_VERSION:-latest}
     profiles: ["paperless"]
@@ -115,6 +148,7 @@ services:
       GIT_CONFIG_VALUE_0: /dev/null
     volumes:
       - ${DATA_ROOT:-./data}/sources:/knowledge/sources:ro
+      - ${DATA_ROOT:-./data}/incoming/answers:/knowledge/incoming/answers:rw
       - ${DATA_ROOT:-./data}/wiki:/knowledge/wiki:rw
       - ${DATA_ROOT:-./data}/opencode/config:/home/opencode/.config/opencode:rw
       - ${DATA_ROOT:-./data}/opencode/data:/home/opencode/.local/share/opencode:rw

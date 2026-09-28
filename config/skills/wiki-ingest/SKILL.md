@@ -24,7 +24,11 @@ auf. Lies `AGENTS.md` und vor Änderungen Git-Status und Historie sowie `index.m
    als YAML; erhalte bestehende Felder. Nenne den exakten Quellpfad und
    Fundstellen. Bei `paperless_url`: HTTPS-Feld erhalten und im Seitentext als
    klickbaren Originallink anzeigen. Integriere belegte Aussagen in betroffene
-   Wiki-Seiten; kennzeichne Unsicherheit und Widersprüche.
+   Wiki-Seiten; kennzeichne Unsicherheit und Widersprüche. Bei `answers`:
+   Nutzerantworten als solche und nicht als unabhängige Belege kennzeichnen;
+   verknüpfte Fragennummern, Befunde und betroffene Wiki-Seiten nachführen.
+   Übersprungene, zurückgestellte oder unsichere Antworten nicht als geklärte
+   Tatsachen übernehmen; verbleibende Konflikte ausdrücklich melden.
 3. Aktualisiere `overview.md`, `index.md` und `log.md`. Prüfe Diff, Links und
    Herkunftsnachweise; committe genau einmal pro Quelle. Melde Erfolg erst
    nach dem Commit mit Hash, Quellpfad, geänderten Seiten und offenen Lücken.

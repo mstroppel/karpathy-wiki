@@ -14,6 +14,7 @@ WebDAV ------- rclone -> local redaction -> sources/webdav/ ------+
                            atomic current switch)                 |
 Paperless ---- local redaction (optional) -> sources/paperless/ --+--> OpenCode
                                         (coherent generations)      |
+Confirmed Q&A -> local inbox -> local redaction -> sources/answers/ -+
                                                                         |
                                                                         v
                                                                    wiki/ + Git
