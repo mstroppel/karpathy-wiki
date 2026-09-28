@@ -42,6 +42,7 @@ test('confirmed answer travels through the provider manifest and wiki status', a
     assert.equal(status.summary.conflict, 0)
     const record = status.adapters.answers.new[0]
     assert.equal(record.source_key, 'review-1.md')
+    assert.equal(record.wiki_path, path.join(wikiSourceRoot, 'answers', 'review-1', 'index.md'))
     assert.ok((await readFile(record.source_path, 'utf8')).includes('[PERSON]'))
     const fields = Object.entries(record.frontmatter)
       .map(([key, value]) => `${key}: ${JSON.stringify(value)}`)

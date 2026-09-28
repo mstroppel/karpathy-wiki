@@ -82,6 +82,9 @@ fi
 # Git rejects repositories owned by another identity. Correct the configured
 # data tree before inspecting it; later services run as this ID.
 chown -R "$PUID:$PGID" "$KNOWLEDGE_ROOT"
+# Drafts can contain unredacted answers. Keep the inbox traversable only by
+# the configured user, including when init is rerun on an existing data tree.
+chmod 0700 "$KNOWLEDGE_ROOT/incoming/answers"
 
 # Install generated files through a hard link so an existing path, including a
 # concurrently created path, can never be replaced.

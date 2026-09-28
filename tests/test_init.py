@@ -1,5 +1,6 @@
 import json
 import os
+import stat
 import subprocess
 import tempfile
 import unittest
@@ -83,6 +84,14 @@ class InitTests(unittest.TestCase):
             self.assertTrue((root / "sources" / "answers").is_dir())
             self.assertTrue((root / "wiki" / "sources" / "answers").is_dir())
             self.assertIn("/knowledge/incoming/answers", (root / "wiki" / "AGENTS.md").read_text())
+            inbox = root / "incoming" / "answers"
+            self.assertEqual(stat.S_IMODE(inbox.stat().st_mode), 0o700)
+            self.assertEqual(inbox.stat().st_uid, os.getuid())
+            inbox.chmod(0o755)
+            (inbox / "existing.md").write_text("retained draft")
+            self.run_init(root, COMPOSE_PROFILES="answers")
+            self.assertEqual(stat.S_IMODE(inbox.stat().st_mode), 0o700)
+            self.assertEqual((inbox / "existing.md").read_text(), "retained draft")
 
     def test_existing_content_is_never_overwritten(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -12,6 +12,7 @@ assert.equal(status.summary.invalid, 0, JSON.stringify(status.summary))
 assert.equal(status.summary.conflict, 0, JSON.stringify(status.summary))
 const record = status.adapters.answers[expected][0]
 assert.equal(record.source_key, 'review-1.md')
+assert.equal(record.wiki_path, path.join(wikiSourceRoot, 'answers', 'review-1', 'index.md'))
 const content = await readFile(record.source_path, 'utf8')
 assert.ok(content.includes('[PERSON_1]'))
 assert.ok(!content.includes('Max Mustermann'))
