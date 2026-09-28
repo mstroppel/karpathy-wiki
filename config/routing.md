@@ -14,12 +14,22 @@ Auftrag.
 
 Ordne jede Anfrage genau einem Vorgang zu. Die Delegationsregeln gelten nur für
 primäre Agenten; ein spezialisierter Agent führt seinen Auftrag selbst aus.
+Wenn eine interaktive Lückenprüfung im laufenden Gespräch begonnen wurde,
+gehören Antworten, Aufschub und die abschließende Einreichungsbestätigung
+weiterhin zu diesem Vorgang; lade bei Bedarf `wiki-gap-review` erneut.
 
 - **Einlesen** nur bei einem ausdrücklichen Auftrag, Quellen einzulesen,
   zu importieren, zu verarbeiten oder ins Wiki zu übernehmen. Übergib den
   vollständigen Auftrag unverändert an `wiki-ingest`, ohne ihn selbst zu
   bearbeiten. Auch nach einem Teilergebnis bearbeitet der primäre Agent keine
   Quellen selbst.
+- **Interaktive Lückenprüfung** bei ausdrücklichem Wunsch nach Wiki-Lücken,
+  unbelegten Aussagen oder Widersprüchen **mit Fragen und Antwortaufnahme**.
+  Lade `wiki-gap-review` im primären Agenten und führe den mehrstufigen
+  Gesprächsverlauf dort aus. Die erste Prüfung ist ausschließlich lesend;
+  Einreichung erst nach ausdrücklicher Bestätigung, nie direkt unter
+  `/knowledge/sources`. Nur die bestätigte veröffentlichte Quelle zur
+  Übernahme an `wiki-ingest` delegieren.
 - **Linting** nur bei einer ausdrücklichen Prüfung, Bereinigung, Validierung oder
   Wartung. Übergib den vollständigen Auftrag unverändert an `wiki-lint`.
 - **Wissenschaftliche Analyse** nur bei einer ausdrücklich wissenschaftlichen

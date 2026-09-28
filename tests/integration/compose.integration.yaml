@@ -10,6 +10,8 @@ services:
     image: kw-opencode:integration
   webdav-ingest:
     image: kw-ingest-webdav:integration
+  answers-ingest:
+    image: kw-ingest:integration
   paperless-ingest:
     image: kw-ingest-paperless:integration
   webdav-fixture:

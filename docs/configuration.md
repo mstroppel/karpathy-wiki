@@ -37,12 +37,14 @@ browser.
 Select optional services with a comma-separated value:
 
 ```env
-COMPOSE_PROFILES=webdav,paperless,raw-files
+COMPOSE_PROFILES=webdav,paperless,answers,raw-files
 ```
 
 An installation can run without source providers and receive files through a
 separate trusted process. When the `paperless` profile is active, initialization
 automatically installs the corresponding wiki rules and directories.
+The `answers` profile starts the local answer provider for
+[`/gap-review`](gap-review.md) and uses the shared `REDACTIONS_FILE`.
 
 Ingest tracking discovers sources from directories below `/knowledge/sources`.
 A directory is compared against its provider manifest (`manifest.json`), which

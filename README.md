@@ -89,6 +89,16 @@ and a print-optimized HTML view at `WIKI_PUBLIC_URL/.fs/assets/analyses/<slug>.h
 from which the browser's print dialog produces a shareable PDF. See
 [analysis export](docs/analysis-export.md).
 
+## Interactive gap review
+
+Enable the `answers` profile, then run `/gap-review` in OpenCode to review
+unsupported claims, contradictions, missing information, and stale syntheses.
+Answer or defer its numbered questions across turns. Only after you confirm
+the proposed answers does OpenCode submit a Markdown Q&A draft to the local
+answer inbox. The provider locally redacts and publishes it as a tracked
+source, which the normal wiki ingest flow uses to update the wiki. See
+[gap review](docs/gap-review.md) for setup and the submission boundary.
+
 ## Profiles
 
 Set `COMPOSE_PROFILES` in `.env`; profiles can be enabled independently:
@@ -96,6 +106,7 @@ Set `COMPOSE_PROFILES` in `.env`; profiles can be enabled independently:
 | Profile | Purpose |
 | --- | --- |
 | `webdav` | Mirror and locally redact a selected WebDAV folder |
+| `answers` | Publish confirmed Q&A drafts from the local answer inbox |
 | `paperless` | Export tagged OCR text and redact configured personal data |
 | `raw-files` | Expose source files to a trusted reverse proxy |
 
@@ -146,14 +157,15 @@ npm ci
 scripts/install-shellcheck.sh  # add ~/.local/bin to PATH if needed; Linux x86_64
 scripts/lint.sh
 scripts/test-python.sh
-node --test tests/test_wiki_ingest_status.mjs tests/test_contract_fixtures.mjs
+node --test tests/test_wiki_ingest_status.mjs tests/test_contract_fixtures.mjs tests/test_answer_intake.mjs
 tests/integration/run.sh  # requires Docker; disposable Compose stack test
 ```
 
 The integration runner builds local images and starts a temporary Compose
 project with a disposable WebDAV upstream. It verifies redaction, manifest
 publication, the status scanner's `new → current → outdated → current` path,
-and restart/failure health behavior. A deterministic test page exercises the
+the local confirmed-answer inbox and provider, and restart/failure health
+behavior. A deterministic test page exercises the
 source-to-wiki contract; model-driven wiki publication and the future
 publisher/worker pipeline are not part of this suite yet. It also checks that
 one-shot Paperless fails against an unreachable disposable endpoint. The

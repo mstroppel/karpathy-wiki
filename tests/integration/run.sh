@@ -91,7 +91,7 @@ PUID=1000
 PGID=$(id -g)
 WEBPROXY_NETWORK=$network_name
 KARPATHY_WIKI_VERSION=integration
-COMPOSE_PROFILES=webdav
+COMPOSE_PROFILES=webdav,answers
 PAPERLESS_TOKEN_FILE=$scratch_dir/secrets/paperless-token
 REDACTIONS_FILE=$scratch_dir/secrets/redactions.json
 PAPERLESS_SOURCE_TAG_ID=5
@@ -108,6 +108,8 @@ docker build -q -t kw-opencode:integration -f opencode/Dockerfile . \
   || fail "cannot build the opencode image"
 docker build -q -t kw-ingest-webdav:integration --target webdav ingest/ \
   || fail "cannot build the webdav ingest image"
+docker build -q -t kw-ingest:integration --target core ingest/ \
+  || fail "cannot build the core ingest image"
 docker build -q -t kw-ingest-paperless:integration --target paperless ingest/ \
   || fail "cannot build the paperless ingest image"
 obscured_password=$(docker run --rm --entrypoint rclone kw-ingest-webdav:integration obscure integration-only) \
@@ -116,7 +118,7 @@ printf 'WEBDAV_PASSWORD_OBSCURED=%s\n' "$obscured_password" >>"$env_file"
 
 # ---------------------------------------------------------------- startup
 printf 'compose-integration: starting the stack\n'
-compose up -d --wait --wait-timeout 240 opencode silverbullet \
+compose up -d --wait --wait-timeout 240 opencode silverbullet answers-ingest \
   || fail "opencode/silverbullet did not start"
 
 init_exit=$(docker inspect -f '{{.State.ExitCode}}' "$project_name-init-1" 2>/dev/null || true)
@@ -178,6 +180,24 @@ if grep -R -F 'Max Mustermann' "$scratch_dir/data/sources" "$scratch_dir/data/wi
 fi
 printf 'compose-integration: publication OK\n'
 
+# ------------------------------------------------------- confirmed answer intake
+compose exec -T opencode sh -c 'printf "# Answers\n\n1. Max Mustermann confirmed the result.\n\n<!-- END CONFIRMED ANSWERS -->\n" > /knowledge/incoming/answers/review-1.md' \
+  || fail "opencode cannot write to the private answer inbox"
+i=0
+until node tests/integration/answer-publication.mjs "$scratch_dir/data" new >/dev/null 2>&1; do
+  i=$((i + 1))
+  [ "$i" -lt 30 ] || fail "answer provider did not publish the confirmed draft"
+  sleep 2
+done
+share_wiki_with_host || fail "cannot access the answer source and wiki"
+node tests/integration/answer-publication.mjs "$scratch_dir/data" new publish \
+  || fail "answer source did not become a current wiki page"
+wiki_git add sources/answers/review-1/index.md
+wiki_git -c commit.gpgsign=false commit -m "docs(wiki): import confirmed answer" \
+  || fail "cannot commit the answer source page"
+node tests/integration/answer-publication.mjs "$scratch_dir/data" current \
+  || fail "confirmed answer is not current"
+
 # ------------------------------------------------------------- webdav health
 printf 'compose-integration: checking ingest daemon lifecycle and health\n'
 compose up -d webdav-ingest || fail "cannot start webdav-ingest"
@@ -228,7 +248,7 @@ done
 printf 'compose-integration: restart OK\n'
 node tests/integration/publication.mjs "$scratch_dir/data" current \
   || fail "publication did not survive opencode restart"
-[ "$(wiki_git rev-list --count HEAD)" -eq 3 ] \
+[ "$(wiki_git rev-list --count HEAD)" -eq 4 ] \
   || fail "wiki Git history changed after opencode restart"
 
 # ----------------------------------------------------------------- failure

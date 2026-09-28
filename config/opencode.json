@@ -112,6 +112,12 @@
       "agent": "build",
       "subagent": false,
       "template": "Nimm die fertige Analyse ins Wiki auf (Seite, Index, Log und Druckansicht): Finde im bisherigen Gespräch die letzte vollständige Analyse einschließlich späterer Korrekturen. Falls der folgende Auftrag selbst einen vollständigen Analysetext enthält, verwende stattdessen diesen. Prüfe bei einer Analyse aus einem Subagenten-Ergebnis auf Kürzungsmarker ([showing ...; full output saved to ...]). Lies in diesem Fall die vollständige gespeicherte Tool-Ausgabe stückweise über den read-Befehl; wenn sie nicht vollständig wiederherstellbar ist, speichere nichts und melde den Grund. Übergib nur den vollständigen zu speichernden Text an den Subagenten wiki-analysis-save, nicht nur einen Verweis auf das Gespräch. Ist keine fertige Analyse vorhanden, speichere nichts und melde das. Auftrag: $ARGUMENTS"
+    },
+    "gap-review": {
+      "description": "Wiki-Lücken prüfen, Fragen beantworten und bestätigte Antworten einreichen",
+      "agent": "build",
+      "subagent": false,
+      "template": "Lade den Skill wiki-gap-review und führe eine interaktive Lückenprüfung durch. Prüfe zunächst ausschließlich lesend; halte nummerierte Fragen und Antworten über die weiteren Gesprächsrunden fest. Reiche erst nach ausdrücklicher Bestätigung bestätigte Antworten über den lokalen Eingang und den Anbieter ein. Auftrag: $ARGUMENTS"
     }
   },
   "permissions": [
@@ -212,6 +218,11 @@
     },
     {
       "action": "skill",
+      "resource": "wiki-gap-review",
+      "effect": "allow"
+    },
+    {
+      "action": "skill",
       "resource": "wiki-ingest",
       "effect": "allow"
     },
@@ -223,6 +234,11 @@
     {
       "action": "wiki_ingest_status",
       "resource": "*",
+      "effect": "allow"
+    },
+    {
+      "action": "external_directory",
+      "resource": "/knowledge/incoming/answers/**",
       "effect": "allow"
     },
     {

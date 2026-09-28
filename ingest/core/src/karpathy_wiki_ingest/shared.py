@@ -442,10 +442,12 @@ def canonical_phone(value: str) -> str:
     return digits
 
 
-def atomic_write(path: Path, content: str) -> None:
+def atomic_write(path: Path, content: str, mode: int | None = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
     try:
+        if mode is not None:
+            os.fchmod(descriptor, mode)
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
             handle.write(content)
             handle.flush()

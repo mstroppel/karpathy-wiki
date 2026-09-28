@@ -180,9 +180,10 @@ def build_manifest(
     return manifest
 
 
-def write_manifest(path: Path, manifest: dict[str, Any]) -> None:
+def write_manifest(path: Path, manifest: dict[str, Any], mode: int | None = None) -> None:
     """Persist the manifest atomically; the scanner tolerates concurrent reads."""
     atomic_write(
         path,
         json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+        mode=mode,
     )

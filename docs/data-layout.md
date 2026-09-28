@@ -7,8 +7,10 @@ contains the launcher, `.env`, optional secrets, and local Compose adoptions.
 ${DATA_ROOT}/
 ├── sources/
 │   ├── webdav/             # Published WebDAV generations (current + generations/)
+│   ├── answers/            # Published locally redacted Q&A source revisions
 │   └── paperless/          # Published Paperless generations (current + generations/)
 ├── wiki/                   # SilverBullet space and independent Git repository
+├── incoming/answers/       # Confirmed Q&A drafts, private to OpenCode and answer provider
 ├── state/
 │   └── ingest.sqlite3      # Durable ingest jobs, leases, generations, publications
 ├── quarantine/

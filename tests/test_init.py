@@ -1,5 +1,6 @@
 import json
 import os
+import stat
 import subprocess
 import tempfile
 import unittest
@@ -61,6 +62,8 @@ class InitTests(unittest.TestCase):
             self.assertIn("https://wiki.example.test/<pfad-ohne-.md>", agents)
             self.assertIn("wiki-analysis-save", agents)
             self.assertFalse((root / "sources" / "paperless").exists())
+            self.assertFalse((root / "sources" / "answers").exists())
+            self.assertTrue((root / "incoming" / "answers").is_dir())
             self.assertTrue((root / "sources" / "webdav").is_dir())
             self.assertTrue((root / "wiki" / ".git").is_dir())
             self.assertFalse((root / "exports").exists())
@@ -73,6 +76,22 @@ class InitTests(unittest.TestCase):
                 text=True,
             ).strip()
             self.assertEqual(author, "Wiki Agent <wiki@example.test>")
+
+    def test_answers_profile_creates_only_the_provider_source_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "knowledge"
+            self.run_init(root, COMPOSE_PROFILES="webdav, answers")
+            self.assertTrue((root / "sources" / "answers").is_dir())
+            self.assertTrue((root / "wiki" / "sources" / "answers").is_dir())
+            self.assertIn("/knowledge/incoming/answers", (root / "wiki" / "AGENTS.md").read_text())
+            inbox = root / "incoming" / "answers"
+            self.assertEqual(stat.S_IMODE(inbox.stat().st_mode), 0o700)
+            self.assertEqual(inbox.stat().st_uid, os.getuid())
+            inbox.chmod(0o755)
+            (inbox / "existing.md").write_text("retained draft")
+            self.run_init(root, COMPOSE_PROFILES="answers")
+            self.assertEqual(stat.S_IMODE(inbox.stat().st_mode), 0o700)
+            self.assertEqual((inbox / "existing.md").read_text(), "retained draft")
 
     def test_existing_content_is_never_overwritten(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -190,6 +209,11 @@ class ConfigTests(unittest.TestCase):
             ["deny"],
         )
         self.assertEqual(rules[("skill", "wiki-analysis-save")], "allow")
+        self.assertEqual(rules[("skill", "wiki-gap-review")], "allow")
+        self.assertEqual(rules[("edit", "/knowledge/sources/**")], "deny")
+        self.assertEqual(rules[("external_directory", "/knowledge/incoming/answers/**")], "allow")
+        self.assertEqual(config["commands"]["gap-review"]["agent"], "build")
+        self.assertFalse(config["commands"]["gap-review"]["subagent"])
         generic_status = "".join(
             path.read_text().lower()
             for path in (
@@ -204,7 +228,8 @@ class ConfigTests(unittest.TestCase):
         skills = ROOT / "config" / "skills"
         directories = sorted(path.name for path in skills.iterdir() if path.is_dir())
         self.assertEqual(
-            directories, ["wiki-analysis", "wiki-analysis-save", "wiki-ingest", "wiki-lint"]
+            directories,
+            ["wiki-analysis", "wiki-analysis-save", "wiki-gap-review", "wiki-ingest", "wiki-lint"],
         )
         for directory in directories:
             text = (skills / directory / "SKILL.md").read_text()
