@@ -15,10 +15,14 @@ selected WebDAV folder (audio extensions only)
   -> audio connector: rclone to private incoming/audio snapshots
   -> audio worker: decode, transcribe, optionally diarize, redact
   -> sources/audio: immutable sanitized generation + v1 manifest
-  -> wiki_ingest_status / wiki-ingest -> wiki/sources/audio/...
+  -> wiki_ingest_status / wiki-ingest (/ingest-new) -> wiki/sources/audio/...
 ```
 
-1. Add an opt-in `audio` profile. Its WebDAV connector uses the existing
+1. Deliver the audio provider as an ingest plugin per
+   [ingest modules](ingest-modules.md): its own distribution and image built
+   on the shared core, dispatched through `python -m karpathy_wiki_ingest`,
+   publishing the versioned provider manifest like the built-in plugins.
+   Add an opt-in `audio` profile. Its WebDAV connector uses the existing
    WebDAV credentials but keeps its own private raw-audio directory; it does
    not change the Markdown-only WebDAV provider or publish raw files under
    `sources/`. Sync a complete inventory to a private snapshot before making
