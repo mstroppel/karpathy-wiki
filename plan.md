@@ -3,7 +3,26 @@
 This plan lists only work that remains to be done. Deliver changes in small,
 independently deployable PRs.
 
-## User-facing extensions
+## Current priorities
+
+### [#15](https://github.com/mstroppel/karpathy-wiki/issues/15): Audio ingest
+
+See [audio ingest concept](docs/audio-ingest-concept.md) for the proposed
+WebDAV, local transcription, speaker diarization and publication boundaries.
+
+1. Add an audio provider using the versioned manifest contract and discover
+   WebDAV audio files idempotently by hash.
+2. Use a replaceable transcription backend with optional speaker diarization;
+   emit Markdown with timestamps, speaker labels and provenance.
+3. Anonymize transcripts before publication. Make external transcription
+   opt-in and explicitly configured. Keep transcription reusable by other
+   providers, including email ingest.
+
+### [#26](https://github.com/mstroppel/karpathy-wiki/issues/26): Integration coverage
+
+Reassess the remaining acceptance criteria against the coverage reporting and
+disposable source-to-wiki test added in #119. Cover any remaining operational
+failure or restart gap with a focused test, then update or close the issue.
 
 ### [#18](https://github.com/mstroppel/karpathy-wiki/issues/18): Multi-language support
 
@@ -14,15 +33,7 @@ independently deployable PRs.
    them implicitly.
 4. Test German, English and unsupported-locale fallbacks.
 
-### [#15](https://github.com/mstroppel/karpathy-wiki/issues/15): Audio ingest
-
-1. Add an audio provider using the versioned manifest contract and discover
-   WebDAV audio files idempotently by hash.
-2. Use a replaceable transcription backend with optional speaker diarization;
-   emit Markdown with timestamps, speaker labels and provenance.
-3. Anonymize transcripts before publication. Make external transcription
-   opt-in and explicitly configured. Keep transcription reusable by other
-   providers, including email ingest.
+## Further user-facing extensions
 
 ### [#78](https://github.com/mstroppel/karpathy-wiki/issues/78): Email ingest
 
