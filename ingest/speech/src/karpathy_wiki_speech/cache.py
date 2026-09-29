@@ -1,0 +1,130 @@
+"""Speech cache and worker queue: the shared filesystem between provider and worker.
+
+The speech root holds private directories (never mounted into OpenCode or
+the wiki):
+
+``cache/``
+    structured, unredacted speech results keyed by audio SHA-256 plus the
+    full processing key, plus a per-audio index mapping the requested
+    options to the newest result;
+``requests/``
+    provider submissions ``<request-id>.json`` (content-free, referencing an
+    audio file inside the private recordings store);
+``recordings/``
+    immutable per-audio-hash copies the worker transcribes.
+
+The audio provider owns requests + recordings; the worker processes each
+request, writes the result atomically into the cache, and deletes the
+request. Identical work replays from the cache; a changed worker image
+supersedes older results for the same options.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+from collections.abc import Mapping
+from pathlib import Path
+
+REQUESTS_DIRECTORY = "requests"
+CACHE_DIRECTORY = "cache"
+RECORDINGS_DIRECTORY = "recordings"
+FAILURES_DIRECTORY = "failures"
+HEALTH_FILENAME = "worker-health.json"
+
+REQUEST_ID_PATTERN = re.compile(r"^[a-f0-9]{64}-[a-f0-9]{64}$")
+
+
+def requests_dir(root: Path) -> Path:
+    return root / REQUESTS_DIRECTORY
+
+
+def cache_dir(root: Path) -> Path:
+    return root / CACHE_DIRECTORY
+
+
+def recordings_dir(root: Path) -> Path:
+    return root / RECORDINGS_DIRECTORY
+
+
+def failures_dir(root: Path) -> Path:
+    return root / FAILURES_DIRECTORY
+
+
+def request_id(audio_sha256: str, options_key: str) -> str:
+    """Deterministic request id: one queue entry per recording + options."""
+    return f"{audio_sha256}-{options_key}"
+
+
+def options_key(options: Mapping[str, object]) -> str:
+    """Cache/request key of the provider-requested options."""
+    encoded = json.dumps(
+        options,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def valid_request_id(value: str) -> bool:
+    return isinstance(value, str) and bool(REQUEST_ID_PATTERN.fullmatch(value))
+
+
+def request_path(root: Path, identifier: str) -> Path:
+    return requests_dir(root) / f"{identifier}.json"
+
+
+def cache_result_path(root: Path, identity: str) -> Path:
+    return cache_dir(root) / f"{identity}.json"
+
+
+def cache_index_path(root: Path, audio_sha256: str) -> Path:
+    return cache_dir(root) / f"{audio_sha256}.results.json"
+
+
+def failure_path(root: Path, audio_sha256: str, options_key: str) -> Path:
+    return failures_dir(root) / f"{audio_sha256}-{options_key}.json"
+
+
+def recording_path(root: Path, audio_sha256: str, extension: str) -> Path:
+    return recordings_dir(root) / audio_sha256[:2] / f"{audio_sha256}.{extension}"
+
+
+def load_index(root: Path, audio_sha256: str) -> list[dict[str, object]]:
+    """Per-audio index entries, newest last."""
+    try:
+        payload = json.loads(cache_index_path(root, audio_sha256).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    if not isinstance(payload, list):
+        return []
+    return [entry for entry in payload if isinstance(entry, dict)]
+
+
+def newest_index_entry(
+    root: Path,
+    audio_sha256: str,
+    options: Mapping[str, object],
+) -> dict[str, object] | None:
+    """The newest cached result for ``options`` (a changed worker supersedes)."""
+    key = options_key(options)
+    found: dict[str, object] | None = None
+    for entry in load_index(root, audio_sha256):
+        if entry.get("options_key") == key and isinstance(entry.get("identity"), str):
+            found = entry
+    return found
+
+
+def find_cached_result(
+    root: Path,
+    audio_sha256: str,
+    options: Mapping[str, object],
+) -> Path | None:
+    entry = newest_index_entry(root, audio_sha256, options)
+    if entry is None:
+        return None
+    identity = entry["identity"]
+    assert isinstance(identity, str)
+    return cache_result_path(root, identity)

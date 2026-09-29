@@ -15,15 +15,15 @@ variable "RCLONE_VERSION" {
 }
 
 group "default" {
-  targets = ["opencode", "ingest", "ingest-webdav", "ingest-paperless"]
+  targets = ["opencode", "ingest", "ingest-webdav", "ingest-audio", "ingest-speech", "ingest-paperless"]
 }
 
 group "release" {
-  targets = ["opencode-release", "ingest-release", "ingest-webdav-release", "ingest-paperless-release"]
+  targets = ["opencode-release", "ingest-release", "ingest-webdav-release", "ingest-audio-release", "ingest-speech-release", "ingest-paperless-release"]
 }
 
 group "stable" {
-  targets = ["opencode-stable", "ingest-stable", "ingest-webdav-stable", "ingest-paperless-stable"]
+  targets = ["opencode-stable", "ingest-stable", "ingest-webdav-stable", "ingest-audio-stable", "ingest-speech-stable", "ingest-paperless-stable"]
 }
 
 target "common" {
@@ -60,6 +60,26 @@ target "ingest-webdav" {
   tags = ["karpathy-wiki-ingest-webdav:test"]
 }
 
+target "ingest-audio" {
+  inherits = ["common"]
+  context = "ingest"
+  target = "audio"
+  args = {
+    RCLONE_VERSION = RCLONE_VERSION
+  }
+  tags = ["karpathy-wiki-ingest-audio:test"]
+}
+
+target "ingest-speech" {
+  inherits = ["common"]
+  context = "ingest"
+  target = "speech"
+  args = {
+    RCLONE_VERSION = RCLONE_VERSION
+  }
+  tags = ["karpathy-wiki-ingest-speech:test"]
+}
+
 target "ingest-paperless" {
   inherits = ["common"]
   context = "ingest"
@@ -85,6 +105,16 @@ target "ingest-webdav-release" {
   tags = ["${REGISTRY}/karpathy-wiki-ingest-webdav:${IMAGE_VERSION}"]
 }
 
+target "ingest-audio-release" {
+  inherits = ["ingest-audio"]
+  tags = ["${REGISTRY}/karpathy-wiki-ingest-audio:${IMAGE_VERSION}"]
+}
+
+target "ingest-speech-release" {
+  inherits = ["ingest-speech"]
+  tags = ["${REGISTRY}/karpathy-wiki-ingest-speech:${IMAGE_VERSION}"]
+}
+
 target "ingest-paperless-release" {
   inherits = ["ingest-paperless"]
   tags = ["${REGISTRY}/karpathy-wiki-ingest-paperless:${IMAGE_VERSION}"]
@@ -103,6 +133,16 @@ target "ingest-stable" {
 target "ingest-webdav-stable" {
   inherits = ["ingest-webdav"]
   tags = ["${REGISTRY}/karpathy-wiki-ingest-webdav:${IMAGE_VERSION}", "${REGISTRY}/karpathy-wiki-ingest-webdav:latest"]
+}
+
+target "ingest-audio-stable" {
+  inherits = ["ingest-audio"]
+  tags = ["${REGISTRY}/karpathy-wiki-ingest-audio:${IMAGE_VERSION}", "${REGISTRY}/karpathy-wiki-ingest-audio:latest"]
+}
+
+target "ingest-speech-stable" {
+  inherits = ["ingest-speech"]
+  tags = ["${REGISTRY}/karpathy-wiki-ingest-speech:${IMAGE_VERSION}", "${REGISTRY}/karpathy-wiki-ingest-speech:latest"]
 }
 
 target "ingest-paperless-stable" {

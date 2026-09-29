@@ -37,7 +37,7 @@ browser.
 Select optional services with a comma-separated value:
 
 ```env
-COMPOSE_PROFILES=webdav,paperless,answers,raw-files
+COMPOSE_PROFILES=webdav,audio,paperless,answers,raw-files
 ```
 
 An installation can run without source providers and receive files through a
@@ -112,6 +112,19 @@ cannot be read as text are kept out of the source tree and written to
 restarting the daemon.
 After every successful cycle the provider manifest `sources/webdav/manifest.json`
 is refreshed; the name is reserved there.
+
+### Audio recordings
+
+With the `audio` profile enabled, a second connector synchronizes a
+WebDAV folder of recordings (`AUDIO_WEBDAV_PATH`, default `Recordings`) into
+its own private snapshot, transcribes locally through the
+[`audio-speech` worker](audio.md), applies the shared redactions (including
+matches that span transcript segments), and publishes sanitized Markdown to
+`sources/audio` as coherent generations. Raw audio, unredacted transcripts,
+and the speech-result cache stay in private directories that are never
+mounted into OpenCode; no audio or transcript is sent to a cloud API.
+See [audio ingest](audio.md) for all options, the source identity model,
+and retention.
 
 ## Source Generations
 

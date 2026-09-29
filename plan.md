@@ -7,16 +7,17 @@ independently deployable PRs.
 
 ### [#15](https://github.com/mstroppel/karpathy-wiki/issues/15): Audio ingest
 
-See [audio ingest concept](docs/audio-ingest-concept.md) for the proposed
-WebDAV, local transcription, speaker diarization and publication boundaries.
+The provider, worker handoff, redaction, and publication are implemented
+(see [audio ingest](docs/audio.md)). Remaining host-side work:
 
-1. Add an audio provider using the versioned manifest contract and discover
-   WebDAV audio files idempotently by hash.
-2. Use a replaceable transcription backend with optional speaker diarization;
-   emit Markdown with timestamps, speaker labels and provenance.
-3. Anonymize transcripts before publication. Make external transcription
-   opt-in and explicitly configured. Keep transcription reusable by other
-   providers, including email ingest.
+1. Run the bounded local transcription spike on the target host: measure
+   VRAM, processing time, and diarization quality with short, consented
+   one- and two-speaker recordings; confirm the CUDA runtime before
+   choosing the default model preset.
+2. Ship the opt-in CUDA speech image (pinned PyTorch/pyannote stack with an
+   NVIDIA GPU reservation) and the diarization model license/consent flow.
+3. Verify real-model behavior on the host: interrupted sync/worker/restart
+   and diarization-disabled-or-uncertain cases, then close the issue.
 
 ### [#26](https://github.com/mstroppel/karpathy-wiki/issues/26): Integration coverage
 
@@ -46,8 +47,8 @@ failure or restart gap with a focused test, then update or close the issue.
    recipient metadata are handled.
 3. Convert the selected message body and supported attachments to sanitized
    source entries with provenance and a versioned provider manifest. Apply
-   local redaction before wiki/model access, and use the shared transcription
-   provider for audio attachments when enabled.
+   local redaction before wiki/model access, and use the shared
+   `karpathy-wiki-speech` worker for audio attachments when enabled.
 4. Cover exact-address filtering, malformed messages, attachment handling,
    duplicates, failures and restarts with tests; document mailbox setup,
    retention and deletion behavior.

@@ -106,11 +106,13 @@ Set `COMPOSE_PROFILES` in `.env`; profiles can be enabled independently:
 | Profile | Purpose |
 | --- | --- |
 | `webdav` | Mirror and locally redact a selected WebDAV folder |
+| `audio` | Transcribe WebDAV recordings locally and publish redacted transcripts |
 | `answers` | Publish confirmed Q&A drafts from the local answer inbox |
 | `paperless` | Export tagged OCR text and redact configured personal data |
 | `raw-files` | Expose source files to a trusted reverse proxy |
 
-See [configuration](docs/configuration.md) and
+See [configuration](docs/configuration.md),
+[audio ingestion](docs/audio.md), and
 [Paperless ingestion](docs/paperless.md) for profile-specific setup and
 production paths. See [architecture](docs/architecture.md)
 for service boundaries and [data layout](docs/data-layout.md) for the persistent
@@ -152,7 +154,7 @@ Run the same checks CI runs:
 
 ```bash
 python3 -m pip install -r requirements-dev.txt
-python3 -m pip install -e ingest/core -e ingest/webdav -e ingest/paperless
+python3 -m pip install -e ingest/core -e ingest/webdav -e ingest/paperless -e ingest/audio -e ingest/speech
 npm ci
 scripts/install-shellcheck.sh  # add ~/.local/bin to PATH if needed; Linux x86_64
 scripts/lint.sh

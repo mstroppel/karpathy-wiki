@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Audio ingest (#15): the `audio` profile transcribes selected WebDAV
+  recordings locally (faster-whisper in the opt-in `audio-speech` worker
+  image), optionally diarizes speaker turns, redacts transcripts with the
+  shared anonymizer — including configured phrases split across segment
+  boundaries — and publishes sanitized Markdown sources with the versioned
+  provider manifest under `sources/audio`. Source identity comes from a
+  persistent opaque path mapping (renames revoke, identical audio at
+  different paths stays distinct), structured speech results are cached
+  privately by audio hash plus the full processing key, and raw audio plus
+  unredacted transcripts never leave the private speech store. All failures
+  are content-free and keep the last published generation active.
+
 ### Fixed
 
 - `/analysis-save` can now save the latest finished analysis and subsequent

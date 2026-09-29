@@ -55,6 +55,85 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  audio-ingest:
+    image: ghcr.io/mstroppel/karpathy-wiki-ingest-audio:${KARPATHY_WIKI_VERSION:-latest}
+    profiles: ["audio"]
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-UTC}
+      WEBDAV_PATH: ${AUDIO_WEBDAV_PATH:-Recordings}
+      REDACTIONS_FILE: /run/secrets/redactions
+      HEALTH_PATH: /tmp/health.json
+      INGEST_STATE_PATH: /data/state/ingest.sqlite3
+      AUDIO_SYNC_INTERVAL: ${AUDIO_SYNC_INTERVAL:-1h}
+      AUDIO_LANGUAGE: ${AUDIO_LANGUAGE}
+      AUDIO_DIARIZE: ${AUDIO_DIARIZE:-0}
+      AUDIO_MAX_BYTES: ${AUDIO_MAX_BYTES}
+      AUDIO_MAX_DURATION_SECONDS: ${AUDIO_MAX_DURATION_SECONDS}
+      SPEECH_ROOT: /data/speech
+      SPEECH_TIMEOUT_SEC: ${SPEECH_TIMEOUT_SEC:-43200}
+    user: "${PUID:-1000}:${PGID:-1000}"
+    volumes:
+      - ${DATA_ROOT:-./data}/incoming/audio:/data/incoming/audio:rw
+      - ${DATA_ROOT:-./data}/speech:/data/speech:rw
+      - ${DATA_ROOT:-./data}/sources/audio:/data/sanitized/audio:rw
+      - ${DATA_ROOT:-./data}/quarantine/audio:/data/quarantine/audio:rw
+      - ${DATA_ROOT:-./data}/state:/data/state:rw
+    secrets:
+      - redactions
+    depends_on:
+      init:
+        condition: service_completed_successfully
+      audio-speech:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-m", "karpathy_wiki_ingest.health"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
+      start_period: 10m
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  audio-speech:
+    image: ghcr.io/mstroppel/karpathy-wiki-ingest-speech:${KARPATHY_WIKI_VERSION:-latest}
+    profiles: ["audio"]
+    restart: unless-stopped
+    user: "${PUID:-1000}:${PGID:-1000}"
+    entrypoint: ["python", "-m", "karpathy_wiki_speech"]
+    environment:
+      TZ: ${TZ:-UTC}
+      SPEECH_ROOT: /data/speech
+      SPEECH_BACKEND: ${SPEECH_BACKEND:-faster-whisper}
+      SPEECH_MODEL: ${SPEECH_MODEL:-small}
+      SPEECH_DEVICE: ${SPEECH_DEVICE:-cpu}
+      SPEECH_COMPUTE_TYPE: ${SPEECH_COMPUTE_TYPE:-int8}
+      SPEECH_POLL_SECONDS: ${SPEECH_POLL_SECONDS:-5}
+      HF_HOME: /models
+      HUGGINGFACE_TOKEN: ${HUGGINGFACE_TOKEN}
+    volumes:
+      - ${DATA_ROOT:-./data}/speech:/data/speech:rw
+      - ${DATA_ROOT:-./data}/models/audio:/models:rw
+    healthcheck:
+      test: ["CMD", "python", "-m", "karpathy_wiki_speech",
+             "--health-check", "/data/speech/worker-health.json"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
+      start_period: 5m
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
   answers-ingest:
     image: ghcr.io/mstroppel/karpathy-wiki-ingest:${KARPATHY_WIKI_VERSION:-latest}
     profiles: ["answers"]

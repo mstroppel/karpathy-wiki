@@ -7,14 +7,23 @@ contains the launcher, `.env`, optional secrets, and local Compose adoptions.
 ${DATA_ROOT}/
 ├── sources/
 │   ├── webdav/             # Published WebDAV generations (current + generations/)
+│   ├── audio/              # Published audio transcripts (current + generations/)
 │   ├── answers/            # Published locally redacted Q&A source revisions
 │   └── paperless/          # Published Paperless generations (current + generations/)
 ├── wiki/                   # SilverBullet space and independent Git repository
-├── incoming/answers/       # Confirmed Q&A drafts, private to OpenCode and answer provider
+├── incoming/
+│   ├── audio/              # Private rclone snapshot of WebDAV recordings
+│   └── answers/            # Confirmed Q&A drafts, private to OpenCode and answer provider
+├── speech/                 # Speech worker store: recordings, queue, failures,
+│   └── cache/              #   and structured results (unredacted, private)
+├── models/
+│   └── audio/              # Persistent speech model cache
 ├── state/
-│   └── ingest.sqlite3      # Durable ingest jobs, leases, generations, publications
+│   ├── ingest.sqlite3      # Durable ingest jobs, leases, generations, publications
+│   └── audio-identity/     # Private WebDAV path → opaque source ID mapping
 ├── quarantine/
 │   ├── webdav/             # Content-free WebDAV error reports
+│   ├── audio/              # Content-free audio error reports
 │   └── paperless/          # Content-free Paperless error reports
 └── opencode/
     ├── config/             # OpenCode configuration and generated policy
@@ -50,6 +59,19 @@ readers never observe a partially published cycle and the last successful
 generation stays active after any failure. See
 [configuration](configuration.md#source-generations) for the publication
 model, retention, and recovery.
+
+## Audio recordings and the speech worker
+
+Audio transcripts publish the same generation model below `sources/audio`
+(`wiki_root: audio`). Each recording keeps one persistent opaque source ID
+mapped from its WebDAV path in `state/audio-identity` (private provider
+storage): renames revoke the old source, identical audio at different paths
+stays distinct, and redaction changes never change identity. Raw audio
+(`incoming/audio`), immutable worker copies, the unredacted speech-result
+cache, and model weights live under `incoming/audio`, `speech/`, and
+`models/audio`; those directories are private to the ingest and speech
+containers and never mounted into OpenCode. See
+[audio ingest](audio.md) for the processing options and retention.
 
 ## Durable ingest state
 
