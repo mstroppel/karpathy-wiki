@@ -127,10 +127,33 @@ class IngestPackageTests(unittest.TestCase):
 
     def test_speech_runtime_requirements_are_hash_pinned(self):
         requirements = read(ROOT / "ingest" / "speech" / "requirements.txt")
-        self.assertRegex(requirements, r"(?m)^faster_whisper==\d[\w.]* --hash=sha256:[0-9a-f]{64}$")
-        self.assertRegex(requirements, r"(?m)^ctranslate2==\d[\w.]* --hash=sha256:[0-9a-f]{64}$")
-        self.assertRegex(requirements, r"(?m)^av==\d[\w.]* --hash=sha256:[0-9a-f]{64}$")
-        self.assertNotRegex(requirements, r"(?m)^[a-z].*(?<!--hash=sha256:[0-9a-f]{64})\s*$")
+        pins: dict[str, set[str]] = {}
+        for line in requirements.replace("\\\n", " ").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            with self.subTest(requirement=line):
+                self.assertRegex(line, r"^[\w-]+==\d[\w.]*(?:\s+--hash=sha256:[0-9a-f]{64})+$")
+                name = line.split("==", 1)[0].replace("-", "_").lower()
+                self.assertNotIn(name, pins, "duplicate speech dependency")
+                pins[name] = set(re.findall(r"--hash=sha256:([0-9a-f]{64})", line))
+        self.assertIn("faster_whisper", pins)
+        # These native dependencies need distinct amd64 and arm64 wheels on
+        # CPython 3.12. Catch missing pins and single-architecture lock updates;
+        # actual wheel compatibility/digests are verified with pip download.
+        for name in (
+            "ctranslate2",
+            "av",
+            "tokenizers",
+            "onnxruntime",
+            "hf_xet",
+            "numpy",
+            "protobuf",
+            "pyyaml",
+        ):
+            with self.subTest(native_dependency=name):
+                self.assertIn(name, pins)
+                self.assertGreaterEqual(len(pins[name]), 2, "missing amd64/arm64 wheel hashes")
 
     def test_build_backends_are_pinned(self):
         requires_pin = f"setuptools=={ingest_setuptools_version()}"
