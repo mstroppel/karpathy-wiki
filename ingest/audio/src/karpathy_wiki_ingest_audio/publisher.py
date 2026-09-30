@@ -78,6 +78,7 @@ from karpathy_wiki_speech.types import (
     TranscriptionLimits,
     TranscriptionOptions,
     TranscriptionResult,
+    file_revision,
 )
 
 LOG = logging.getLogger("karpathy-wiki-audio")
@@ -134,14 +135,6 @@ class SourceWork:
 
 def new_generation_id() -> str:
     return f"{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-{os.urandom(4).hex()}"
-
-
-def file_revision(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for block in iter(lambda: handle.read(65536), b""):
-            digest.update(block)
-    return digest.hexdigest()
 
 
 def wiki_path_of(source_id: str) -> str:
@@ -343,6 +336,12 @@ def sanitize_into_generation(
     return items, changed, failed
 
 
+def inventory_fingerprint(inventory: dict[str, str]) -> str:
+    """Compare private upstream paths without publishing their original values."""
+    encoded = json.dumps(inventory, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def write_generation_metadata(
     staging: Path,
     generation_name: str,
@@ -355,7 +354,7 @@ def write_generation_metadata(
         "created_at": int(time.time()),
         "redaction_fingerprint": fingerprint,
         "speech_identity": speech_identity,
-        "upstream_inventory": inventory,
+        "inventory_fingerprint": inventory_fingerprint(inventory),
         "renderer_version": RENDERER_VERSION,
     }
     atomic_write(
@@ -439,9 +438,21 @@ def read_active_revisions(sanitized: Path) -> dict[str, str]:
 def revocations(
     items: list[ManifestItem],
     previous_revisions: dict[str, str],
+    sanitized: Path,
 ) -> list[dict[str, Any]]:
-    """Revoke vanished upstream paths; renames become new sources (concept 4)."""
+    """Retain removal tombstones until their sources become live again."""
     published = set(previous_revisions)
+    try:
+        payload = json.loads((sanitized / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        payload = {}
+    previous_revoked = payload.get("revoked", []) if isinstance(payload, dict) else []
+    if isinstance(previous_revoked, list):
+        published.update(
+            entry["source_key"]
+            for entry in previous_revoked
+            if isinstance(entry, dict) and isinstance(entry.get("source_key"), str)
+        )
     live = {item.source_key for item in items}
     return [
         {"source_key": source_id, "claim": {"audio_source_id": source_id}}
@@ -522,7 +533,7 @@ def publish_generation(
             build_manifest(
                 SOURCE_NAME,
                 items,
-                revoked=revocations(items, previous_revisions),
+                revoked=revocations(items, previous_revisions, sanitized),
                 errors=[],
                 wiki_root=WIKI_ROOT,
             ),
@@ -576,7 +587,7 @@ def published_matches(
     if (
         metadata.get("redaction_fingerprint") != anonymizer.fingerprint
         or metadata.get("speech_identity") != speech_identity
-        or metadata.get("upstream_inventory") != inventory
+        or metadata.get("inventory_fingerprint") != inventory_fingerprint(inventory)
         or metadata.get("renderer_version") != RENDERER_VERSION
     ):
         return False
@@ -590,7 +601,7 @@ def published_matches(
     if not isinstance(items, list):
         return False
     files = {
-        path.relative_to(generation).as_posix(): file_revision(path)
+        path.relative_to(generation).as_posix(): file_revision(str(path))
         for path in generation.rglob("*")
         if path.is_file() and path != generation / GENERATION_METADATA_FILENAME
     }

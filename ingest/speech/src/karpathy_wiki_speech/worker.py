@@ -195,7 +195,7 @@ def process_request(
     decode: bool = True,
 ) -> int:
     """One request: verify, transcribe (or replay from cache), store."""
-    from karpathy_wiki_speech.cache import newest_index_entry
+    from karpathy_wiki_speech.cache import load_cached_result
 
     audio_reference = str(payload["audio"])
     audio_sha256 = str(payload["audio_sha256"])
@@ -206,10 +206,13 @@ def process_request(
         compute_type=pipeline.compute_type,
         device=pipeline.device,
     )
-    entry = newest_index_entry(
-        root, audio_sha256, {"language": requested.language, "diarize": requested.diarize}
+    cached = load_cached_result(
+        root,
+        audio_sha256,
+        {"language": requested.language, "diarize": requested.diarize},
+        worker_tag,
     )
-    if entry is not None and entry.get("worker_identity") == worker_tag:
+    if cached is not None:
         LOG.info(
             "Speech request %s replayed from cache",
             identifier_tail(identifier_of_request(payload)),

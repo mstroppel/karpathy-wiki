@@ -19,7 +19,7 @@ from pathlib import Path
 
 from karpathy_wiki_speech.cache import (
     failure_path,
-    find_cached_result,
+    load_cached_result,
     recording_path,
     request_id,
     request_path,
@@ -50,63 +50,6 @@ def result_identity(options: TranscriptionOptions) -> str:
     return key_of(requested_options(options))
 
 
-def parse_result_payload(payload: object) -> TranscriptionResult | None:
-    """Validate a cached worker result; ``None`` marks it unusable."""
-    if not isinstance(payload, dict):
-        return None
-    if not isinstance(payload.get("backend"), str) or not isinstance(payload.get("model"), str):
-        return None
-    language = payload.get("language")
-    if language is not None and not isinstance(language, str):
-        return None
-    segments: list = []
-    raw_segments = payload.get("segments")
-    if not isinstance(raw_segments, list):
-        return None
-    for raw in raw_segments:
-        if not isinstance(raw, dict):
-            return None
-        start_ms = raw.get("start_ms")
-        end_ms = raw.get("end_ms")
-        text = raw.get("text")
-        if (
-            not isinstance(start_ms, int)
-            or not isinstance(end_ms, int)
-            or not isinstance(text, str)
-        ):
-            return None
-        speaker_id = raw.get("speaker_id")
-        if speaker_id is not None and not isinstance(speaker_id, int):
-            return None
-        segments.append(
-            dict(
-                zip(
-                    ("start_ms", "end_ms", "text", "speaker_id"),
-                    (start_ms, end_ms, text, speaker_id),
-                    strict=True,
-                )
-            )
-        )
-    from karpathy_wiki_speech.types import Segment
-
-    rendered = payload.get("options")
-    return TranscriptionResult(
-        segments=[
-            Segment(
-                start_ms=int(entry["start_ms"]),
-                end_ms=int(entry["end_ms"]),
-                text=str(entry["text"]),
-                speaker_id=int(entry["speaker_id"]) if entry["speaker_id"] is not None else None,
-            )
-            for entry in segments
-        ],
-        language=language,
-        backend=str(payload["backend"]),
-        model=str(payload["model"]),
-        options=rendered if isinstance(rendered, dict) else {},
-    )
-
-
 def load_result(
     speech_root: Path,
     audio_sha256: str,
@@ -114,14 +57,7 @@ def load_result(
 ) -> TranscriptionResult | None:
     """Latest structured result for the requested options, if complete."""
 
-    cache_file = find_cached_result(speech_root, audio_sha256, requested_options(options))
-    if cache_file is None:
-        return None
-    try:
-        payload = json.loads(cache_file.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    return parse_result_payload(payload)
+    return load_cached_result(speech_root, audio_sha256, requested_options(options))
 
 
 def load_failure(

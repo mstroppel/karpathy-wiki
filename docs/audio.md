@@ -112,6 +112,10 @@ except the directory `current` resolves to, then restart the service. The
 names `manifest.json`, `current`, `generations`, and `.generation.json`
 are reserved inside `sources/audio`.
 
+Generation metadata stores only an inventory fingerprint, never the original
+recording paths. Removal revocations remain in subsequent manifests until the
+same source becomes live again, so delayed wiki ingestion still sees removals.
+
 ## Speech worker
 
 The `audio-speech` service (`karpathy-wiki-ingest-speech` image) owns the

@@ -12,7 +12,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from karpathy_wiki_speech.types import TranscriptionLimits
+from karpathy_wiki_speech.types import TranscriptionLimits, file_revision
 
 
 def synchronize(incoming: Path, path: str, rclone_binary: str = "rclone") -> None:
@@ -52,15 +52,5 @@ def audio_inventory(
         if not path.is_file() or path.suffix.lower() not in limits.allowed_extensions:
             continue
         relative = path.relative_to(snapshot).as_posix()
-        inventory[relative] = file_revision(path)
+        inventory[relative] = file_revision(str(path))
     return inventory
-
-
-def file_revision(path: Path) -> str:
-    import hashlib
-
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for block in iter(lambda: handle.read(65536), b""):
-            digest.update(block)
-    return digest.hexdigest()

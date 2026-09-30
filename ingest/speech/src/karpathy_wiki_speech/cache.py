@@ -27,6 +27,8 @@ import re
 from collections.abc import Mapping
 from pathlib import Path
 
+from karpathy_wiki_speech.types import Segment, TranscriptionResult
+
 REQUESTS_DIRECTORY = "requests"
 CACHE_DIRECTORY = "cache"
 RECORDINGS_DIRECTORY = "recordings"
@@ -121,13 +123,87 @@ def find_cached_result(
     root: Path,
     audio_sha256: str,
     options: Mapping[str, object],
+    worker_identity: str | None = None,
 ) -> Path | None:
     entry = newest_index_entry(root, audio_sha256, options)
-    if entry is None or entry.get("worker_identity") != current_worker_identity(root):
+    worker_identity = worker_identity or current_worker_identity(root)
+    if not worker_identity or entry is None or entry.get("worker_identity") != worker_identity:
         return None
     identity = entry["identity"]
     assert isinstance(identity, str)
+    if re.fullmatch(r"[a-f0-9]{64}", identity) is None:
+        return None
     return cache_result_path(root, identity)
+
+
+def parse_result_payload(payload: object) -> TranscriptionResult | None:
+    """Validate a cached worker result; ``None`` marks it unusable."""
+    if not isinstance(payload, dict):
+        return None
+    backend, model = payload.get("backend"), payload.get("model")
+    if not isinstance(backend, str) or not isinstance(model, str):
+        return None
+    language = payload.get("language")
+    if language is not None and not isinstance(language, str):
+        return None
+    raw_segments = payload.get("segments")
+    if not isinstance(raw_segments, list):
+        return None
+    segments = []
+    for raw in raw_segments:
+        if not isinstance(raw, dict):
+            return None
+        start_ms, end_ms, text = raw.get("start_ms"), raw.get("end_ms"), raw.get("text")
+        speaker_id = raw.get("speaker_id")
+        if (
+            type(start_ms) is not int
+            or type(end_ms) is not int
+            or not isinstance(text, str)
+            or (speaker_id is not None and type(speaker_id) is not int)
+        ):
+            return None
+        segments.append(Segment(start_ms, end_ms, text, speaker_id))
+    rendered = payload.get("options")
+    return TranscriptionResult(
+        segments=segments,
+        language=language,
+        backend=backend,
+        model=model,
+        options=rendered if isinstance(rendered, dict) else {},
+    )
+
+
+def load_cached_result(
+    root: Path,
+    audio_sha256: str,
+    options: Mapping[str, object],
+    worker_identity: str | None = None,
+) -> TranscriptionResult | None:
+    """Load a complete result for this recording, options, and active worker.
+
+    The index is only a pointer: missing, unreadable, or malformed results
+    are cache misses, so a queued request can repair them by transcribing.
+    """
+    worker_identity = worker_identity or current_worker_identity(root)
+    path = find_cached_result(root, audio_sha256, options, worker_identity)
+    if path is None:
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    rendered = payload.get("options")
+    if (
+        payload.get("identity") != path.stem
+        or payload.get("audio_sha256") != audio_sha256
+        or payload.get("worker_identity") != worker_identity
+        or not isinstance(rendered, dict)
+        or any(key not in rendered or rendered[key] != value for key, value in options.items())
+    ):
+        return None
+    return parse_result_payload(payload)
 
 
 def current_worker_identity(root: Path) -> str | None:

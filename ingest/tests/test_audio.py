@@ -598,7 +598,7 @@ class CycleHarness(unittest.TestCase):
             self.speech_root,
             anonymizer_instance or anonymizer(),
             options or TranscriptionOptions(),
-            {},
+            load_mapping(self.mapping_dir),
             limits,
             60,
             self.store if store == "default" else store,
@@ -675,6 +675,12 @@ class PublicationTests(CycleHarness):
         manifest = json.dumps(self.manifest(), ensure_ascii=False)
         self.assertNotIn("Max Mustermann", manifest)
         self.assertIn("[ICH]", manifest)
+        for path in self.sanitized.rglob("*"):
+            if path.is_file():
+                self.assertNotIn("Max Mustermann", path.read_text(), str(path))
+        generation = self.active()
+        self.assertEqual(self.cycle(), (0, 0, False))
+        self.assertEqual(self.active(), generation)
 
     def test_multiword_literal_split_across_segments_never_publishes_it(self):
         write_recording(self.incoming, "Meetings/kickoff.mp3")
@@ -767,6 +773,33 @@ class IdentityStabilityTests(CycleHarness):
         self.assertEqual(self.cycle(), (2, 0, False))
         claims = {item["claim"]["audio_source_id"] for item in self.manifest()["items"]}
         self.assertEqual(len(claims), 2)
+
+    def test_revocations_survive_later_generations_until_source_returns(self):
+        write_recording(self.incoming, "a.mp3")
+        self.cycle()
+        first_key = self.manifest()["items"][0]["source_key"]
+        (self.incoming / "a.mp3").unlink()
+        self.cycle()
+        tombstone = {"source_key": first_key, "claim": {"audio_source_id": first_key}}
+        self.assertEqual(self.manifest()["revoked"], [tombstone])
+        write_recording(self.incoming, "b.mp3")
+        self.cycle()
+        self.assertEqual(self.manifest()["revoked"], [tombstone])
+        second_key = self.manifest()["items"][0]["source_key"]
+        (self.incoming / "b.mp3").unlink()
+        write_recording(self.incoming, "c.mp3")
+        self.cycle()
+        self.assertEqual(
+            {entry["source_key"] for entry in self.manifest()["revoked"]},
+            {first_key, second_key},
+        )
+        write_recording(self.incoming, "a.mp3")
+        self.cycle()
+        self.assertIn(first_key, {entry["source_key"] for entry in self.manifest()["items"]})
+        self.assertEqual(
+            self.manifest()["revoked"],
+            [{"source_key": second_key, "claim": {"audio_source_id": second_key}}],
+        )
 
 
 class FailureTests(CycleHarness):
@@ -925,7 +958,7 @@ class SpeechClientTests(unittest.TestCase):
         self.assertEqual(list((self.root / "requests").glob("*.json")), first)
 
     def test_parse_result_payload_rejects_incomplete_results(self):
-        from karpathy_wiki_ingest_audio.speech_client import parse_result_payload
+        from karpathy_wiki_speech.cache import parse_result_payload
 
         self.assertIsNone(parse_result_payload(None))
         self.assertIsNone(parse_result_payload({"backend": "b"}))
