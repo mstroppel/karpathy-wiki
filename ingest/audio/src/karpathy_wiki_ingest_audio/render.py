@@ -59,7 +59,7 @@ def render_transcript_document(
         text = " ".join(segment.text.split())
         if text:
             entries.append(f"{stamp} {speaker}{text}")
-        elif segment.speaker_id is not None:
+        else:
             # A fully redacted segment keeps its timing entry without text:
             # the matched words were removed, not duplicated.
             entries.append(stamp)

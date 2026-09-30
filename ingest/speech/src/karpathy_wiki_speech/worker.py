@@ -23,6 +23,7 @@ import json
 import logging
 import os
 import signal
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -76,8 +77,20 @@ def speech_limits():
 
 def worker_identity(backend: SpeechBackend, pipeline: TranscriptionOptions) -> str:
     """Stable identity of the worker's processing configuration."""
+    from importlib.metadata import distributions
+
+    image_stamp = Path("/app/speech-runtime-id")
     documented = json.dumps(
-        backend.describe(pipeline),
+        {
+            "image": image_stamp.read_text() if image_stamp.is_file() else None,
+            "backend": backend.describe(pipeline),
+            "limits": vars(speech_limits()),
+            "runtime": sorted((dist.metadata["Name"], dist.version) for dist in distributions()),
+            "code": [
+                path.read_text(encoding="utf-8")
+                for path in sorted(Path(__file__).parent.glob("*.py"))
+            ],
+        },
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
@@ -99,6 +112,7 @@ def run_cycle(
     from karpathy_wiki_speech.cache import requests_dir
 
     requests_dir(root).mkdir(parents=True, exist_ok=True)
+    atomic_json(root / "worker-identity.json", {"identity": worker_tag})
     completed = 0
     failed = 0
     for request in sorted(requests_dir(root).glob("*.json")):
@@ -317,15 +331,22 @@ def clear_failure(root: Path, audio_sha256: str, options_key: str) -> None:
 
 
 def atomic_json(path: Path, payload: object) -> None:
-    from karpathy_wiki_ingest.shared import atomic_write
-
-    atomic_write(path, json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n", mode=0o600)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", dir=path.parent, delete=False
+    ) as handle:
+        temporary = Path(handle.name)
+        try:
+            handle.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+            os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
 
 
 def write_health(root: Path, failed: int) -> None:
-    from karpathy_wiki_ingest.shared import write_health
-
-    write_health(root / "worker-health.json", failed)
+    atomic_json(root / "worker-health.json", {"checked_at": int(time.time()), "failed": failed})
 
 
 def install_stop_handler() -> threading.Event:

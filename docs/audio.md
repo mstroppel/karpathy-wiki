@@ -93,6 +93,7 @@ ${DATA_ROOT}/
 │   ├── requests/               # content-free queue entries
 │   ├── failures/               # content-free worker failure reports
 │   ├── cache/                  # structured results (unredacted!)
+│   ├── worker-identity.json    # active processing configuration fingerprint
 │   └── worker-health.json      # worker heartbeat
 ├── models/audio/               # persistent model cache
 ├── sources/audio/              # published sanitized generations
@@ -120,6 +121,14 @@ never WebDAV credentials, redactions, or the wiki. It polls
 `speech/cache`; providers replay identical work from that cache, keyed by
 audio SHA-256 plus the full processing key (a changed worker image
 supersedes older results automatically).
+
+Before processing requests, the worker announces its identity in
+`speech/worker-identity.json`. The identity covers the backend, model,
+device, compute type, limits, installed runtime, speech code, and a build-time
+image stamp. Providers accept only matching cache entries and include this
+identity in durable publication jobs, so configuration changes reprocess
+unchanged recordings too. A worker change during publication aborts that
+generation for retry. Start the worker before running a one-shot provider.
 
 CI and machines without a GPU run the fake backend by setting
 `SPEECH_BACKEND=fake` for the speech service; it produces deterministic

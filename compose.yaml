@@ -62,6 +62,12 @@ services:
     environment:
       TZ: ${TZ:-UTC}
       WEBDAV_PATH: ${AUDIO_WEBDAV_PATH:-Recordings}
+      RCLONE_CONFIG_WEBDAV_TYPE: webdav
+      RCLONE_CONFIG_WEBDAV_URL: ${WEBDAV_URL:-https://cloud.example.com/remote.php/dav/files/username/}
+      RCLONE_CONFIG_WEBDAV_VENDOR: ${WEBDAV_VENDOR:-nextcloud}
+      RCLONE_CONFIG_WEBDAV_USER: ${WEBDAV_USERNAME:-username}
+      RCLONE_CONFIG_WEBDAV_PASS: ${WEBDAV_PASSWORD_OBSCURED:-}
+      WEBDAV_SYNC_INTERVAL: ${AUDIO_SYNC_INTERVAL:-1h}
       REDACTIONS_FILE: /run/secrets/redactions
       HEALTH_PATH: /tmp/health.json
       INGEST_STATE_PATH: /data/state/ingest.sqlite3
@@ -114,6 +120,8 @@ services:
       SPEECH_DEVICE: ${SPEECH_DEVICE:-cpu}
       SPEECH_COMPUTE_TYPE: ${SPEECH_COMPUTE_TYPE:-int8}
       SPEECH_POLL_SECONDS: ${SPEECH_POLL_SECONDS:-5}
+      SPEECH_MAX_BYTES: ${AUDIO_MAX_BYTES}
+      SPEECH_MAX_DURATION_SECONDS: ${AUDIO_MAX_DURATION_SECONDS}
       HF_HOME: /models
       HUGGINGFACE_TOKEN: ${HUGGINGFACE_TOKEN}
     volumes:

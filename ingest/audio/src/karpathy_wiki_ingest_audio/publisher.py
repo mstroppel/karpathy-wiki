@@ -186,17 +186,20 @@ def speech_options() -> TranscriptionOptions:
     )
 
 
-def requested_options_identity(options: TranscriptionOptions) -> str:
-    """Speech identity of a cycle: the requested processing options key.
+def requested_options_identity(options: TranscriptionOptions, speech_root: Path) -> str:
+    """Include the active worker configuration in publication and durable job identity."""
+    from karpathy_wiki_speech.cache import current_worker_identity, options_key
 
-    Worker configuration (backend, model, device) is stamped into the
-    cached results themselves, so a changed worker image supersedes older
-    results for the same requested options without invalidating shared
-    caches.
-    """
-    from karpathy_wiki_speech.cache import options_key
-
-    return options_key({"language": options.language, "diarize": options.diarize})
+    worker = current_worker_identity(speech_root)
+    if worker is None:
+        raise RuntimeError("the speech worker has not announced its processing identity")
+    return options_key(
+        {
+            "language": options.language,
+            "diarize": options.diarize,
+            "worker": worker,
+        }
+    )
 
 
 def _int_env(name: str, default: int) -> int:
@@ -461,6 +464,7 @@ def publish_generation(
     commit_guard: Callable[[], None] | None = None,
 ) -> tuple[int, int]:
     """Build a complete generation and publish it in one atomic step."""
+    speech_identity = requested_options_identity(options, speech_root)
     sanitized.mkdir(parents=True, exist_ok=True)
     quarantine.mkdir(parents=True, exist_ok=True)
     generations = sanitized / GENERATIONS_DIRECTORY
@@ -495,7 +499,7 @@ def publish_generation(
             generation.name,
             anonymizer.fingerprint,
             inventory,
-            requested_options_identity(options),
+            speech_identity,
         )
         if failed:
             # A generation is all-or-nothing: the last successful generation
@@ -503,6 +507,8 @@ def publish_generation(
             # content-free, and retry backoff applies.
             shutil.rmtree(staging, ignore_errors=True)
             return 0, failed
+        if requested_options_identity(options, speech_root) != speech_identity:
+            raise RuntimeError("speech worker changed during publication; retry the cycle")
         staging.rename(generation)
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
@@ -701,7 +707,7 @@ def process_cycle(
     """
     moment = int(time.time() if now is None else now)
     inventory = audio_inventory(snapshot, limits)
-    speech_identity = requested_options_identity(options)
+    speech_identity = requested_options_identity(options, speech_root)
     if store is None:
         changed, failed = publish_generation(
             snapshot,

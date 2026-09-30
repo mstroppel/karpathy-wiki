@@ -321,12 +321,16 @@ class TargetedAnonymizer:
         does (longest names first by construction). Callers project these
         original-coordinate matches onto other views of the same text (for
         example timed transcript segments joined into one continuous string)
-        and derive their own replacements; overlapping matches must not be
-        passed to ``replace_matches`` together.
+        and derive their own replacements. Earlier rules take precedence:
+        candidates overlapping an accepted span are discarded.
         """
         matches: list[DenyMatch] = []
         for rule in self.literal_rules:
             for match in rule.pattern.finditer(text):
+                if any(
+                    match.start() < prior.end and prior.start < match.end() for prior in matches
+                ):
+                    continue
                 matches.append(
                     DenyMatch(
                         start=match.start(),
@@ -347,11 +351,12 @@ class TargetedAnonymizer:
                 category="PHONE",
             )
 
-        matches.extend(
-            candidate
-            for candidate in (phone_match(match) for match in PHONE_CANDIDATE_RE.finditer(text))
-            if candidate is not None
-        )
+        for match in PHONE_CANDIDATE_RE.finditer(text):
+            candidate = phone_match(match)
+            if candidate is not None and not any(
+                candidate.start < prior.end and prior.start < candidate.end for prior in matches
+            ):
+                matches.append(candidate)
         return matches
 
 

@@ -79,9 +79,11 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 COPY --from=build /wheels/speech /wheels
 COPY speech/requirements.txt /src/speech-requirements.txt
+# A new runtime layer gets a new identity, including base-image/dependency changes.
 RUN python -m pip install --no-index --no-deps --find-links=/wheels karpathy-wiki-speech \
     && python -m pip install --require-hashes --only-binary=:all: \
         -r /src/speech-requirements.txt \
+    && python -c 'import pathlib, uuid; pathlib.Path("/app/speech-runtime-id").write_text(uuid.uuid4().hex)' \
     && rm -rf /wheels /src
 ENTRYPOINT ["python", "-m", "karpathy_wiki_speech"]
 

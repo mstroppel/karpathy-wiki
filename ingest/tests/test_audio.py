@@ -8,6 +8,7 @@ deterministically without codecs or model downloads.
 import hashlib
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -84,9 +85,9 @@ class ScriptedBackend:
         self, path: str, audio: DecodedAudio, options: TranscriptionOptions
     ) -> TranscriptionResult:
         stem = Path(path).stem
-        base = self.transcripts.get(stem) or [
-            Segment(0, int(audio.duration_seconds * 1000), f"{stem} Talking Point")
-        ]
+        base = self.transcripts.get(
+            stem, [Segment(0, int(audio.duration_seconds * 1000), f"{stem} Talking Point")]
+        )
         segments = [
             Segment(
                 start_ms=base[index].start_ms,
@@ -117,6 +118,35 @@ def describe_options(options: TranscriptionOptions) -> dict[str, object]:
 
 
 class RedactionTests(unittest.TestCase):
+    def test_structured_name_overlap_is_replaced_once(self):
+        target = TargetedAnonymizer.from_config(
+            {"people": [{"first_name": "Anton", "last_name": "Hotz", "replacement": "[PERSON_1]"}]}
+        )
+        segments, counts = redact_transcript(
+            [Segment(0, 1000, "Anton"), Segment(1000, 2000, "Hotz")], target
+        )
+        expected, expected_counts = target.anonymize("Anton Hotz")
+        self.assertEqual([s.text for s in segments], [expected, ""])
+        self.assertEqual(counts, expected_counts)
+
+    def test_multiple_matches_in_one_segment_keep_each_replacement(self):
+        redacted, counts = self.redact([Segment(0, 1000, "Max Mustermann und Max Mustermann")])
+        self.assertEqual(redacted[0].text, "[ICH] und [ICH]")
+        self.assertEqual(counts, {"PERSON": 2})
+
+    def test_literal_takes_precedence_over_overlapping_phone(self):
+        target = TargetedAnonymizer.from_config(
+            {
+                "people": [{"replacement": "[CONTACT]", "values": ["Call 0170 1234567"]}],
+                "phones": [{"replacement": "[PHONE]", "values": ["0170 1234567"]}],
+            }
+        )
+        redacted, counts = redact_transcript(
+            [Segment(0, 1000, "Call 0170"), Segment(1000, 2000, "1234567")], target
+        )
+        self.assertEqual([s.text for s in redacted], ["[CONTACT]", ""])
+        self.assertEqual(counts, {"PERSON": 1})
+
     def redact(self, segments, anonymizer_instance=None):
         return redact_transcript(segments, anonymizer_instance or anonymizer())
 
@@ -258,6 +288,25 @@ class WorkerCacheTests(unittest.TestCase):
         self.assertEqual(result.backend, "scripted")
         self.assertIn("Max", result.segments[0].text)
 
+    def test_worker_runs_without_ingest_core_installed(self):
+        self.queue_request()
+        source = Path(speech_worker.__file__).resolve().parents[1]
+        script = (
+            "import sys, runpy; "
+            f"sys.path.insert(0, {str(source)!r}); "
+            "sys.argv = ['karpathy_wiki_speech', '--once']; "
+            "runpy.run_module('karpathy_wiki_speech', run_name='__main__')"
+        )
+        subprocess.run(
+            [sys.executable, "-I", "-S", "-c", script],
+            env={**os.environ, "SPEECH_ROOT": str(self.root), "SPEECH_BACKEND": "fake"},
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(json.loads((self.root / "worker-health.json").read_text())["failed"], 0)
+        self.assertTrue(list((self.root / "cache").glob("*.results.json")))
+
     def test_second_cycle_replays_from_cache(self):
         digest = audio_digest()
         transcripts = {digest: [Segment(0, 1000, "One"), Segment(1000, 2000, "Two")]}
@@ -267,6 +316,34 @@ class WorkerCacheTests(unittest.TestCase):
         completed, failed = self.run_worker(transcripts)
         self.assertEqual((completed, failed), (1, 0))
         self.assertFalse((self.root / "requests" / f"{identifier}.json").exists())
+
+    def test_empty_transcript_completes_provider_handoff(self):
+        from karpathy_wiki_ingest_audio.speech_client import await_result
+
+        self.queue_request()
+        self.assertEqual(self.run_worker({audio_digest(): []}), (1, 0))
+        result = await_result(self.root, audio_digest(), TranscriptionOptions(), 0)
+        self.assertEqual(result.segments, [])
+
+    def test_provider_requeues_after_idle_worker_configuration_change(self):
+        from karpathy_wiki_ingest_audio.speech_client import ensure_requested, load_result
+
+        identifier = self.queue_request()
+        self.run_worker()
+        backend = ScriptedBackend()
+        pipeline = TranscriptionOptions(model="changed")
+        tag = speech_worker.worker_identity(backend, pipeline)
+        speech_worker.run_cycle(self.root, backend, pipeline, tag, DEFAULT_LIMITS, decode=False)
+        self.assertIsNone(load_result(self.root, audio_digest(), TranscriptionOptions()))
+        ensure_requested(
+            self.root,
+            audio_digest(),
+            TranscriptionOptions(),
+            f"recordings/{audio_digest()[:2]}/{audio_digest()}.mp3",
+        )
+        self.assertTrue((self.root / "requests" / f"{identifier}.json").exists())
+        speech_worker.run_cycle(self.root, backend, pipeline, tag, DEFAULT_LIMITS, decode=False)
+        self.assertIsNotNone(load_result(self.root, audio_digest(), TranscriptionOptions()))
 
     def test_worker_failure_report_is_content_free(self):
         identifier = self.queue_request()
@@ -471,6 +548,8 @@ class CycleHarness(unittest.TestCase):
                 Segment(1000, 2000, "Mustermann im Büro"),
             ]
         }
+        self.pipeline = TranscriptionOptions(model="scripted-1")
+        self.announce_worker()
 
         def instant_worker(
             speech_root: Path,
@@ -480,7 +559,7 @@ class CycleHarness(unittest.TestCase):
             poll_seconds: int = 5,
         ) -> TranscriptionResult:
             backend = ScriptedBackend(self.transcripts)
-            pipeline = TranscriptionOptions(model="scripted-1")
+            pipeline = self.pipeline
             worker_tag = speech_worker.worker_identity(backend, pipeline)
             speech_worker.run_cycle(
                 speech_root, backend, pipeline, worker_tag, DEFAULT_LIMITS, decode=False
@@ -495,6 +574,13 @@ class CycleHarness(unittest.TestCase):
         )
         worker.start()
         self.addCleanup(worker.stop)
+
+    def announce_worker(self):
+        backend = ScriptedBackend(self.transcripts)
+        tag = speech_worker.worker_identity(backend, self.pipeline)
+        speech_worker.run_cycle(
+            self.speech_root, backend, self.pipeline, tag, DEFAULT_LIMITS, decode=False
+        )
 
     def cycle(
         self,
@@ -536,6 +622,15 @@ class CycleHarness(unittest.TestCase):
 
 
 class PublicationTests(CycleHarness):
+    def test_fully_redacted_segment_keeps_timestamp_without_diarization(self):
+        self.transcripts[audio_digest()] = [
+            Segment(0, 1000, "Max"),
+            Segment(1000, 2000, "Mustermann"),
+        ]
+        write_recording(self.incoming, "meeting.mp3")
+        self.assertEqual(self.cycle(), (1, 0, False))
+        self.assertIn("[00:00:01-00:00:02]\n", self.page())
+
     def test_publishes_redacted_recording_with_provenance(self):
         write_recording(self.incoming, "Meetings/kickoff.mp3")
         self.assertEqual(self.cycle(), (1, 0, False))
@@ -874,14 +969,45 @@ class PublisherOptionsTests(unittest.TestCase):
 
 
 class DurableCycleTests(CycleHarness):
+    def test_worker_change_during_publication_keeps_previous_generation(self):
+        from karpathy_wiki_ingest_audio import publisher
+
+        write_recording(self.incoming, "meeting.mp3")
+        self.cycle()
+        previous = self.active()
+        original = publisher.sanitize_into_generation
+
+        def change_worker(*args, **kwargs):
+            result = original(*args, **kwargs)
+            self.pipeline = TranscriptionOptions(model="changed-during-publication")
+            self.announce_worker()
+            return result
+
+        with mock.patch.object(publisher, "sanitize_into_generation", side_effect=change_worker):
+            with self.assertRaisesRegex(RuntimeError, "worker changed"):
+                self.cycle(options=TranscriptionOptions(language="en"))
+        self.assertEqual(self.active(), previous)
+        self.assertEqual(self.cycle(), (1, 0, False))
+
+    def test_worker_change_republishes_unchanged_inventory(self):
+        write_recording(self.incoming, "meeting.mp3")
+        self.assertEqual(self.cycle(), (1, 0, False))
+        first = self.active()
+        self.pipeline = TranscriptionOptions(model="scripted-2")
+        self.transcripts[audio_digest()] = [Segment(0, 1000, "Updated transcript")]
+        self.announce_worker()
+        self.assertEqual(self.cycle(), (1, 0, False))
+        self.assertNotEqual(self.active(), first)
+        self.assertIn("Updated transcript", self.page())
+        self.assertEqual(self.cycle(), (0, 0, False))
+
     def test_cycle_is_a_durable_job_keyed_by_inventory_and_speech_identity(self):
         write_recording(self.incoming, "Meetings/kickoff.mp3")
         self.assertEqual(self.cycle(now=1000), (1, 0, False))
         inventory = audio_inventory(self.incoming, DEFAULT_LIMITS)
-        options_key = json.dumps(
-            {"language": None, "diarize": False}, sort_keys=True, separators=(",", ":")
-        )
-        speech_identity = hashlib.sha256(options_key.encode()).hexdigest()
+        from karpathy_wiki_ingest_audio.publisher import requested_options_identity
+
+        speech_identity = requested_options_identity(TranscriptionOptions(), self.speech_root)
         key = cycle_idempotency_key(anonymizer().fingerprint, inventory, speech_identity)
         job = self.store.job_by_idempotency_key(key)
         self.assertIsNotNone(job)

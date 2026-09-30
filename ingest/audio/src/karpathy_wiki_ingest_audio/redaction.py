@@ -56,8 +56,7 @@ def project_matches(
     (start position, longer match first) and are non-overlapping by
     construction of the shared rules.
     """
-    removed: list[list[tuple[int, int]]] = [[] for _ in pieces]
-    replacement_by_piece: dict[int, str] = {}
+    removed: list[list[tuple[int, int, str]]] = [[] for _ in pieces]
     for match in sorted(matches, key=lambda match: (match.start, -match.end)):
         coverage = [
             index
@@ -67,31 +66,31 @@ def project_matches(
         if not coverage:
             continue
         first_piece = coverage[0]
-        if first_piece not in replacement_by_piece:
-            replacement_by_piece[first_piece] = match.replacement
         for index in coverage:
             start, end = offsets[index]
-            removed[index].append((max(match.start, start) - start, min(match.end, end) - start))
+            removed[index].append(
+                (
+                    max(match.start, start) - start,
+                    min(match.end, end) - start,
+                    match.replacement if index == first_piece else "",
+                )
+            )
     output: list[str] = []
     for index, piece in enumerate(pieces):
         spans = removed[index]
         if not spans:
             output.append(piece)
             continue
-        replacement = replacement_by_piece.get(index)
         parts: list[str] = []
         cursor = 0
-        emitted = False
-        for start, end in sorted(set(spans)):
+        for start, end, replacement in sorted(set(spans)):
             if start < cursor:
                 # Overlapping splice inside one piece: keep the wider removal.
                 start = cursor
             if end <= start:
                 continue
             parts.append(piece[cursor:start])
-            if replacement is not None and not emitted:
-                parts.append(replacement)
-                emitted = True
+            parts.append(replacement)
             cursor = end
         parts.append(piece[cursor:])
         output.append(_WHITESPACE_RE.sub(" ", "".join(parts)).strip())

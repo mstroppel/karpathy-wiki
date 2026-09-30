@@ -61,7 +61,7 @@ def parse_result_payload(payload: object) -> TranscriptionResult | None:
         return None
     segments: list = []
     raw_segments = payload.get("segments")
-    if not isinstance(raw_segments, list) or not raw_segments:
+    if not isinstance(raw_segments, list):
         return None
     for raw in raw_segments:
         if not isinstance(raw, dict):

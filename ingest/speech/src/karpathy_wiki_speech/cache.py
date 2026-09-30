@@ -123,8 +123,18 @@ def find_cached_result(
     options: Mapping[str, object],
 ) -> Path | None:
     entry = newest_index_entry(root, audio_sha256, options)
-    if entry is None:
+    if entry is None or entry.get("worker_identity") != current_worker_identity(root):
         return None
     identity = entry["identity"]
     assert isinstance(identity, str)
     return cache_result_path(root, identity)
+
+
+def current_worker_identity(root: Path) -> str | None:
+    """The active worker announces its processing identity before consuming requests."""
+    try:
+        payload = json.loads((root / "worker-identity.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    identity = payload.get("identity") if isinstance(payload, dict) else None
+    return identity if isinstance(identity, str) and identity else None
