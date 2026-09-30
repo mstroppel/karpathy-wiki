@@ -5,22 +5,31 @@ independently deployable PRs.
 
 ## Current priorities
 
-### [#15](https://github.com/mstroppel/karpathy-wiki/issues/15): CUDA and speaker diarization
+### [#130](https://github.com/mstroppel/karpathy-wiki/issues/130): Optional CUDA deployment for local speech
 
 1. Ship an opt-in CUDA speech image with compatible, pinned CUDA/cuDNN,
-   CTranslate2, PyTorch, and pyannote dependencies, plus a Compose override
+   faster-whisper, and CTranslate2 dependencies, plus a Compose override
    reserving an NVIDIA GPU. Document host driver and NVIDIA Container Toolkit
    requirements and the GPU device/compute settings.
-2. Complete the diarization runtime: pin model revisions, document model
-   license acceptance and token setup, configure the processing device, and
-   verify sequential transcription/diarization with GPU-memory release between
-   stages.
-3. Benchmark real models on the target GPU with short, consented one- and
-   two-speaker recordings. Measure VRAM, processing time, and transcription
-   and diarization quality before choosing a supported GPU model preset.
-4. Verify real-model behavior on the host: interrupted sync/worker/restart,
-   diarization disabled, ambiguous or overlapping speakers, and content-free
-   failures that preserve the last published generation.
+2. Benchmark real transcription models on the target GPU with short, consented
+   recordings. Measure VRAM, processing time, and quality before choosing a
+   supported GPU model preset.
+3. Verify GPU-memory lifecycle, interrupted work/restart, unavailable-GPU
+   errors, and content-free failures that preserve the last published
+   generation; provide an opt-in real-GPU smoke test.
+
+### [#131](https://github.com/mstroppel/karpathy-wiki/issues/131): Optional local speaker diarization
+
+1. Deliver a pinned PyTorch/pyannote runtime with CPU support, independently
+   of CUDA deployment. Pin model revisions and document license acceptance,
+   token setup, private model caching, and activation.
+2. Configure the diarization device and validate anonymous speaker turns and
+   transcript alignment with real one- and two-speaker recordings. Verify
+   sequential execution and GPU-memory release when combined with CUDA.
+3. Test diarization disabled, silence, ambiguous/overlapping speakers, missing
+   runtime/model/token, interrupted work/restart, redaction, timing preservation,
+   and cache invalidation after processing changes. Preserve the last published
+   generation on failure and provide a reproducible real-model smoke test.
 
 ### [#26](https://github.com/mstroppel/karpathy-wiki/issues/26): Integration coverage
 
