@@ -5,25 +5,33 @@ independently deployable PRs.
 
 ## Current priorities
 
-### [#15](https://github.com/mstroppel/karpathy-wiki/issues/15): Audio ingest
+### [#15](https://github.com/mstroppel/karpathy-wiki/issues/15): CUDA and speaker diarization
 
-The provider, worker handoff, redaction, and publication are implemented
-(see [audio ingest](docs/audio.md)). Remaining host-side work:
-
-1. Run the bounded local transcription spike on the target host: measure
-   VRAM, processing time, and diarization quality with short, consented
-   one- and two-speaker recordings; confirm the CUDA runtime before
-   choosing the default model preset.
-2. Ship the opt-in CUDA speech image (pinned PyTorch/pyannote stack with an
-   NVIDIA GPU reservation) and the diarization model license/consent flow.
-3. Verify real-model behavior on the host: interrupted sync/worker/restart
-   and diarization-disabled-or-uncertain cases, then close the issue.
+1. Ship an opt-in CUDA speech image with compatible, pinned CUDA/cuDNN,
+   CTranslate2, PyTorch, and pyannote dependencies, plus a Compose override
+   reserving an NVIDIA GPU. Document host driver and NVIDIA Container Toolkit
+   requirements and the GPU device/compute settings.
+2. Complete the diarization runtime: pin model revisions, document model
+   license acceptance and token setup, configure the processing device, and
+   verify sequential transcription/diarization with GPU-memory release between
+   stages.
+3. Benchmark real models on the target GPU with short, consented one- and
+   two-speaker recordings. Measure VRAM, processing time, and transcription
+   and diarization quality before choosing a supported GPU model preset.
+4. Verify real-model behavior on the host: interrupted sync/worker/restart,
+   diarization disabled, ambiguous or overlapping speakers, and content-free
+   failures that preserve the last published generation.
 
 ### [#26](https://github.com/mstroppel/karpathy-wiki/issues/26): Integration coverage
 
-Reassess the remaining acceptance criteria against the coverage reporting and
-disposable source-to-wiki test added in #119. Cover any remaining operational
-failure or restart gap with a focused test, then update or close the issue.
+1. Add a disposable audio-profile integration test using the fake speech
+   backend: WebDAV recording → provider/worker queue → sanitized manifest →
+   wiki status. Exercise worker configuration changes, cache repair, source
+   removal, restarts, and failure/health behavior across real containers.
+2. Validate the speech image on an ARM64 runtime, including native dependency
+   imports and a small real audio decode/transcription smoke test.
+3. Reconcile the remaining #26 acceptance criteria with the test evidence
+   and close the issue once its operational coverage gaps are verified.
 
 ### [#18](https://github.com/mstroppel/karpathy-wiki/issues/18): Multi-language support
 
