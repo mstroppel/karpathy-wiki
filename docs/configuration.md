@@ -113,6 +113,8 @@ tags; block boundaries provide whitespace. A split match inserts its placeholder
 at the first matched source position and removes the remaining matched text,
 leaving intervening tags intact. Comments and script/style source are also
 checked. Output is checked again with the same matching views before publication.
+Overlapping matches across views use the shared anonymizer's configured rule
+precedence (longest literal values first, then phone rules), not view order.
 Ambiguous no-semicolon named references stay literal in attributes; script/style
 raw text is matched literally, without decoding HTML entities.
 Matches touching structural markup are rejected rather than changing tag syntax.

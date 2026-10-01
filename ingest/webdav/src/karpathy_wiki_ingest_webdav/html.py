@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import html
 import re
+from dataclasses import dataclass
 from html.entities import html5
 from html.parser import HTMLParser
 
@@ -171,12 +172,17 @@ def matching_views(source: str) -> tuple[SourceViews, list[tuple[str, list[tuple
         # parser messages (which may contain source text) or kill the daemon.
         raise PrivacyValidationError("HTML source could not be parsed") from None
     return parsed, [
-        # Match full decoded phrases before raw-source fragments (for example
-        # a surname whose first name lives on the other side of an inline tag).
         ("".join(parsed.text), parsed.spans),
         decoded_view(source, contexts=parsed.contexts),
         (source, [(position, position + 1) for position in range(len(source))]),
     ]
+
+
+@dataclass(frozen=True)
+class ProjectedMatch:
+    positions: tuple[int, ...]
+    replacement: str
+    priority: int
 
 
 def redact_html(source: str, anonymizer: TargetedAnonymizer) -> str:
@@ -187,25 +193,39 @@ def redact_html(source: str, anonymizer: TargetedAnonymizer) -> str:
     tag syntax is rejected rather than damaging the document structure.
     """
     parsed, views = matching_views(source)
-    replacements: dict[int, str] = {}
-    removed: set[int] = set()
+    candidates: list[ProjectedMatch] = []
     for text, spans in views:
         for match in anonymizer.locate(text):
-            positions = sorted(
-                {
-                    position
-                    for left, right in spans[match.start : match.end]
-                    for position in range(left, right)
-                }
+            positions = tuple(
+                sorted(
+                    {
+                        position
+                        for left, right in spans[match.start : match.end]
+                        for position in range(left, right)
+                    }
+                )
             )
-            if not positions:
-                continue
-            if any(parsed.protected[position] for position in positions):
-                raise PrivacyValidationError("HTML match touches structural markup")
-            # Views may find the same span; retain the first placeholder.
-            if not removed.intersection(positions):
-                replacements[positions[0]] = match.replacement
-            removed.update(positions)
+            if positions:
+                candidates.append(ProjectedMatch(positions, match.replacement, match.priority))
+    replacements: dict[int, str] = {}
+    removed: set[int] = set()
+    # Preserve locate()'s configured rule precedence across every view, not
+    # just within each view. Equal-priority candidates scan left-to-right;
+    # at the same source start prefer the most complete projected match.
+    for candidate in sorted(
+        candidates,
+        key=lambda candidate: (
+            candidate.priority,
+            candidate.positions[0],
+            -len(candidate.positions),
+        ),
+    ):
+        if removed.intersection(candidate.positions):
+            continue
+        if any(parsed.protected[position] for position in candidate.positions):
+            raise PrivacyValidationError("HTML match touches structural markup")
+        replacements[candidate.positions[0]] = candidate.replacement
+        removed.update(candidate.positions)
     output = "".join(
         replacements.get(position, "") if position in removed else character
         for position, character in enumerate(source)

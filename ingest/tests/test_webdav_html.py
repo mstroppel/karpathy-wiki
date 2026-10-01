@@ -67,6 +67,49 @@ class HtmlRedactionTests(unittest.TestCase):
         source = '<p title="Max&#32;Mustermann">Max <b>Mustermann</b></p>'
         self.assertEqual(redact_html(source, anonymizer), '<p title="[PERSON]">[PERSON]<b></b></p>')
 
+    def test_cross_tag_full_name_wins_over_different_short_placeholder(self):
+        anonymizer = TargetedAnonymizer.from_config(
+            {
+                "people": [
+                    {"values": ["Max"], "replacement": "[FIRST]"},
+                    {"values": ["Max Mustermann"], "replacement": "[FULL]"},
+                ]
+            }
+        )
+        self.assertEqual(
+            redact_html("<p>Max <b>Mustermann</b></p>", anonymizer), "<p>[FULL]<b></b></p>"
+        )
+
+    def test_raw_longer_rule_wins_over_decoded_short_placeholder(self):
+        anonymizer = TargetedAnonymizer.from_config(
+            {
+                "people": [
+                    {"values": ["Max"], "replacement": "[FIRST]"},
+                    {"values": ["Max&amp;Mustermann"], "replacement": "[FULL]"},
+                ]
+            }
+        )
+        self.assertEqual(
+            redact_html("<p>Max&amp;Mustermann; Max</p>", anonymizer),
+            "<p>[FULL]; [FIRST]</p>",
+        )
+
+    def test_located_matches_expose_literal_then_phone_rule_precedence(self):
+        anonymizer = TargetedAnonymizer.from_config(
+            {
+                "people": [
+                    {"values": ["Max"], "replacement": "[FIRST]"},
+                    {"values": ["Max Mustermann"], "replacement": "[FULL]"},
+                ],
+                "phones": [{"values": ["+49 123 456789"], "replacement": "[PHONE]"}],
+            }
+        )
+        matches = anonymizer.locate("Max Mustermann; Max; +49 123 456789")
+        self.assertEqual(
+            [(match.replacement, match.priority) for match in matches],
+            [("[FULL]", 0), ("[FIRST]", 1), ("[PHONE]", 2)],
+        )
+
     def test_matching_tag_name_fails_closed(self):
         anonymizer = TargetedAnonymizer.from_config(
             {"people": [{"values": ["mark"], "replacement": "[PERSON]"}]}
