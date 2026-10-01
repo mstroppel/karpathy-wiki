@@ -99,7 +99,7 @@ class SourceViews(HTMLParser):
         raw = self.get_starttag_text()
         assert raw is not None
         start = self.source_offset()
-        self.protected[start : start + len(raw)] = b"\1" * len(raw)
+        self.protect(start, start + len(raw))
         name = re.match(r"<[^\s/>]+", raw)
         assert name is not None
         for attribute in ATTRIBUTE.finditer(raw, name.end()):
@@ -114,13 +114,48 @@ class SourceViews(HTMLParser):
     def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         self.handle_starttag(tag, attrs)
 
+    def protect(self, left: int, right: int) -> None:
+        """Mark a source range as structural markup that matches must not touch."""
+        right = max(left, right)
+        self.protected[left:right] = b"\1" * (right - left)
+
+    def terminator(self, start: int, *, brackets: bool) -> int:
+        """Scan to the terminator of a declaration-like construct from `start`.
+
+        The tokenizer does not end `<!...>` constructs at the first `>` when
+        that `>` sits inside a quoted string literal or (for `<!DOCTYPE`
+        internal subsets) inside the `[...]` subset brackets, so a plain
+        `find(">")` would leave those tails-matchable and let later matches
+        delete declaration syntax. Scanning mirrors the tokenizer rules:
+        quotes are skipped as literals, and with `brackets` set a `>` only
+        terminates outside `[...]` depth. Unterminated constructs consume the
+        input to the end, so protection extends there rather than silently
+        covering nothing.
+        """
+        source = self.source
+        quote = ""
+        depth = 0
+        for position in range(start, len(source)):
+            character = source[position]
+            if quote:
+                if character == quote:
+                    quote = ""
+            elif character in "'\"":
+                quote = character
+            elif character == ">" and (not brackets or not depth):
+                return position + 1
+            elif brackets and character == "[":
+                depth += 1
+            elif brackets and character == "]":
+                depth = max(depth - 1, 0)
+        return len(source)
+
     def handle_endtag(self, tag: str) -> None:
         self.boundary(tag)
         if tag in {"script", "style"}:
             self.in_raw_text = False
         start = self.source_offset()
-        end = self.source.find(">", start) + 1
-        self.protected[start:end] = b"\1" * (end - start)
+        self.protect(start, self.terminator(start, brackets=False))
 
     def handle_data(self, data: str) -> None:
         start = self.source_offset()
@@ -153,15 +188,34 @@ class SourceViews(HTMLParser):
 
     def protect_declaration(self) -> None:
         start = self.source_offset()
-        end = self.source.find(">", start) + 1
-        self.protected[start:end] = b"\1" * (end - start)
+        self.protect(start, self.terminator(start, brackets=True))
 
     def handle_comment(self, data: str) -> None:
+        """Protect comment syntax while keeping the body matchable.
+
+        HTMLParser routes both real comments (`<!--...-->`) and bogus
+        comments (`<!...>` or malformed `</...>`) through this handler, so
+        the opener width must be detected from the source instead of being
+        hardcoded to the 4-character real-comment form.
+        """
         start = self.source_offset()
-        self.protected[start : start + 4] = b"\1" * 4
-        end = self.source.find(">", start + 4 + len(data)) + 1
-        left = start + 4 + len(data)
-        self.protected[left:end] = b"\1" * (end - left)
+        source = self.source
+        if source.startswith("<!--", start):
+            self.protect(start, start + 4)
+            tail = source[start + 4 :]
+            close = re.match(r"-?>", tail) or re.search(r"--!?>", tail)
+            if close:
+                self.protect(start + 4 + close.start(), start + 4 + close.end())
+                return
+            # The tokenizer consumes an unterminated comment to the end.
+            self.protect(start + 4, len(source))
+            return
+        self.protect(start, start + 2)
+        end = source.find(">", start + 2)
+        if end < 0:
+            self.protect(start + 2, len(source))
+            return
+        self.protect(end, end + 1)
 
 
 def matching_views(source: str) -> tuple[SourceViews, list[tuple[str, list[tuple[int, int]]]]]:

@@ -118,7 +118,13 @@ precedence (longest literal values first, then phone rules), not view order.
 Ambiguous no-semicolon named references stay literal in attributes; script/style
 raw text is matched literally, without decoding HTML entities.
 Matches touching structural markup are rejected rather than changing tag syntax.
-Files that cannot be decoded or fail privacy validation produce content-free
+This also covers configured values inside declaration or processing-instruction
+data: `<!DOCTYPE` and `<?...?>` bodies (including `<![CDATA[...]]>` sections,
+whose `]]>` terminator must survive) are protected as markup, so a value there
+quarantines the file fail-closed instead of being redacted. Unterminated HTML
+constructs consume the input to the end; a value inside one is likewise
+rejected. Files that cannot be decoded or fail privacy validation produce
+content-free
 reports in `quarantine/webdav`; the previous generation remains active.
 
 **Redacted HTML is untrusted source text, not safe-to-render HTML.** Scripts,

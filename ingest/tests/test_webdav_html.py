@@ -163,10 +163,48 @@ class HtmlRedactionTests(unittest.TestCase):
         source = "<!DOCTYPE html><?fixture safe?><![CDATA[safe]]><p>safe</p>"
         self.assertEqual(self.redact(source), source)
 
-    def test_malformed_declaration_is_rejected_content_free(self):
+    def test_decl_data_match_is_rejected_content_free(self):
+        # Values inside declaration / processing-instruction data are not
+        # matchable: blanket protection quarantines the generation fail-closed
+        # (documented in docs/configuration.md).
         with self.assertRaises(PrivacyValidationError) as caught:
-            self.redact("<![Max Mustermann]>")
+            self.redact('<!DOCTYPE d SYSTEM "Max Mustermann.dtd">')
         self.assertNotIn("Mustermann", str(caught.exception))
+
+    def test_decl_terminator_inside_quotes_is_protected(self):
+        # `>` inside quoted declaration data does not terminate the construct;
+        # a value claimed by the data must not delete the real terminators.
+        anonymizer = TargetedAnonymizer.from_config(
+            {"people": [{"values": ['y"> ]>Max Mustermann'], "replacement": "[PERSON]"}]}
+        )
+        with self.assertRaises(PrivacyValidationError):
+            redact_html('<!DOCTYPE d [<!ENTITY a "x>y"> ]>Max Mustermann', anonymizer)
+
+    def test_end_tag_terminator_inside_quoted_attributes_is_protected(self):
+        anonymizer = TargetedAnonymizer.from_config(
+            {"people": [{"values": [">Max Mustermann"], "replacement": "[PERSON]"}]}
+        )
+        with self.assertRaises(PrivacyValidationError):
+            redact_html('text before </p attr="a>b">Max Mustermann', anonymizer)
+
+    def test_bogus_comment_closing_bracket_is_protected(self):
+        # Bogus comments (`<!...>`) arrive through handle_comment with a
+        # 2-character opener; their closing `>` must survive any redaction.
+        anonymizer = TargetedAnonymizer.from_config(
+            {"people": [{"values": ["safe >Max Mustermann"], "replacement": "[PERSON]"}]}
+        )
+        with self.assertRaises(PrivacyValidationError):
+            redact_html("<! safe >Max Mustermann", anonymizer)
+
+    def test_bogus_comment_body_is_matched_and_protects_syntax(self):
+        self.assertEqual(self.redact("<! Max Mustermann <! tail>tail"), "<! [PERSON] <! tail>tail")
+
+    def test_unterminated_comment_value_is_rejected(self):
+        with self.assertRaises(PrivacyValidationError):
+            self.redact("<!-- Max Mustermann")
+        self.assertEqual(
+            self.redact("<!-- only text without matches"), "<!-- only text without matches"
+        )
 
     def test_configured_encoded_literal_is_matched_in_raw_source(self):
         anonymizer = TargetedAnonymizer.from_config(
