@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- WebDAV ingests UTF-8 `.html` and `.htm` alongside Markdown, preserving original
+  HTML paths and markup while locally redacting decoded entities, attributes,
+  comments, script/style source, and text split across tags. HTML remains
+  untrusted active content, not safe-to-render pages. The redaction algorithm
+  fingerprint changes so existing sources are revalidated on the next cycle.
+
 - Audio ingest (#15): the `audio` profile transcribes selected WebDAV
   recordings locally (faster-whisper in the opt-in `audio-speech` worker
   image), optionally diarizes speaker turns, redacts transcripts with the

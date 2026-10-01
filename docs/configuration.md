@@ -103,11 +103,28 @@ source provider. `WEBDAV_VENDOR` defaults to `nextcloud`; rclone also supports
 other WebDAV implementations.
 
 WebDAV files are synchronized into a private staging directory first. The
-`webdav-ingest` service processes only files whose name ends in `.md`, applies
-`REDACTIONS_FILE` locally, and publishes only UTF-8 Markdown files to
-`sources/webdav`; non-Markdown files are ignored, while Markdown files that
-cannot be read as text are kept out of the source tree and written to
-`quarantine/webdav`. A failed upstream synchronization is retried on the next
+`webdav-ingest` service processes files whose name ends in `.md`, `.html`, or
+`.htm` (case-insensitively), applies `REDACTIONS_FILE` locally, and publishes
+UTF-8 Markdown and HTML files to `sources/webdav`. Other formats are ignored.
+HTML stays HTML: original paths, tags, attributes, formatting, and line endings
+are preserved except for targeted replacements. Matching covers literal source,
+decoded HTML entities (including attribute values), and text split across inline
+tags; block boundaries provide whitespace. A split match inserts its placeholder
+at the first matched source position and removes the remaining matched text,
+leaving intervening tags intact. Comments and script/style source are also
+checked. Output is checked again with the same matching views before publication.
+Matches touching structural markup are rejected rather than changing tag syntax.
+Files that cannot be decoded or fail privacy validation produce content-free
+reports in `quarantine/webdav`; the previous generation remains active.
+
+**Redacted HTML is untrusted source text, not safe-to-render HTML.** Scripts,
+event handlers, links, and embedded resources are not removed or executed, and
+linked resources are not downloaded. Do not serve these files as trusted pages.
+Matching does not interpret JavaScript/CSS escapes, URL encoding, or dynamically
+generated content; the deny-list is not a guarantee of complete anonymization.
+Review output before sending it to an external model provider.
+
+A failed upstream synchronization is retried on the next
 `WEBDAV_SYNC_INTERVAL` and surfaced through the Compose healthcheck instead of
 restarting the daemon.
 After every successful cycle the provider manifest `sources/webdav/manifest.json`

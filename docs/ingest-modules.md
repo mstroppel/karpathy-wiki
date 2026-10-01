@@ -155,17 +155,22 @@ provided: installations upgrade by re-running ingest and re-importing pages.
 A module must guarantee the same properties the built-ins provide:
 
 - Read the shared `REDACTIONS_FILE` secret (JSON) and build a
-  `TargetedAnonymizer` from it; never write content that has not passed
-  `anonymize()` without raising `PrivacyValidationError` on residual matches.
+  `TargetedAnonymizer` from it; validate redacted output with `anonymize()` or
+  format-aware matching views backed by `locate()`, raising
+  `PrivacyValidationError` on residual matches. WebDAV HTML checks literal
+  source, decoded entities, and text joined across tags before publication.
 - Publish coherent output only. A provider that exposes multiple files for one
   synchronization must build the complete sanitized tree in a private staging
   area and expose it in one atomic publication step, keeping the last
   successful generation active after any failure (the built-in WebDAV plugin
   publishes generations behind an atomic `current` symlink).
-- Write sanitized Markdown only to `SANITIZED_ROOT`, non-destructively via
+- Write only privacy-validated UTF-8 source text (Markdown or HTML) to
+  `SANITIZED_ROOT`, non-destructively via
   `atomic_write()`; files that fail text decoding or privacy validation go to
   `QUARANTINE_ROOT` as content-free error reports and are removed from the
-  sanitized tree.
+  candidate sanitized tree. HTML retains active content and must be treated as
+  untrusted source text, not safe-to-render pages; redaction is not HTML
+  sanitization.
 - Operate under `PUID:PGID`, honor a `--once` flag for one-shot runs, and
   tolerate concurrent wiki reads during writes.
 - Keep the source layout and front matter format versioned; OpenCode and the

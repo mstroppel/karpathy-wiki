@@ -18,7 +18,7 @@ PLACEHOLDER_RE = re.compile(r"^\[[A-Z][A-Z0-9_]*\]$")
 # Bump when a change alters which content is redacted or how it is transformed.
 # The fingerprint invalidates previously published sanitized output on the next
 # ingest cycle without requiring users to edit their redaction configuration.
-REDACTION_ALGORITHM_VERSION = 1
+REDACTION_ALGORITHM_VERSION = 2
 
 
 class PrivacyValidationError(ValueError):

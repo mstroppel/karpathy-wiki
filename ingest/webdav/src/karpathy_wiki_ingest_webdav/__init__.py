@@ -1,7 +1,7 @@
 """WebDAV ingest plugin: publish upstream files as coherent sanitized generations.
 
 Every synchronization cycle builds a complete generation in a private staging
-directory, anonymizes and validates every Markdown file with a freshly loaded
+directory, anonymizes and validates every Markdown/HTML file with a freshly loaded
 redaction configuration, and only then exposes it to readers by atomically
 switching the ``current`` symlink and rewriting the provider manifest. A failed
 cycle keeps the last successful generation active.
@@ -48,6 +48,7 @@ from karpathy_wiki_ingest.state import (
     StateError,
     StateStore,
 )
+from karpathy_wiki_ingest_webdav.html import redact_html
 
 LOG = logging.getLogger("karpathy-wiki-webdav")
 
@@ -91,12 +92,12 @@ class GenerationItem:
     revision: str
 
 
-def markdown_source_files(incoming: Path) -> set[Path]:
-    """Return relative paths for all Markdown files in the staging tree."""
+def source_files(incoming: Path) -> set[Path]:
+    """Return relative paths for supported Markdown and HTML source files."""
     return {
         path.relative_to(incoming)
         for path in incoming.rglob("*")
-        if path.is_file() and path.suffix.lower() == ".md"
+        if path.is_file() and path.suffix.lower() in {".md", ".html", ".htm"}
     }
 
 
@@ -108,7 +109,7 @@ def upstream_inventory(incoming: Path) -> dict[str, str]:
     """
     return {
         relative.as_posix(): file_revision(incoming / relative)
-        for relative in sorted(markdown_source_files(incoming))
+        for relative in sorted(source_files(incoming))
     }
 
 
@@ -147,12 +148,12 @@ def sanitize_into_generation(
     anonymizer: TargetedAnonymizer,
     quarantine: Path,
 ) -> tuple[list[GenerationItem], list[dict[str, str]], int]:
-    """Anonymize every upstream Markdown file into the fresh generation directory.
+    """Anonymize every supported upstream file into the fresh generation directory.
 
     Files that cannot be decoded or that fail privacy validation never enter
     the generation; they are reported content-free and counted as failed.
     """
-    incoming_files = markdown_source_files(incoming)
+    incoming_files = source_files(incoming)
     items: list[GenerationItem] = []
     errors: list[dict[str, str]] = []
     failed = 0
@@ -160,8 +161,11 @@ def sanitize_into_generation(
         source = incoming / relative
         target = staging / relative
         try:
-            content = source.read_text(encoding="utf-8")
-            output, _ = anonymizer.anonymize(content)
+            if relative.suffix.lower() in {".html", ".htm"}:
+                with source.open(encoding="utf-8", newline="") as handle:
+                    output = redact_html(handle.read(), anonymizer)
+            else:
+                output, _ = anonymizer.anonymize(source.read_text(encoding="utf-8"))
             revision = hashlib.sha256(output.encode("utf-8")).hexdigest()
             atomic_write(target, output)
             items.append(
