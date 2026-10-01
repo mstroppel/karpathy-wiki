@@ -18,7 +18,7 @@ PLACEHOLDER_RE = re.compile(r"^\[[A-Z][A-Z0-9_]*\]$")
 # Bump when a change alters which content is redacted or how it is transformed.
 # The fingerprint invalidates previously published sanitized output on the next
 # ingest cycle without requiring users to edit their redaction configuration.
-REDACTION_ALGORITHM_VERSION = 1
+REDACTION_ALGORITHM_VERSION = 3
 
 
 class PrivacyValidationError(ValueError):
@@ -69,12 +69,13 @@ class LiteralRule:
 
 @dataclass(frozen=True)
 class DenyMatch:
-    """One deny-list match in the coordinates of the original text."""
+    """One deny-list match with original coordinates and configured rule priority."""
 
     start: int
     end: int
     replacement: str
     category: str
+    priority: int
 
 
 def replace_matches(text: str, matches: list[DenyMatch]) -> str:
@@ -323,9 +324,11 @@ class TargetedAnonymizer:
         example timed transcript segments joined into one continuous string)
         and derive their own replacements. Earlier rules take precedence:
         candidates overlapping an accepted span are discarded.
+        ``priority`` carries this rule order for callers resolving overlapping
+        matches projected from multiple views; smaller values take precedence.
         """
         matches: list[DenyMatch] = []
-        for rule in self.literal_rules:
+        for priority, rule in enumerate(self.literal_rules):
             for match in rule.pattern.finditer(text):
                 if any(
                     match.start() < prior.end and prior.start < match.end() for prior in matches
@@ -337,6 +340,7 @@ class TargetedAnonymizer:
                         end=match.end(),
                         replacement=rule.replacement,
                         category=rule.category,
+                        priority=priority,
                     )
                 )
 
@@ -349,6 +353,7 @@ class TargetedAnonymizer:
                 end=match.end(),
                 replacement=replacement,
                 category="PHONE",
+                priority=len(self.literal_rules),
             )
 
         for match in PHONE_CANDIDATE_RE.finditer(text):

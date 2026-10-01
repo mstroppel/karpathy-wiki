@@ -76,6 +76,7 @@ mkdir -p "$scratch_dir/data" "$scratch_dir/secrets" "$scratch_dir/fixture/Wiki S
 cp tests/integration/fixtures/redactions.json "$scratch_dir/secrets/redactions.json"
 printf 'integration-token\n' >"$scratch_dir/secrets/paperless-token"
 printf '# Meeting\n\nMax Mustermann approved the first draft.\n' >"$scratch_dir/fixture/Wiki Sources/notes.md"
+printf '<!DOCTYPE html>\r\n<p title="Max&#32;Mustermann">Max <b>Mustermann</b> approved the first draft.</p><script>/* fixture */</script>\r\n' >"$scratch_dir/fixture/Wiki Sources/notes.html"
 
 password=$(od -An -N24 -tx1 </dev/urandom | tr -d ' \n')
 env_file="$scratch_dir/env"
@@ -162,10 +163,11 @@ compose run --rm webdav-ingest webdav --once || fail "WebDAV initial sync failed
 share_wiki_with_host || fail "cannot access the wiki after initial synchronization"
 node tests/integration/publication.mjs "$scratch_dir/data" new publish \
   || fail "new source was not published as a current wiki page"
-wiki_git add sources/webdav/notes.md/index.md
+wiki_git add sources/webdav/notes.md/index.md sources/webdav/notes.html/index.md
 wiki_git -c commit.gpgsign=false commit -m "docs(wiki): import integration source" \
   || fail "cannot commit the first wiki source page"
 printf '# Meeting\n\nMax Mustermann approved the revised draft.\n' >"$scratch_dir/fixture/Wiki Sources/notes.md"
+printf '<!DOCTYPE html>\r\n<p title="Max&#32;Mustermann">Max <b>Mustermann</b> approved the revised draft.</p><script>/* fixture */</script>\r\n' >"$scratch_dir/fixture/Wiki Sources/notes.html"
 # rclone serve caches directory entries and size metadata. Restart the
 # disposable server so a host-side fixture edit is visible to the next sync.
 compose restart webdav-fixture || fail "cannot restart WebDAV fixture after the update"
@@ -174,7 +176,7 @@ compose run --rm webdav-ingest webdav --once || fail "WebDAV update sync failed"
 share_wiki_with_host || fail "cannot access the wiki after the update"
 node tests/integration/publication.mjs "$scratch_dir/data" outdated publish \
   || fail "updated source was not republished"
-wiki_git add sources/webdav/notes.md/index.md
+wiki_git add sources/webdav/notes.md/index.md sources/webdav/notes.html/index.md
 wiki_git -c commit.gpgsign=false commit -m "docs(wiki): update integration source" \
   || fail "cannot commit the updated wiki source page"
 node tests/integration/publication.mjs "$scratch_dir/data" current \

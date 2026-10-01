@@ -150,7 +150,7 @@ for a consistent backup and a separate-instance restore check.
 
 - Never commit `.env`, tokens, redaction lists, source material, wiki content, or sessions.
 - Paperless redaction is an explicit deny-list, not general anonymization. Review output before sending it to an external model provider.
-- WebDAV text is locally redacted using the configured deny-list before publication to `sources/webdav`; unknown sensitive values may remain. Review sanitized output before sending it to a model provider.
+- WebDAV Markdown and HTML are locally redacted using the configured deny-list before publication to `sources/webdav`; unknown sensitive values may remain. HTML keeps its original format and active content: treat it as untrusted source text, not safe-to-render pages. Review redacted output before sending it to a model provider.
 - Put OpenCode and `raw-files` behind a trusted, authenticated reverse proxy; do not expose them directly to the internet.
 - The OpenCode configuration is not a substitute for host-level network isolation or least-privilege model credentials.
 

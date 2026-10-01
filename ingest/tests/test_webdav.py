@@ -8,6 +8,7 @@ import threading
 import time
 import unittest
 from collections.abc import Callable
+from contextlib import closing
 from pathlib import Path
 from unittest import mock
 
@@ -108,7 +109,7 @@ class PublicationTests(unittest.TestCase):
         )
         self.assertRegex(metadata["upstream_inventory"]["notes.md"], r"^[0-9a-f]{64}$")
 
-    def test_non_markdown_files_are_ignored(self):
+    def test_unsupported_files_are_ignored(self):
         (self.incoming / "notes.md").write_text("safe", encoding="utf-8")
         (self.incoming / "attachment.txt").write_text("ignored", encoding="utf-8")
 
@@ -118,6 +119,65 @@ class PublicationTests(unittest.TestCase):
         self.assertTrue(self.current_path("notes.md").is_file())
         self.assertFalse(self.current_path("attachment.txt").exists())
         self.assertFalse((self.quarantine / "attachment.txt.error").exists())
+
+    def test_html_and_markdown_keep_distinct_original_paths(self):
+        for filename in ("page.md", "page.html", "page.HTM"):
+            (self.incoming / filename).write_bytes(b"<p>Max <b>Mustermann</b></p>\r\n")
+        self.assertEqual(self.publish(), (3, 0))
+        for filename in ("page.html", "page.HTM"):
+            self.assertEqual(self.current_path(filename).read_bytes(), b"<p>[ICH]<b></b></p>\r\n")
+        self.assertEqual(
+            set(upstream_inventory(self.incoming)), {"page.md", "page.html", "page.HTM"}
+        )
+        manifest = json.loads((self.sanitized / "manifest.json").read_text())
+        for item in manifest["items"]:
+            key = item["source_key"]
+            self.assertEqual(item["wiki_path"], f"webdav/{key}/index.md")
+            self.assertTrue(item["source_path"].endswith(f"/{key}"))
+        self.assertTrue(
+            published_matches(self.sanitized, anonymizer(), upstream_inventory(self.incoming))
+        )
+
+    def test_invalid_html_preserves_previous_generation_and_content_free_report(self):
+        (self.incoming / "page.html").write_text("<p>safe</p>")
+        self.publish()
+        previous = active(self.sanitized)
+        (self.incoming / "page.html").write_bytes(b"<p>Max Mustermann\xff</p>")
+        self.assertEqual(self.publish(), (0, 1))
+        self.assertEqual(active(self.sanitized), previous)
+        report = (self.quarantine / "page.html.error").read_text()
+        self.assertIn("UnicodeDecodeError", report)
+        self.assertNotIn("Mustermann", report)
+
+    def test_html_matching_failure_preserves_previous_generation(self):
+        (self.incoming / "page.html").write_text("<p>safe</p>")
+        self.publish()
+        previous = active(self.sanitized)
+        (self.incoming / "page.html").write_text("<mark>safe</mark>")
+        redactor = TargetedAnonymizer.from_config(
+            {"people": [{"values": ["mark"], "replacement": "[PERSON]"}]}
+        )
+        self.assertEqual(self.publish(redactor), (0, 1))
+        self.assertEqual(active(self.sanitized), previous)
+
+    def test_html_cycles_are_idempotent_and_track_edits_and_deletions(self):
+        with closing(StateStore.open(self.root / "state.sqlite3")) as store:
+
+            def cycle():
+                return process_cycle(
+                    self.incoming, self.sanitized, self.quarantine, anonymizer(), store, interval=60
+                )
+
+            (self.incoming / "page.html").write_text("<p>Max <b>Mustermann</b></p>")
+            self.assertEqual(cycle(), (1, 0, False))
+            previous = active(self.sanitized)
+            self.assertEqual(cycle(), (0, 0, False))
+            self.assertEqual(active(self.sanitized), previous)
+            (self.incoming / "page.html").write_text("<p>updated</p>")
+            self.assertEqual(cycle(), (1, 0, False))
+            (self.incoming / "page.html").unlink()
+            self.assertEqual(cycle(), (0, 0, False))
+            self.assertFalse(self.current_path("page.html").exists())
 
     def test_manifest_describes_stable_wiki_paths_and_immutable_source_paths(self):
         (self.incoming / "nested").mkdir()
