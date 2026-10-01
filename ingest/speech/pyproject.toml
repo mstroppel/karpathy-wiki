@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools==84.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "karpathy-wiki-speech"
+version = "0.1.0"
+description = "Local speech processing interface for Karpathy Wiki: timed transcription and optional diarization"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+dependencies = []
+classifiers = ["Programming Language :: Python :: 3", "Typing :: Typed"]
+
+[project.urls]
+Source = "https://github.com/mstroppel/karpathy-wiki"
+
+[project.optional-dependencies]
+whisper = ["faster-whisper==1.2.1"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"*" = ["py.typed"]

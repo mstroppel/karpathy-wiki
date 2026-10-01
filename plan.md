@@ -5,24 +5,42 @@ independently deployable PRs.
 
 ## Current priorities
 
-### [#15](https://github.com/mstroppel/karpathy-wiki/issues/15): Audio ingest
+### [#130](https://github.com/mstroppel/karpathy-wiki/issues/130): Optional CUDA deployment for local speech
 
-See [audio ingest concept](docs/audio-ingest-concept.md) for the proposed
-WebDAV, local transcription, speaker diarization and publication boundaries.
+1. Ship an opt-in CUDA speech image with compatible, pinned CUDA/cuDNN,
+   faster-whisper, and CTranslate2 dependencies, plus a Compose override
+   reserving an NVIDIA GPU. Document host driver and NVIDIA Container Toolkit
+   requirements and the GPU device/compute settings.
+2. Benchmark real transcription models on the target GPU with short, consented
+   recordings. Measure VRAM, processing time, and quality before choosing a
+   supported GPU model preset.
+3. Verify GPU-memory lifecycle, interrupted work/restart, unavailable-GPU
+   errors, and content-free failures that preserve the last published
+   generation; provide an opt-in real-GPU smoke test.
 
-1. Add an audio provider using the versioned manifest contract and discover
-   WebDAV audio files idempotently by hash.
-2. Use a replaceable transcription backend with optional speaker diarization;
-   emit Markdown with timestamps, speaker labels and provenance.
-3. Anonymize transcripts before publication. Make external transcription
-   opt-in and explicitly configured. Keep transcription reusable by other
-   providers, including email ingest.
+### [#131](https://github.com/mstroppel/karpathy-wiki/issues/131): Optional local speaker diarization
+
+1. Deliver a pinned PyTorch/pyannote runtime with CPU support, independently
+   of CUDA deployment. Pin model revisions and document license acceptance,
+   token setup, private model caching, and activation.
+2. Configure the diarization device and validate anonymous speaker turns and
+   transcript alignment with real one- and two-speaker recordings. Verify
+   sequential execution and GPU-memory release when combined with CUDA.
+3. Test diarization disabled, silence, ambiguous/overlapping speakers, missing
+   runtime/model/token, interrupted work/restart, redaction, timing preservation,
+   and cache invalidation after processing changes. Preserve the last published
+   generation on failure and provide a reproducible real-model smoke test.
 
 ### [#26](https://github.com/mstroppel/karpathy-wiki/issues/26): Integration coverage
 
-Reassess the remaining acceptance criteria against the coverage reporting and
-disposable source-to-wiki test added in #119. Cover any remaining operational
-failure or restart gap with a focused test, then update or close the issue.
+1. Add a disposable audio-profile integration test using the fake speech
+   backend: WebDAV recording → provider/worker queue → sanitized manifest →
+   wiki status. Exercise worker configuration changes, cache repair, source
+   removal, restarts, and failure/health behavior across real containers.
+2. Validate the speech image on an ARM64 runtime, including native dependency
+   imports and a small real audio decode/transcription smoke test.
+3. Reconcile the remaining #26 acceptance criteria with the test evidence
+   and close the issue once its operational coverage gaps are verified.
 
 ### [#18](https://github.com/mstroppel/karpathy-wiki/issues/18): Multi-language support
 
@@ -46,8 +64,8 @@ failure or restart gap with a focused test, then update or close the issue.
    recipient metadata are handled.
 3. Convert the selected message body and supported attachments to sanitized
    source entries with provenance and a versioned provider manifest. Apply
-   local redaction before wiki/model access, and use the shared transcription
-   provider for audio attachments when enabled.
+   local redaction before wiki/model access, and use the shared
+   `karpathy-wiki-speech` worker for audio attachments when enabled.
 4. Cover exact-address filtering, malformed messages, attachment handling,
    duplicates, failures and restarts with tests; document mailbox setup,
    retention and deletion behavior.

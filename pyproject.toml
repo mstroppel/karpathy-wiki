@@ -22,14 +22,18 @@ select = [
 [tool.ruff.lint.isort]
 known-first-party = [
   "karpathy_wiki_ingest",
+  "karpathy_wiki_ingest_audio",
   "karpathy_wiki_ingest_webdav",
   "karpathy_wiki_ingest_paperless",
+  "karpathy_wiki_speech",
 ]
 
 [tool.mypy]
 files = [
   "ingest/core/src/karpathy_wiki_ingest",
   "ingest/webdav/src/karpathy_wiki_ingest_webdav",
+  "ingest/audio/src/karpathy_wiki_ingest_audio",
+  "ingest/speech/src/karpathy_wiki_speech",
   "ingest/paperless/src/karpathy_wiki_ingest_paperless",
   "ingest/tests",
   "tests",

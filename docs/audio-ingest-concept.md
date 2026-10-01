@@ -1,5 +1,9 @@
 # Audio ingest concept (#15)
 
+Status: the provider, worker handoff, redaction, and publication are
+implemented (see [audio ingest](audio.md)); the remaining items are the
+host-side model benchmark and the opt-in CUDA image (below).
+
 ## Goal and boundaries
 
 Turn selected WebDAV audio recordings into locally transcribed, optionally

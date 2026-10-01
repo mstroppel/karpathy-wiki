@@ -104,40 +104,81 @@ class IngestPackageTests(unittest.TestCase):
 
     def test_ingest_distributions_are_pinned_in_lockstep(self):
         versions = {}
-        for directory in ("core", "webdav", "paperless"):
+        for directory in ("core", "webdav", "audio", "speech", "paperless"):
             with self.subTest(package=directory):
                 project = read_ingest_project(directory)
-                expected_name = (
-                    "karpathy-wiki-ingest"
-                    if directory == "core"
-                    else f"karpathy-wiki-ingest-{directory}"
-                )
+                expected_name = {
+                    "core": "karpathy-wiki-ingest",
+                    "speech": "karpathy-wiki-speech",
+                }.get(directory, f"karpathy-wiki-ingest-{directory}")
                 self.assertEqual(project["name"], expected_name)
                 versions[directory] = project["version"]
         self.assertEqual(len(set(versions.values())), 1, "ingest distributions ship in lockstep")
 
     def test_plugins_depend_on_the_core_version(self):
         version = read_ingest_project("core")["version"]
-        for directory in ("webdav", "paperless"):
+        for directory in ("webdav", "audio", "paperless"):
             with self.subTest(package=directory):
-                self.assertIn(
-                    f"karpathy-wiki-ingest=={version}",
-                    read_ingest_project(directory)["dependencies"],
-                )
+                dependencies = read_ingest_project(directory)["dependencies"]
+                self.assertIn(f"karpathy-wiki-ingest=={version}", dependencies)
+        # The audio provider additionally uses the shared speech library.
+        audio_dependencies = read_ingest_project("audio")["dependencies"]
+        self.assertIn(f"karpathy-wiki-speech=={version}", audio_dependencies)
+
+    def test_speech_runtime_requirements_are_hash_pinned(self):
+        requirements = read(ROOT / "ingest" / "speech" / "requirements.txt")
+        pins: dict[str, set[str]] = {}
+        for line in requirements.replace("\\\n", " ").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            with self.subTest(requirement=line):
+                self.assertRegex(line, r"^[\w-]+==\d[\w.]*(?:\s+--hash=sha256:[0-9a-f]{64})+$")
+                name = line.split("==", 1)[0].replace("-", "_").lower()
+                self.assertNotIn(name, pins, "duplicate speech dependency")
+                pins[name] = set(re.findall(r"--hash=sha256:([0-9a-f]{64})", line))
+        self.assertIn("faster_whisper", pins)
+        # These native dependencies need distinct amd64 and arm64 wheels on
+        # CPython 3.12. Catch missing pins and single-architecture lock updates;
+        # actual wheel compatibility/digests are verified with pip download.
+        for name in (
+            "ctranslate2",
+            "av",
+            "tokenizers",
+            "onnxruntime",
+            "hf_xet",
+            "numpy",
+            "protobuf",
+            "pyyaml",
+        ):
+            with self.subTest(native_dependency=name):
+                self.assertIn(name, pins)
+                self.assertGreaterEqual(len(pins[name]), 2, "missing amd64/arm64 wheel hashes")
 
     def test_build_backends_are_pinned(self):
         requires_pin = f"setuptools=={ingest_setuptools_version()}"
-        for directory in ("core", "webdav", "paperless"):
+        for directory in ("core", "webdav", "audio", "speech", "paperless"):
             with self.subTest(package=directory):
                 data = tomllib.loads(read(ROOT / "ingest" / directory / "pyproject.toml"))
                 self.assertIn(requires_pin, data["build-system"]["requires"])
 
     def test_bake_and_compose_target_the_split_ingest_images(self):
         bake = read(BAKE_FILE)
-        for target in ("ingest", "ingest-webdav", "ingest-paperless"):
+        for target in (
+            "ingest",
+            "ingest-webdav",
+            "ingest-audio",
+            "ingest-speech",
+            "ingest-paperless",
+        ):
             self.assertIn(f'target "{target}"', bake)
         compose = read(ROOT / "compose.yaml")
-        for image in ("karpathy-wiki-ingest-webdav", "karpathy-wiki-ingest-paperless"):
+        for image in (
+            "karpathy-wiki-ingest-webdav",
+            "karpathy-wiki-ingest-audio",
+            "karpathy-wiki-ingest-speech",
+            "karpathy-wiki-ingest-paperless",
+        ):
             self.assertIn(f"ghcr.io/mstroppel/{image}", compose)
 
 
@@ -165,19 +206,29 @@ class IngestBuildIsolationTests(unittest.TestCase):
         install_lines = [line for line in content.splitlines() if "pip install" in line]
         self.assertTrue(install_lines, "no pip install step")
         for line in install_lines:
-            if "build-requirements.txt" in line:
-                # The hash-pinned build backend preinstall is the only index
-                # access; wheel builds and image installs never resolve there.
+            if "build-requirements.txt" in line or "speech-requirements.txt" in line:
+                # The hash-pinned build backend preinstall and the hash-pinned
+                # speech runtime are the only index accesses; both install
+                # with --require-hashes so nothing is resolved unpinned.
                 self.assertIn("--require-hashes", line)
-                self.assertIn("--no-deps", line)
-            else:
+                self.assertTrue(
+                    "--no-deps" in line or "--only-binary=:all:" in line,
+                    f"unpinned wheel resolution: {line}",
+                )
+            elif "/wheels" in line:
                 self.assertIn("--no-index", line)
 
 
 class IngestImageIsolationTests(unittest.TestCase):
-    """No final stage may contain another plugin's wheel in any layer."""
+    """No final stage may contain another plugin's wheel in any layer.
+
+    ``karpathy-wiki-speech`` is a shared library (like the core), not a
+    plugin: the audio stage ships it alongside the audio wheel, and the
+    speech stage ships it alone.
+    """
 
     PLUGIN_WHEEL_DIRS = ("webdav", "paperless")
+    SHARED_WHEEL_DIRS = ("core", "speech")
 
     def ingest_stage(self, stage: str) -> list[str]:
         lines = read(INGEST_DOCKERFILE).splitlines()
@@ -191,7 +242,13 @@ class IngestImageIsolationTests(unittest.TestCase):
         return lines[start:end]
 
     def test_each_final_stage_copies_only_its_own_plugin_wheel(self):
-        for stage, plugin in (("core", None), ("webdav", "webdav"), ("paperless", "paperless")):
+        for stage, plugin in (
+            ("core", None),
+            ("webdav", "webdav"),
+            ("audio", "audio"),
+            ("speech", None),
+            ("paperless", "paperless"),
+        ):
             with self.subTest(stage=stage):
                 block = "\n".join(self.ingest_stage(stage))
                 if plugin:
@@ -204,6 +261,10 @@ class IngestImageIsolationTests(unittest.TestCase):
                             msg=f"{stage} stage ships another plugin's wheel",
                         )
                 self.assertNotIn("COPY --from=build /wheels /wheels", block)
+
+    def test_audio_stage_ships_the_shared_speech_library(self):
+        block = "\n".join(self.ingest_stage("audio"))
+        self.assertIn("/wheels/speech", block)
 
 
 class RcloneVersionTests(unittest.TestCase):

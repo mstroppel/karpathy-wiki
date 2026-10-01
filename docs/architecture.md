@@ -1,10 +1,12 @@
 # Architecture
 
 The core services are `init`, `opencode`, and `silverbullet`. Optional source
-and export services are enabled with Compose profiles. The `webdav-ingest` and
-`paperless-ingest` services use dedicated images (`karpathy-wiki-ingest-webdav`
-and `karpathy-wiki-ingest-paperless`) that contain only the shared ingest core
-and their own plugin. Ingest is
+and export services are enabled with Compose profiles. The `webdav-ingest`,
+`audio-ingest`, and `paperless-ingest` services use dedicated images
+(`karpathy-wiki-ingest-webdav`, `karpathy-wiki-ingest-audio`, and
+`karpathy-wiki-ingest-paperless`) that contain only the shared ingest core
+and their own plugin; audio additionally uses the separate local speech
+worker image (`karpathy-wiki-ingest-speech`). Ingest is
 plugin-based; additional modules can live in separate repositories (see
 `ingest-modules.md`).
 
@@ -12,6 +14,9 @@ plugin-based; additional modules can live in separate repositories (see
 WebDAV ------- rclone -> local redaction -> sources/webdav/ ------+
                           (coherent generations,                  |
                            atomic current switch)                 |
+WebDAV audio -- rclone snapshot -> local speech worker ->         |
+                  local redaction -> sources/audio/ --------------+
+                                        (coherent generations)     |
 Paperless ---- local redaction (optional) -> sources/paperless/ --+--> OpenCode
                                         (coherent generations)      |
 Confirmed Q&A -> local inbox -> local redaction -> sources/answers/ -+

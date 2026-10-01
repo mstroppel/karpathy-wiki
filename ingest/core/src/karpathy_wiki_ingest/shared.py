@@ -67,6 +67,28 @@ class LiteralRule:
     pattern: re.Pattern[str]
 
 
+@dataclass(frozen=True)
+class DenyMatch:
+    """One deny-list match in the coordinates of the original text."""
+
+    start: int
+    end: int
+    replacement: str
+    category: str
+
+
+def replace_matches(text: str, matches: list[DenyMatch]) -> str:
+    """Apply non-overlapping matches to ``text`` in original coordinates."""
+    parts: list[str] = []
+    position = 0
+    for match in sorted(matches, key=lambda match: match.start):
+        parts.append(text[position : match.start])
+        parts.append(match.replacement)
+        position = match.end
+    parts.append(text[position:])
+    return "".join(parts)
+
+
 class TargetedAnonymizer:
     CATEGORIES = {
         "people": "PERSON",
@@ -288,6 +310,54 @@ class TargetedAnonymizer:
 
     def contains_person_name(self, text: str) -> bool:
         return any(pattern.search(text) for pattern in self.person_name_patterns)
+
+    def locate(self, text: str) -> list[DenyMatch]:
+        """Return every deny-list match in the coordinates of ``text``.
+
+        The match set is the same the ``anonymize()`` replacement pass uses:
+        literal rules in configured order, then phone candidates whose
+        canonical form is configured. Regex alternations are scanned
+        left-to-right, so overlapping literal rules resolve like ``re.sub``
+        does (longest names first by construction). Callers project these
+        original-coordinate matches onto other views of the same text (for
+        example timed transcript segments joined into one continuous string)
+        and derive their own replacements. Earlier rules take precedence:
+        candidates overlapping an accepted span are discarded.
+        """
+        matches: list[DenyMatch] = []
+        for rule in self.literal_rules:
+            for match in rule.pattern.finditer(text):
+                if any(
+                    match.start() < prior.end and prior.start < match.end() for prior in matches
+                ):
+                    continue
+                matches.append(
+                    DenyMatch(
+                        start=match.start(),
+                        end=match.end(),
+                        replacement=rule.replacement,
+                        category=rule.category,
+                    )
+                )
+
+        def phone_match(match: re.Match[str]) -> DenyMatch | None:
+            replacement = self.phone_replacements.get(canonical_phone(match.group()))
+            if replacement is None:
+                return None
+            return DenyMatch(
+                start=match.start(),
+                end=match.end(),
+                replacement=replacement,
+                category="PHONE",
+            )
+
+        for match in PHONE_CANDIDATE_RE.finditer(text):
+            candidate = phone_match(match)
+            if candidate is not None and not any(
+                candidate.start < prior.end and prior.start < candidate.end for prior in matches
+            ):
+                matches.append(candidate)
+        return matches
 
 
 def literal_pattern(value: str) -> re.Pattern[str]:

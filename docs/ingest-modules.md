@@ -10,6 +10,12 @@ ingest/
                                               dispatch; ships no plugins
   webdav/     karpathy-wiki-ingest-webdav     rclone sync + generation publisher
               (karpathy_wiki_ingest_webdav)
+  audio/      karpathy-wiki-ingest-audio      WebDAV audio snapshots + local
+              (karpathy_wiki_ingest_audio)    transcription + publication
+  speech/     karpathy-wiki-speech            speech worker library: timed
+              (karpathy_wiki_speech)          segments, faster-whisper backend,
+                                              queue/cache between providers and
+                                              the worker image
   paperless/  karpathy-wiki-ingest-paperless  Paperless API + sanitizer loop
               (karpathy_wiki_ingest_paperless)
 ```
