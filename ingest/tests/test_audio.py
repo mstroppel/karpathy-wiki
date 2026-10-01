@@ -621,6 +621,74 @@ class CycleHarness(unittest.TestCase):
         return sources[-1].read_text(encoding="utf-8")
 
 
+class DaemonSchedulingTests(CycleHarness):
+    def test_short_interval_waits_for_transcription_and_reuses_completed_work(self):
+        from karpathy_wiki_ingest_audio import publisher
+
+        redactions = self.root / "redactions.json"
+        redactions.write_text(json.dumps(ANONYMIZER_CONFIGURATION), encoding="utf-8")
+        clock = 1000
+        sync_times: list[int] = []
+        wait_times: list[int] = []
+        stop_event = mock.Mock()
+        stop_event.is_set.return_value = False
+        instant_worker = publisher.await_result
+
+        def synchronize(incoming, _remote):
+            sync_times.append(clock)
+            write_recording(incoming, "meeting.mp3")
+
+        def slow_worker(*args, **kwargs):
+            nonlocal clock
+            # More than two sync intervals pass before the worker answers.
+            clock += 125
+            self.assertEqual(sync_times, [1000])
+            self.assertEqual(wait_times, [])
+            return instant_worker(*args, **kwargs)
+
+        def wait(interval):
+            nonlocal clock
+            self.assertEqual(interval, 60)
+            self.assertTrue((self.sanitized / ACTIVE_SYMLINK).is_symlink())
+            wait_times.append(clock)
+            clock += interval
+            return len(wait_times) == 2
+
+        stop_event.wait.side_effect = wait
+        with (
+            mock.patch.dict(
+                os.environ,
+                {
+                    "REDACTIONS_FILE": str(redactions),
+                    "AUDIO_INCOMING_ROOT": str(self.incoming),
+                    "AUDIO_SANITIZED_ROOT": str(self.sanitized),
+                    "AUDIO_QUARANTINE_ROOT": str(self.quarantine),
+                    "AUDIO_MAPPING_ROOT": str(self.mapping_dir),
+                    "SPEECH_ROOT": str(self.speech_root),
+                    "HEALTH_PATH": str(self.root / "health.json"),
+                    "AUDIO_SYNC_INTERVAL": "1m",
+                    "INGEST_STATE_PATH": str(self.root / "ingest.sqlite3"),
+                    "WEBDAV_PATH": "Recordings",
+                },
+                clear=True,
+            ),
+            mock.patch.object(publisher, "install_stop_handler", return_value=stop_event),
+            mock.patch.object(publisher, "synchronize", side_effect=synchronize),
+            mock.patch.object(publisher, "await_result", side_effect=slow_worker) as speech,
+            mock.patch.object(publisher.time, "time", side_effect=lambda: clock),
+        ):
+            publisher.run(once=False)
+
+        self.assertEqual(sync_times, [1000, 1185])
+        self.assertEqual(wait_times, [1125, 1185])
+        speech.assert_called_once()
+        self.assertEqual(self.store.metrics()["jobs"][JOB_SUCCEEDED], 1)
+        self.assertEqual(self.store.metrics()["source_generations"], 1)
+        self.assertEqual(
+            json.loads((self.root / "health.json").read_text(encoding="utf-8"))["failed"], 0
+        )
+
+
 class PublicationTests(CycleHarness):
     def test_fully_redacted_segment_keeps_timestamp_without_diarization(self):
         self.transcripts[audio_digest()] = [

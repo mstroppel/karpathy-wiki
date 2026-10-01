@@ -39,20 +39,32 @@ is reported content-free through the health record and retry backoff.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `AUDIO_WEBDAV_PATH` | `Recordings` | WebDAV folder scanned for audio files |
-| `AUDIO_SYNC_INTERVAL` | `1h` | Daemon cycle interval (transcription is expensive) |
+| `AUDIO_SYNC_INTERVAL` | `1h` | Pause after each completed daemon cycle (for example, `1m`) |
 | `AUDIO_LANGUAGE` | auto-detect | ISO code passed to the speech worker |
 | `AUDIO_DIARIZE` | `0` | Request anonymous speaker-turn diarization |
 | `AUDIO_MAX_BYTES` | `536870912` | Reject larger recordings content-free |
 | `AUDIO_MAX_DURATION_SECONDS` | `14400` | Reject longer recordings content-free |
 | `SPEECH_MODEL` | `small` | faster-whisper model preset (see below) |
-| `SPEECH_DEVICE` | `cpu` | `cpu` or `cuda` |
-| `SPEECH_COMPUTE_TYPE` | `int8` | CTranslate2 compute type; use `int8_float16` on CUDA |
+| `SPEECH_DEVICE` | `cpu` | Only `cpu` is currently supported by the shipped speech image |
+| `SPEECH_COMPUTE_TYPE` | `int8` | CTranslate2 compute type for CPU transcription |
 | `HUGGINGFACE_TOKEN` | – | Only needed for diarization model downloads |
 
-Model presets: start with `small` (multilingual, `int8` on CPU,
-`int8_float16` on a small CUDA GPU). Larger models and Whisper V3 Turbo
-quality presets should be benchmarked on the actual host before adoption
-(the concept doc records the host-trial caveat). Model files are downloaded
+Cycles run sequentially: the daemon synchronizes WebDAV, waits for each
+recording's speech result (or failure/timeout), and finishes publication
+before waiting `AUDIO_SYNC_INTERVAL`. Setting it to `1m` means the next
+sync starts one minute after the previous cycle finishes, even when
+transcription takes longer than a minute. Interval ticks do not start
+overlapping cycles or accumulate scheduled jobs. Unchanged recordings
+reuse cached results, and the speech worker processes queued requests one
+at a time. A provider timeout does not cancel the worker's request; retries
+reuse the queued request or its completed result.
+
+Model presets: start with `small` (multilingual, `int8` on CPU).
+Only CPU deployment is currently supported; CUDA deployment is tracked in
+[#130](https://github.com/mstroppel/karpathy-wiki/issues/130).
+Larger models and Whisper V3 Turbo quality presets should be benchmarked
+on the actual host before adoption (the concept doc records the host-trial
+caveat). Model files are downloaded
 once into the persistent model cache (`DATA_ROOT/models/audio`); their
 licenses require acceptance for diarization models.
 
@@ -134,8 +146,9 @@ identity in durable publication jobs, so configuration changes reprocess
 unchanged recordings too. A worker change during publication aborts that
 generation for retry. Start the worker before running a one-shot provider.
 
-CI and machines without a GPU run the fake backend by setting
+CI runs the fake backend by setting
 `SPEECH_BACKEND=fake` for the speech service; it produces deterministic
 segments without codecs. The CPU image carries faster-whisper pinned by
-hash (`ingest/speech/requirements.txt`); a CUDA override with an NVIDIA GPU
-reservation is an opt-in host configuration, not shipped by default.
+hash (`ingest/speech/requirements.txt`). CUDA runtime and Compose GPU
+reservation support are tracked in
+[#130](https://github.com/mstroppel/karpathy-wiki/issues/130).
