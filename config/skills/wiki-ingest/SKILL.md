@@ -31,7 +31,23 @@ auf. Lies `AGENTS.md` und vor Änderungen Git-Status und Historie sowie `index.m
    Tatsachen übernehmen; verbleibende Konflikte ausdrücklich melden.
 3. Aktualisiere `overview.md`, `index.md` und `log.md`. Prüfe Diff, Links und
    Herkunftsnachweise; committe genau einmal pro Quelle. Melde Erfolg erst
-   nach dem Commit mit Hash, Quellpfad, geänderten Seiten und offenen Lücken.
+   nach dem Commit und halte die Details für den Abschlussbericht fest.
+
+## Abschlussbericht
+
+Beginne mit „Einlesen erfolgreich abgeschlossen.“ oder kennzeichne den Auftrag
+als unvollständig. Gib auch bei Sammelaufträgen in der Abschlussantwort je Quelle
+einen Detailblock aus; Zwischenmeldungen oder Sammelzusammenfassungen reichen nicht:
+
+- **Quelle:** Exakter `source_path`.
+- **Commit:** Mit Git verifizierter kurzer Hash oder „Kein Commit“ mit Grund.
+- **Geänderte Seiten:** Wiki-Pfade aus dem tatsächlichen Quellen-Commit.
+- **Inhalt:** Übernommene Aussagen knapp zusammenfassen, Werte mit Einheiten.
+- **Widersprüche/offene Fragen:** Konkrete Unsicherheiten oder „Keine festgestellt“.
+- **Extraktionsgrenzen:** Fehlende/unlesbare/teilweise erfasste Inhalte; „Keine
+  festgestellt“ nur nach vollständigem Lesen. Quelldatei unverändert bestätigen.
+
+Keine Details erfinden; Unbekanntes als „Nicht ermittelt“ angeben.
 
 ## Alle neuen und geänderten Quellen
 
@@ -56,3 +72,7 @@ auf. Lies `AGENTS.md` und vor Änderungen Git-Status und Historie sowie `index.m
 - Prüfe zum Schluss erneut `summary_only: true` und arbeite weiter bis
   `new=0` und `outdated=0`. Bei einem Blocker melde den fehlgeschlagenen
   Befehl, die genaue Fehlermeldung und alle offenen Quellen als unvollständig.
+- Gib abschließend alle Quellen-Detailblöcke aus, danach den zuletzt geprüften
+  Gesamtstatus mit `new` und `outdated` sowie separat `revoked` und `orphaned`
+  (unverändert belassen). Wurde keine Quelle bearbeitet, melde dies ausdrücklich
+  zusammen mit dem Gesamtstatus; erzeuge keine leeren Detailblöcke.
