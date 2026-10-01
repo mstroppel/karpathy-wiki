@@ -80,6 +80,14 @@ provider's `manifest.json` and its published sanitized copies. Then ask
 OpenCode to import `/knowledge/sources/webdav`. Generated pages are written to
 `wiki/` and can be read at `WIKI_PUBLIC_URL`.
 
+## Ingestion reports
+
+`/ingest-new` processes all new and changed sources sequentially, with one
+commit per source. Its final report includes a separate block for each source:
+source path, commit hash, changed wiki pages, content summary, contradictions or
+open questions, and extraction limits. The final status follows these details;
+blocked runs also identify unfinished sources.
+
 ## Analyses
 
 Scientific analyses (`/analysis`) can be saved from the same conversation with

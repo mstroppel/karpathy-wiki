@@ -224,6 +224,29 @@ class ConfigTests(unittest.TestCase):
         self.assertNotIn("webdav", generic_status)
         self.assertNotIn("paperless", generic_status)
 
+    def test_ingest_reports_per_source_details(self):
+        config = json.loads((ROOT / "config" / "opencode.json").read_text())
+        template = config["commands"]["ingest-new"]["template"]
+        skill = (ROOT / "config" / "skills" / "wiki-ingest" / "SKILL.md").read_text()
+        self.assertIn("für jede bearbeitete Quelle einen eigenen Detailblock", template)
+        self.assertIn("reine Sammelzusammenfassung", template)
+        for field in (
+            "Quelle",
+            "Commit",
+            "Geänderte Seiten",
+            "Inhalt",
+            "Widersprüche/offene Fragen",
+            "Extraktionsgrenzen",
+        ):
+            self.assertIn(field, template)
+            self.assertIn(f"**{field}:**", skill)
+        self.assertIn("Zwischenmeldungen ersetzen diese Blöcke", skill)
+        self.assertIn("mit Git verifizierter", skill)
+        self.assertIn("Tatsächlich im Quellen-Commit geänderte Wiki-Pfade", skill)
+        self.assertIn("Kein Commit", skill)
+        self.assertIn("Nicht ermittelt", skill)
+        self.assertIn("Wurde keine Quelle bearbeitet", skill)
+
     def test_skills_declare_matching_frontmatter(self):
         skills = ROOT / "config" / "skills"
         directories = sorted(path.name for path in skills.iterdir() if path.is_dir())

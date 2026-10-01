@@ -31,7 +31,31 @@ auf. Lies `AGENTS.md` und vor Änderungen Git-Status und Historie sowie `index.m
    Tatsachen übernehmen; verbleibende Konflikte ausdrücklich melden.
 3. Aktualisiere `overview.md`, `index.md` und `log.md`. Prüfe Diff, Links und
    Herkunftsnachweise; committe genau einmal pro Quelle. Melde Erfolg erst
-   nach dem Commit mit Hash, Quellpfad, geänderten Seiten und offenen Lücken.
+   nach dem Commit und halte die Details für den Abschlussbericht fest.
+
+## Abschlussbericht
+
+Gib für jede bearbeitete Quelle einen eigenen Detailblock aus, auch bei einem
+Sammelauftrag. Zwischenmeldungen ersetzen diese Blöcke in der Abschlussantwort
+nicht. Beginne bei vollständig erfolgreichem Abschluss mit „Einlesen erfolgreich
+abgeschlossen.“; bei einem Blocker kennzeichne den Auftrag als unvollständig.
+
+- **Quelle:** Exakter `source_path` unter `/knowledge/sources`.
+- **Commit:** Tatsächlich erzeugter, mit Git verifizierter kurzer Commit-Hash;
+  bei einer nicht abgeschlossenen Quelle „Kein Commit“ und der Grund.
+- **Geänderte Seiten:** Tatsächlich im Quellen-Commit geänderte Wiki-Pfade,
+  nicht nur Seitenkategorien oder geplante Änderungen.
+- **Inhalt:** Kurze Zusammenfassung der übernommenen Aussagen; wichtige Werte
+  mit Einheiten erhalten, keine unbelegten Schlussfolgerungen hinzufügen.
+- **Widersprüche/offene Fragen:** Konkrete neue oder verbleibende Unsicherheiten
+  dieser Quelle; wenn keine festgestellt wurden, ausdrücklich so angeben.
+- **Extraktionsgrenzen:** Nicht lesbare, fehlende oder nur teilweise erfasste
+  Inhalte nennen; „Keine festgestellt“ nur, wenn die Quelle vollständig gelesen
+  wurde. Bestätige, dass die Quelldatei unverändert blieb.
+
+Erfinde keine Hashes, Seiten, Inhalte oder Entwarnungen. Gib bei abgebrochenen
+Quellen nicht ermittelte Details als „Nicht ermittelt“ an. Fasse mehrere Quellen
+nicht zu einem einzigen Detailblock zusammen.
 
 ## Alle neuen und geänderten Quellen
 
@@ -56,3 +80,7 @@ auf. Lies `AGENTS.md` und vor Änderungen Git-Status und Historie sowie `index.m
 - Prüfe zum Schluss erneut `summary_only: true` und arbeite weiter bis
   `new=0` und `outdated=0`. Bei einem Blocker melde den fehlgeschlagenen
   Befehl, die genaue Fehlermeldung und alle offenen Quellen als unvollständig.
+- Gib abschließend alle Quellen-Detailblöcke aus, danach den zuletzt geprüften
+  Gesamtstatus mit `new` und `outdated` sowie separat `revoked` und `orphaned`
+  (unverändert belassen). Wurde keine Quelle bearbeitet, melde dies ausdrücklich
+  zusammen mit dem Gesamtstatus; erzeuge keine leeren Detailblöcke.
