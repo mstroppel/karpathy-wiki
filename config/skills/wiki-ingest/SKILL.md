@@ -35,27 +35,19 @@ auf. Lies `AGENTS.md` und vor Änderungen Git-Status und Historie sowie `index.m
 
 ## Abschlussbericht
 
-Gib für jede bearbeitete Quelle einen eigenen Detailblock aus, auch bei einem
-Sammelauftrag. Zwischenmeldungen ersetzen diese Blöcke in der Abschlussantwort
-nicht. Beginne bei vollständig erfolgreichem Abschluss mit „Einlesen erfolgreich
-abgeschlossen.“; bei einem Blocker kennzeichne den Auftrag als unvollständig.
+Beginne mit „Einlesen erfolgreich abgeschlossen.“ oder kennzeichne den Auftrag
+als unvollständig. Gib auch bei Sammelaufträgen in der Abschlussantwort je Quelle
+einen Detailblock aus; Zwischenmeldungen oder Sammelzusammenfassungen reichen nicht:
 
-- **Quelle:** Exakter `source_path` unter `/knowledge/sources`.
-- **Commit:** Tatsächlich erzeugter, mit Git verifizierter kurzer Commit-Hash;
-  bei einer nicht abgeschlossenen Quelle „Kein Commit“ und der Grund.
-- **Geänderte Seiten:** Tatsächlich im Quellen-Commit geänderte Wiki-Pfade,
-  nicht nur Seitenkategorien oder geplante Änderungen.
-- **Inhalt:** Kurze Zusammenfassung der übernommenen Aussagen; wichtige Werte
-  mit Einheiten erhalten, keine unbelegten Schlussfolgerungen hinzufügen.
-- **Widersprüche/offene Fragen:** Konkrete neue oder verbleibende Unsicherheiten
-  dieser Quelle; wenn keine festgestellt wurden, ausdrücklich so angeben.
-- **Extraktionsgrenzen:** Nicht lesbare, fehlende oder nur teilweise erfasste
-  Inhalte nennen; „Keine festgestellt“ nur, wenn die Quelle vollständig gelesen
-  wurde. Bestätige, dass die Quelldatei unverändert blieb.
+- **Quelle:** Exakter `source_path`.
+- **Commit:** Mit Git verifizierter kurzer Hash oder „Kein Commit“ mit Grund.
+- **Geänderte Seiten:** Wiki-Pfade aus dem tatsächlichen Quellen-Commit.
+- **Inhalt:** Übernommene Aussagen knapp zusammenfassen, Werte mit Einheiten.
+- **Widersprüche/offene Fragen:** Konkrete Unsicherheiten oder „Keine festgestellt“.
+- **Extraktionsgrenzen:** Fehlende/unlesbare/teilweise erfasste Inhalte; „Keine
+  festgestellt“ nur nach vollständigem Lesen. Quelldatei unverändert bestätigen.
 
-Erfinde keine Hashes, Seiten, Inhalte oder Entwarnungen. Gib bei abgebrochenen
-Quellen nicht ermittelte Details als „Nicht ermittelt“ an. Fasse mehrere Quellen
-nicht zu einem einzigen Detailblock zusammen.
+Keine Details erfinden; Unbekanntes als „Nicht ermittelt“ angeben.
 
 ## Alle neuen und geänderten Quellen
 

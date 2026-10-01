@@ -240,9 +240,9 @@ class ConfigTests(unittest.TestCase):
         ):
             self.assertIn(field, template)
             self.assertIn(f"**{field}:**", skill)
-        self.assertIn("Zwischenmeldungen ersetzen diese Blöcke", skill)
-        self.assertIn("mit Git verifizierter", skill)
-        self.assertIn("Tatsächlich im Quellen-Commit geänderte Wiki-Pfade", skill)
+        self.assertIn("Zwischenmeldungen oder Sammelzusammenfassungen reichen nicht", skill)
+        self.assertIn("Mit Git verifizierter", skill)
+        self.assertIn("Wiki-Pfade aus dem tatsächlichen Quellen-Commit", skill)
         self.assertIn("Kein Commit", skill)
         self.assertIn("Nicht ermittelt", skill)
         self.assertIn("Wurde keine Quelle bearbeitet", skill)
