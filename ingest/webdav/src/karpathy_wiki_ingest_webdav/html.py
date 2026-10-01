@@ -20,15 +20,20 @@ BLOCKS = frozenset(
     "footer form h1 h2 h3 h4 h5 h6 header hr li main nav ol p pre section table "
     "tbody td th thead tr ul script style title".split()
 )
+ATTRIBUTE_CONTEXT = 1
+RAW_TEXT_CONTEXT = 2
 
 
-def decoded_view(source: str, offset: int = 0) -> tuple[str, list[tuple[int, int]]]:
+def decoded_view(
+    source: str, offset: int = 0, contexts: bytearray | None = None
+) -> tuple[str, list[tuple[int, int]]]:
     """Map each decoded character back to its literal character or whole entity."""
     characters: list[str] = []
     spans: list[tuple[int, int]] = []
     position = 0
     while position < len(source):
-        entity = ENTITY.match(source, position)
+        context = contexts[offset + position] if contexts is not None else 0
+        entity = ENTITY.match(source, position) if context != RAW_TEXT_CONTEXT else None
         end = position + 1
         value = source[position]
         if entity:
@@ -42,6 +47,16 @@ def decoded_view(source: str, offset: int = 0) -> tuple[str, list[tuple[int, int
                 for length in range(len(token) - 1, 0, -1):
                     name = token[1 : length + 1]
                     if name in html5:
+                        following = source[position + length + 1 : position + length + 2]
+                        if (
+                            context == ATTRIBUTE_CONTEXT
+                            and not name.endswith(";")
+                            and following
+                            and (following in "=" or following.isascii() and following.isalnum())
+                        ):
+                            # In attributes, an ambiguous ampersand is literal,
+                            # unlike the same no-semicolon reference in text.
+                            break
                         end = position + length + 1
                         value = html5[name]
                         break
@@ -62,6 +77,8 @@ class SourceViews(HTMLParser):
         self.text: list[str] = []
         self.spans: list[tuple[int, int]] = []
         self.protected = bytearray(len(source))
+        self.contexts = bytearray(len(source))
+        self.in_raw_text = False
         self.feed(source)
         self.close()
 
@@ -76,6 +93,8 @@ class SourceViews(HTMLParser):
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         self.boundary(tag)
+        if tag in {"script", "style"}:
+            self.in_raw_text = True
         raw = self.get_starttag_text()
         assert raw is not None
         start = self.source_offset()
@@ -87,18 +106,26 @@ class SourceViews(HTMLParser):
                 if attribute.start(group) >= 0:
                     left, right = attribute.span(group)
                     self.protected[start + left : start + right] = b"\0" * (right - left)
+                    self.contexts[start + left : start + right] = bytes([ATTRIBUTE_CONTEXT]) * (
+                        right - left
+                    )
 
     def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         self.handle_starttag(tag, attrs)
 
     def handle_endtag(self, tag: str) -> None:
         self.boundary(tag)
+        if tag in {"script", "style"}:
+            self.in_raw_text = False
         start = self.source_offset()
         end = self.source.find(">", start) + 1
         self.protected[start:end] = b"\1" * (end - start)
 
     def handle_data(self, data: str) -> None:
-        text, spans = decoded_view(data, self.source_offset())
+        start = self.source_offset()
+        if self.in_raw_text:
+            self.contexts[start : start + len(data)] = bytes([RAW_TEXT_CONTEXT]) * len(data)
+        text, spans = decoded_view(data, start, self.contexts)
         self.text.append(text)
         self.spans.extend(spans)
 
@@ -144,9 +171,11 @@ def matching_views(source: str) -> tuple[SourceViews, list[tuple[str, list[tuple
         # parser messages (which may contain source text) or kill the daemon.
         raise PrivacyValidationError("HTML source could not be parsed") from None
     return parsed, [
-        (source, [(position, position + 1) for position in range(len(source))]),
-        decoded_view(source),
+        # Match full decoded phrases before raw-source fragments (for example
+        # a surname whose first name lives on the other side of an inline tag).
         ("".join(parsed.text), parsed.spans),
+        decoded_view(source, contexts=parsed.contexts),
+        (source, [(position, position + 1) for position in range(len(source))]),
     ]
 
 
@@ -173,7 +202,7 @@ def redact_html(source: str, anonymizer: TargetedAnonymizer) -> str:
                 continue
             if any(parsed.protected[position] for position in positions):
                 raise PrivacyValidationError("HTML match touches structural markup")
-            # Both views may find the same span; retain the first placeholder.
+            # Views may find the same span; retain the first placeholder.
             if not removed.intersection(positions):
                 replacements[positions[0]] = match.replacement
             removed.update(positions)

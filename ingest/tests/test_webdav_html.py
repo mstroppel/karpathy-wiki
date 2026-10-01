@@ -56,6 +56,17 @@ class HtmlRedactionTests(unittest.TestCase):
             "<p>[PERSON]<b></b>; [PERSON]</p>",
         )
 
+    def test_full_structured_name_takes_precedence_over_raw_fragments(self):
+        anonymizer = TargetedAnonymizer.from_config(
+            {
+                "people": [
+                    {"first_name": "Max", "last_name": "Mustermann", "replacement": "[PERSON]"}
+                ]
+            }
+        )
+        source = '<p title="Max&#32;Mustermann">Max <b>Mustermann</b></p>'
+        self.assertEqual(redact_html(source, anonymizer), '<p title="[PERSON]">[PERSON]<b></b></p>')
+
     def test_matching_tag_name_fails_closed(self):
         anonymizer = TargetedAnonymizer.from_config(
             {"people": [{"values": ["mark"], "replacement": "[PERSON]"}]}
@@ -76,6 +87,31 @@ class HtmlRedactionTests(unittest.TestCase):
         self.assertEqual(len(text), len(spans))
         self.assertEqual(spans[0], (10, 14))
         self.assertEqual(spans[-1], spans[-2])
+
+    def test_ambiguous_named_references_remain_literal_in_attributes(self):
+        anonymizer = TargetedAnonymizer.from_config(
+            {"people": [{"values": ["¬it", "¬=", "¬", "©"], "replacement": "[PERSON]"}]}
+        )
+        source = '<p title="&notit; &not= &copy9">&notit; &not= &copy9</p>'
+        self.assertEqual(
+            redact_html(source, anonymizer),
+            '<p title="&notit; &not= &copy9">[PERSON]; [PERSON] &copy9</p>',
+        )
+        self.assertEqual(
+            redact_html('<p title="&not; &copy!">safe</p>', anonymizer),
+            '<p title="[PERSON] [PERSON]!">safe</p>',
+        )
+
+    def test_script_and_style_entities_are_literal_not_decoded(self):
+        source = (
+            '<script>const value = "Max&#32;Mustermann"; /* Max Mustermann */</script>'
+            "<style>/* Max&#32;Mustermann; Max Mustermann */</style>"
+        )
+        self.assertEqual(
+            self.redact(source),
+            '<script>const value = "Max&#32;Mustermann"; /* [PERSON] */</script>'
+            "<style>/* Max&#32;Mustermann; [PERSON] */</style>",
+        )
 
     def test_incomplete_markup_keeps_literal_source(self):
         self.assertEqual(self.redact("<p>Max Mustermann <unfinished"), "<p>[PERSON] <unfinished")

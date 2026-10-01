@@ -108,11 +108,13 @@ WebDAV files are synchronized into a private staging directory first. The
 UTF-8 Markdown and HTML files to `sources/webdav`. Other formats are ignored.
 HTML stays HTML: original paths, tags, attributes, formatting, and line endings
 are preserved except for targeted replacements. Matching covers literal source,
-decoded HTML entities (including attribute values), and text split across inline
+context-aware decoded HTML entities (including attribute values), and text split across inline
 tags; block boundaries provide whitespace. A split match inserts its placeholder
 at the first matched source position and removes the remaining matched text,
 leaving intervening tags intact. Comments and script/style source are also
 checked. Output is checked again with the same matching views before publication.
+Ambiguous no-semicolon named references stay literal in attributes; script/style
+raw text is matched literally, without decoding HTML entities.
 Matches touching structural markup are rejected rather than changing tag syntax.
 Files that cannot be decoded or fail privacy validation produce content-free
 reports in `quarantine/webdav`; the previous generation remains active.
