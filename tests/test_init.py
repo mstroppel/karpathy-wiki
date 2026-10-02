@@ -246,6 +246,10 @@ class ConfigTests(unittest.TestCase):
         self.assertIn("Kein Commit", skill)
         self.assertIn("Nicht ermittelt", skill)
         self.assertIn("Wurde keine Quelle bearbeitet", skill)
+        self.assertIn("nur, wenn der Benutzer ausdrücklich genau diese Quelle", skill)
+        self.assertIn("ein normaler Auftrag für alle neuen/geänderten Quellen", skill)
+        self.assertIn("include_current: true", skill)
+        self.assertIn("statt eine Duplikatseite für", skill)
 
     def test_skills_declare_matching_frontmatter(self):
         skills = ROOT / "config" / "skills"
