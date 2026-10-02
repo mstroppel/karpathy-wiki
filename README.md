@@ -126,6 +126,10 @@ production paths. See [architecture](docs/architecture.md)
 for service boundaries and [data layout](docs/data-layout.md) for the persistent
 folder structure.
 
+OpenChamber is being evaluated as an optional chat interface; it is not yet a
+shipped profile. See the [compatibility evaluation](docs/openchamber-evaluation.md)
+for transport test evidence, access boundaries, and remaining acceptance checks.
+
 ## Updates
 
 The launcher downloads and caches the Compose file matching the pinned release
