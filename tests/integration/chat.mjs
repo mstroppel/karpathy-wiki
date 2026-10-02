@@ -4,7 +4,7 @@ import { readFile, writeFile } from 'node:fs/promises'
 
 const origin = 'http://127.0.0.1:3000'
 const directory = '/knowledge/wiki'
-const statePath = '/tmp/openchamber-smoke-session.json'
+const statePath = `${process.env.OPENCHAMBER_DATA_DIR}/integration-session.json`
 const phase = process.argv[2] ?? 'create'
 let cookie
 

@@ -5,7 +5,7 @@ linked issues. Deliver small, independently deployable PRs.
 
 ## Current priorities
 
-1. [#137](https://github.com/mstroppel/karpathy-wiki/issues/137): Use OpenChamber — transport spike passed; next deliver the opt-in integration and validate browser/model workflows (see [evaluation](docs/openchamber-evaluation.md))
+1. [#137](https://github.com/mstroppel/karpathy-wiki/issues/137): OpenChamber as the main chat interface — release image and default service implemented; complete browser/model acceptance (see [chat deployment](docs/chat.md))
 2. [#134](https://github.com/mstroppel/karpathy-wiki/issues/134): Optional Mistral hosted speech-to-text backend
 3. [#129](https://github.com/mstroppel/karpathy-wiki/issues/129): Add code-review agent skill
 4. [#26](https://github.com/mstroppel/karpathy-wiki/issues/26): Expand integration coverage and harden daemon failure handling

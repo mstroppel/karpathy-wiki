@@ -86,6 +86,7 @@ STACK_ID=$project_name
 WIKI_NAME=Integration Wiki
 WIKI_PUBLIC_URL=https://wiki.invalid
 OPENCODE_PASSWORD=$password
+OPENCHAMBER_UI_PASSWORD=$password-chat
 DATA_ROOT=$scratch_dir/data
 INTEGRATION_FIXTURE_ROOT=$scratch_dir/fixture
 PUID=1000
@@ -105,7 +106,7 @@ EOF
 docker network create "$network_name" >/dev/null || fail "cannot create test network"
 
 # ------------------------------------------------------------------ build
-docker build -q -t kw-opencode:integration -f opencode/Dockerfile . \
+docker build -q --target opencode -t kw-opencode:integration -f opencode/Dockerfile . \
   || fail "cannot build the opencode image"
 docker build -q -t kw-ingest-webdav:integration --target webdav ingest/ \
   || fail "cannot build the webdav ingest image"

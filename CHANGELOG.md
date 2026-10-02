@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- OpenChamber is now the default chat interface, with a release-built locked
+  image, separate browser authentication, persistent UI settings, read-only wiki
+  access and backend-aware health checks. OpenCode is private; SilverBullet is
+  unchanged. Existing installations must manually set `OPENCHAMBER_UI_PASSWORD`,
+  run initialization for the new `DATA_ROOT/openchamber` directory, and point
+  their HTTPS chat proxy at `${STACK_ID}-openchamber:3000` instead of OpenCode.
+  No data migration or compatibility alias is provided.
+
 - WebDAV ingests UTF-8 `.html` and `.htm` alongside Markdown, preserving original
   HTML paths and markup while locally redacting decoded entities, attributes,
   comments, script/style source, and text split across tags. HTML remains

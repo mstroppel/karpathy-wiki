@@ -1,6 +1,6 @@
 # Architecture
 
-The core services are `init`, `opencode`, and `silverbullet`. Optional source
+The core services are `init`, `opencode`, `openchamber`, and `silverbullet`. Optional source
 and export services are enabled with Compose profiles. The `webdav-ingest`,
 `audio-ingest`, and `paperless-ingest` services use dedicated images
 (`karpathy-wiki-ingest-webdav`, `karpathy-wiki-ingest-audio`, and
@@ -28,8 +28,9 @@ Confirmed Q&A -> local inbox -> local redaction -> sources/answers/ -+
                                                                    SilverBullet
 ```
 
-OpenCode sessions remain directly accessible in OpenCode; they are no longer
-exported.
+OpenChamber exposes the private OpenCode backend's sessions and wiki commands;
+sessions are not exported to SilverBullet. The frontend has a separate private
+settings directory and only a read-only wiki mount. See [chat deployment](chat.md).
 
 OpenCode reads source directories and writes generated Markdown to `wiki/`.
 SilverBullet serves the wiki space from a read-only mount. Services do not publish host ports; the
@@ -37,7 +38,7 @@ reverse proxy reaches them through `WEBPROXY_NETWORK` using these aliases:
 
 ```text
 ${STACK_ID}-silverbullet:3000
-${STACK_ID}-opencode:4096
+${STACK_ID}-openchamber:3000
 ${STACK_ID}-raw-files:8080
 ```
 

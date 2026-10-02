@@ -1,10 +1,10 @@
 #!/bin/sh
-# Disposable #137 compatibility spike, not a production deployment.
+# Disposable integration test of the shipped primary chat image.
 # Images must already exist locally; no host data/configuration is mounted.
 set -eu
 
-: "${OPENCHAMBER_SMOKE_IMAGE:?Set OPENCHAMBER_SMOKE_IMAGE to a locally built OpenChamber 2.1.0 image}"
-: "${OPENCODE_SMOKE_IMAGE:?Set OPENCODE_SMOKE_IMAGE to the locally built repository OpenCode image}"
+OPENCHAMBER_SMOKE_IMAGE=${CHAT_IMAGE:-kw-openchamber:integration}
+OPENCODE_SMOKE_IMAGE=${BACKEND_IMAGE:-kw-opencode:integration}
 
 # shellcheck disable=SC1007
 repository_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
@@ -41,8 +41,8 @@ docker run --rm --network none --user 0:0 --entrypoint /bin/sh \
   -e PUID=1000 -e PGID=1000 -e COMPOSE_PROFILES=answers \
   "$OPENCODE_SMOKE_IMAGE" /etc/opencode/init.sh >/dev/null
 docker run --rm --network none --user 0:0 --entrypoint /bin/sh \
-  --mount "type=volume,src=$home,dst=/home/node" \
-  "$OPENCODE_SMOKE_IMAGE" -c 'chown 1000:1000 /home/node'
+  --mount "type=volume,src=$home,dst=/settings" \
+  "$OPENCODE_SMOKE_IMAGE" -c 'chown 1000:1000 /settings'
 
 docker run -d --name "$backend" --network "$network" --network-alias opencode \
   --user 1000:1000 --cap-drop ALL --security-opt no-new-privileges:true \
@@ -58,15 +58,14 @@ docker run -d --name "$backend" --network "$network" --network-alias opencode \
 
 docker run -d --name "$frontend" --network "$network" \
   --user 1000:1000 --cap-drop ALL --security-opt no-new-privileges:true \
-  -e HOME=/home/node -e OPENCHAMBER_RELAY_HOST=off \
+  --read-only --tmpfs /tmp -e OPENCHAMBER_RELAY_HOST=off \
   -e OPENCODE_DISABLE_EXTERNAL_SKILLS=1 -e OPENCODE_DISABLE_CLAUDE_CODE_SKILLS=1 \
   -e OPENCODE_HOST=http://opencode:4096 -e OPENCODE_SKIP_START=true \
   -e OPENCHAMBER_OPENCODE_CWD=/knowledge/wiki \
   -e OPENCODE_PASSWORD -e OPENCHAMBER_UI_PASSWORD \
   --mount "type=volume,src=$data,dst=/knowledge/wiki,volume-subpath=wiki,readonly" \
-  --mount "type=volume,src=$home,dst=/home/node" \
-  -w /knowledge/wiki --entrypoint openchamber "$OPENCHAMBER_SMOKE_IMAGE" \
-  serve --foreground --host 0.0.0.0 --port 3000 >/dev/null
+  --mount "type=volume,src=$home,dst=/home/openchamber/.config/openchamber" \
+  -w /knowledge/wiki "$OPENCHAMBER_SMOKE_IMAGE" >/dev/null
 
 wait_ready() {
   attempts=0
@@ -78,8 +77,8 @@ wait_ready() {
   done
 }
 wait_ready
-docker cp "$repository_root/tests/integration/openchamber-smoke.mjs" "$frontend:/tmp/openchamber-smoke.mjs"
-docker exec "$frontend" node /tmp/openchamber-smoke.mjs create
+docker exec -i "$frontend" sh -c 'cat > /tmp/chat.mjs' < "$repository_root/tests/integration/chat.mjs"
+docker exec "$frontend" node /tmp/chat.mjs create
 
 # These checks concern mounts/process access, not API authorization or model safety.
 if docker exec "$frontend" sh -c 'touch /knowledge/wiki/.smoke-write' >/dev/null 2>&1; then
@@ -100,5 +99,6 @@ fi
 
 docker restart "$backend" "$frontend" >/dev/null
 wait_ready
-docker exec "$frontend" node /tmp/openchamber-smoke.mjs restart
+docker exec -i "$frontend" sh -c 'cat > /tmp/chat.mjs' < "$repository_root/tests/integration/chat.mjs"
+docker exec "$frontend" node /tmp/chat.mjs restart
 printf 'openchamber-smoke: OK; disposable containers and volumes will be removed\n'

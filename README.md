@@ -3,7 +3,8 @@
 A self-hosted Markdown knowledge base inspired by [Andrej Karpathy's LLM wiki
 pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f).
 OpenCode turns explicitly selected source material into linked Markdown pages,
-and SilverBullet provides the read-only browser UI. Each installation keeps its
+OpenChamber provides the chat interface, and SilverBullet provides the read-only
+wiki browser. Each installation keeps its
 own configuration, sources, wiki history, credentials, and sessions.
 
 ## Quick Start
@@ -45,7 +46,7 @@ Edit `.env` with at least:
 ```env
 WIKI_NAME=My Wiki
 WIKI_PUBLIC_URL=https://wiki.example.com
-OPENCODE_PUBLIC_URL=https://chat.example.com
+OPENCHAMBER_PUBLIC_URL=https://chat.example.com
 DATA_ROOT=./data
 COMPOSE_PROFILES=
 ```
@@ -66,10 +67,13 @@ Configure the reverse proxy with these upstreams, replacing `karpathy-wiki` if
 
 ```text
 karpathy-wiki-silverbullet:3000  # WIKI_PUBLIC_URL
-karpathy-wiki-opencode:4096     # OPENCODE_PUBLIC_URL
+karpathy-wiki-openchamber:3000  # OPENCHAMBER_PUBLIC_URL
 ```
 
-ask OpenCode to ingest a source. For a first test with the `webdav`
+Open the chat URL, sign in with `OPENCHAMBER_UI_PASSWORD`, connect your model
+provider in Settings, and select a model. OpenCode runs privately behind
+OpenChamber; no browser pairing or backend password forwarding is needed.
+Then ask it to ingest a source. For a first test with the `webdav`
 provider: enable the `webdav` profile (`COMPOSE_PROFILES=webdav` in `.env`,
 then `./karpathy-wiki.sh up -d`), configure WebDAV access and redactions (see
 [configuration](docs/configuration.md#secrets)), and create a `notes.md` file
@@ -126,9 +130,8 @@ production paths. See [architecture](docs/architecture.md)
 for service boundaries and [data layout](docs/data-layout.md) for the persistent
 folder structure.
 
-OpenChamber is being evaluated as an optional chat interface; it is not yet a
-shipped profile. See the [compatibility evaluation](docs/openchamber-evaluation.md)
-for transport test evidence, access boundaries, and remaining acceptance checks.
+See [chat deployment](docs/chat.md) for authentication, proxy setup, supported
+workflows, and access boundaries.
 
 ## Updates
 
@@ -155,7 +158,7 @@ for a consistent backup and a separate-instance restore check.
 - Never commit `.env`, tokens, redaction lists, source material, wiki content, or sessions.
 - Paperless redaction is an explicit deny-list, not general anonymization. Review output before sending it to an external model provider.
 - WebDAV Markdown and HTML are locally redacted using the configured deny-list before publication to `sources/webdav`; unknown sensitive values may remain. HTML keeps its original format and active content: treat it as untrusted source text, not safe-to-render pages. Review redacted output before sending it to a model provider.
-- Put OpenCode and `raw-files` behind a trusted, authenticated reverse proxy; do not expose them directly to the internet.
+- Put OpenChamber and `raw-files` behind a trusted HTTPS reverse proxy; keep OpenCode private and do not publish container ports.
 - The OpenCode configuration is not a substitute for host-level network isolation or least-privilege model credentials.
 
 Report vulnerabilities according to [SECURITY.md](SECURITY.md).
@@ -172,6 +175,10 @@ scripts/install-shellcheck.sh  # add ~/.local/bin to PATH if needed; Linux x86_6
 scripts/lint.sh
 scripts/test-python.sh
 node --test tests/test_wiki_ingest_status.mjs tests/test_contract_fixtures.mjs tests/test_answer_intake.mjs
+node --test tests/test_chat_bootstrap.mjs
+docker build --target opencode -t kw-opencode:integration -f opencode/Dockerfile .
+docker build --target openchamber -t kw-openchamber:integration -f opencode/Dockerfile .
+sh tests/integration/chat.sh  # authentication, discovery, native SSE and restart persistence
 tests/integration/run.sh  # requires Docker; disposable Compose stack test
 ```
 
