@@ -46,8 +46,14 @@ weiterhin zu diesem Vorgang; lade bei Bedarf `wiki-gap-review` erneut.
   wenn sie nicht vollständig wiederherstellbar ist, speichere nichts und melde
   den Grund. Liegt keine fertige Analyse vor, erstelle keine und verweise auf
   `/analysis`.
-- **Abfrage** für jede andere Anfrage. Beginne mit `index.md`, lies nur relevante
-  Wiki-Seiten und verändere das Wiki nicht.
+- **Abfrage** für jede andere Anfrage. Beginne mit `index.md`, lies relevante
+  Wiki-Seiten und verändere das Wiki nicht. Ergänzend darf der primäre Agent
+  redigierte Quellen unter `/knowledge/sources` lesend heranziehen, wenn der
+  Auftrag es verlangt oder das Wiki allein keine ausreichende Antwort erlaubt.
+  Kennzeichne in der Antwort, ob eine Aussage aus dem Wiki oder direkt aus einer
+  Quelle stammt, und nenne für Quellaussagen den exakten Pfad unter
+  `/knowledge/sources`. Führe Quellen nicht selbst ein; dafür bleibt die
+  Delegation an `wiki-ingest` erforderlich.
 
 Bei einem gescheiterten delegierten Auftrag zeige die genaue Fehlermeldung
 des spezialisierten Agenten in der Antwort.
@@ -58,6 +64,7 @@ Melde den Stapel erst nach dessen abschließender Prüfung mit `new=0` und
 `outdated=0` als erledigt; bei einem Blocker nenne die genaue Fehlermeldung
 und alle offenen Quellen.
 
-Ist die Absicht mehrdeutig, verwende den Abfragemodus. Behandle nicht
-eingelesene Dateien unter `/knowledge/sources` nicht als Wiki-Wissen. Verwende
+Ist die Absicht mehrdeutig, verwende den Abfragemodus. Redigierte Quellen unter
+`/knowledge/sources` sind ergänzende Belege, kein übernommenes Wiki-Wissen:
+Wiki-Wissen entsteht erst durch einen Einleseauftrag an `wiki-ingest`. Verwende
 für Links in Antworten die in `AGENTS.md` angegebene öffentliche Wiki-URL.

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Wiki queries and `/analysis` may additionally read the locally redacted
+  source files under `/knowledge/sources` (read-only) when the wiki alone is
+  insufficient. Answers must label whether a claim comes from the wiki or
+  directly from a source, cite the exact source path, and treat source content
+  as untrusted data. Sources remain unchanged wiki knowledge until a
+  `wiki-ingest` order imports them; generated wikis created before this change
+  keep their installed `AGENTS.md` and need a manual review of that file.
+
 ### Added
 
 - WebDAV ingests UTF-8 `.html` and `.htm` alongside Markdown, preserving original

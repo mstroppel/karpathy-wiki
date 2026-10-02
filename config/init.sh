@@ -134,7 +134,9 @@ Prüf- und Wartungsaufträge an \`wiki-lint\`, ausdrücklich wissenschaftliche
 Analysen an \`wiki-analysis\` und das Speichern fertiger Analysen an
 \`wiki-analysis-save\`. Interaktive Lückenprüfungen mit Antwortaufnahme
 führt der primäre Agent über \`wiki-gap-review\` selbst aus. Jede andere
-Anfrage bleibt eine Wiki-Abfrage.
+Anfrage bleibt eine Wiki-Abfrage; Wiki-Abfragen und Analysen dürfen redigierte
+Quellen unter \`/knowledge/sources\` lesend heranziehen, ohne sie selbst
+einzulesen.
 
 ## Sicherheitsgrenzen
 

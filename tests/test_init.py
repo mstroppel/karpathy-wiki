@@ -61,6 +61,8 @@ class InitTests(unittest.TestCase):
             self.assertIn("# Example Wiki", agents)
             self.assertIn("https://wiki.example.test/<pfad-ohne-.md>", agents)
             self.assertIn("wiki-analysis-save", agents)
+            self.assertIn("lesend heranziehen", agents)
+            self.assertIn("ohne sie selbst\neinzulesen", agents)
             self.assertFalse((root / "sources" / "paperless").exists())
             self.assertFalse((root / "sources" / "answers").exists())
             self.assertTrue((root / "incoming" / "answers").is_dir())
