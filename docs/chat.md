@@ -71,3 +71,33 @@ session agent switching, correlated native SSE events, read-only mounts and
 restart persistence. Real-provider generation, browser question/permission
 dialogs and deployment-specific HTTPS/WebSocket behavior require operator
 acceptance testing; they are not claimed by the transport test.
+
+### Operator acceptance checklist
+
+Use a disposable installation, synthetic documents and an explicitly approved
+model/provider budget. Do not use private sources for these checks.
+
+- [ ] Open the HTTPS chat URL: unsigned API requests and an incorrect password
+  must fail; UI sign-in succeeds without exposing the backend password.
+- [ ] Select the wiki project and model. Confirm all four wiki commands and
+  wiki agents/skills are visible; switch agents and verify the next turn uses
+  the selected agent.
+- [ ] Run `/ingest-new` on a synthetic published source: verify streamed output,
+  a wiki commit, and the page in SilverBullet. Run `/analysis`, then
+  `/analysis-save` in the same conversation: verify the saved page and HTML view.
+- [ ] With `answers` enabled, run `/gap-review`: answer and defer questions
+  across turns. No answer source may be published before explicit confirmation;
+  after confirmation verify local redaction and normal ingest.
+- [ ] Trigger a harmless permission request with a disposable test agent:
+  deny it and verify no operation occurs; approve another and verify it runs
+  once. Trigger a native question and verify the response resumes the same turn.
+- [ ] During a streamed reply, disconnect/reconnect the browser and restart
+  the backend. Verify session history survives and subsequent native events
+  arrive. Check the proxy preserves cookies, does not buffer SSE, and permits
+  WebSocket upgrades for any enabled supported feature.
+- [ ] Restart the UI: selected project/settings and backend sessions survive.
+  Backend failure must make the UI unhealthy; recovery must restore readiness.
+
+Record the release, architecture, model, outcomes and any failures before using
+the deployment for real wiki work. Stop on failed confirmation or permission
+boundaries; do not work around them with concurrent writers or local editing.

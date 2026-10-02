@@ -67,6 +67,13 @@ class OpenChamberTests(unittest.TestCase):
             block = match[1]
             self.assertIn("openchamber", block)
         self.assertIn("directory: /openchamber", (ROOT / ".github/dependabot.yml").read_text())
+        prerelease = (ROOT / ".github/workflows/pre-release.yml").read_text()
+        self.assertIn("needs: [tests, lint, chat-integration]", prerelease)
+        publication = (ROOT / ".github/workflows/images.yml").read_text()
+        self.assertLess(
+            publication.index("sh tests/integration/chat.sh"),
+            publication.index("name: Build and publish images"),
+        )
 
     def test_no_evaluation_artifacts_remain(self):
         self.assertFalse((ROOT / "docs/openchamber-evaluation.md").exists())
