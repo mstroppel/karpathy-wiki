@@ -18,9 +18,14 @@ auf. Lies `AGENTS.md` und vor Änderungen Git-Status und Historie sowie `index.m
    `source_revision`, `wiki_path` und `frontmatter`. Bearbeite `current`-Quellen
    nur, wenn der Benutzer ausdrücklich genau diese Quelle erneut einlesen oder
    auswerten lassen will; ein normaler Auftrag für alle neuen/geänderten Quellen
-   schließt `current` weiterhin aus. Ermittle dafür den aktuellen Eintrag mit
-   `include_current: true` sowie `adapter` und `source_key` und verfahre danach
-   wie bei `new`/`outdated`. Lies die Quelle vollständig neu und aktualisiere
+   schließt `current` weiterhin aus. Ermittle dafür aktuelle Einträge mit
+   `include_current: true` und `status_state: current`; bei einer Anfrage per
+   Quellpfad blättere durch die Adapterseiten (`adapter`, `offset`, `limit`) und
+   suche nach dem exakten `source_path`. Leite `adapter` und `source_key` aus
+   genau diesem Statusdatensatz ab; Quellpfad und Quellschlüssel sind nicht
+   zwingend identisch. Brich ab, wenn kein eindeutiger Treffer vorliegt.
+   Verwende danach den gezielten Statusabruf mit `adapter` und `source_key` und
+   verfahre wie bei `new`/`outdated`. Lies die Quelle vollständig neu und aktualisiere
    ihre bestehende revisionsbezogene Wiki-Seite, statt eine Duplikatseite für
    dieselbe Revision anzulegen. Rufe unmittelbar vor jeder Änderung
    `wiki_ingest_status` mit `include_current: true`, `adapter` und `source_key`

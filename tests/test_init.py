@@ -249,6 +249,8 @@ class ConfigTests(unittest.TestCase):
         self.assertIn("nur, wenn der Benutzer ausdrücklich genau diese Quelle", skill)
         self.assertIn("ein normaler Auftrag für alle neuen/geänderten Quellen", skill)
         self.assertIn("include_current: true", skill)
+        self.assertIn("suche nach dem exakten `source_path`", skill)
+        self.assertIn("Quellpfad und Quellschlüssel sind nicht", skill)
         self.assertIn("statt eine Duplikatseite für", skill)
 
     def test_skills_declare_matching_frontmatter(self):
