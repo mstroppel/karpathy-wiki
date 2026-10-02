@@ -15,3 +15,15 @@ Installations upgrade by reorganizing data manually per the release notes.
 Before opening a pull request, run the validation commands documented in
 `README.md` and include behavior changes, security implications, migration
 impact, and test evidence in the pull request description.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live in GitHub Issues for `mstroppel/karpathy-wiki`. See
+`docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Single-context layout: root `GLOSSARY.md` and `docs/adr/`. See
+`docs/agents/domain.md`.
