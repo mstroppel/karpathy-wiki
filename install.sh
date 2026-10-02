@@ -75,6 +75,7 @@ esac
 temporary_dir=$(mktemp -d)
 trap 'rm -rf "$temporary_dir"' EXIT HUP INT TERM
 opencode_password=$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')
+openchamber_password=$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')
 
 base_url="https://raw.githubusercontent.com/$repository/$tag"
 main_url="https://raw.githubusercontent.com/$repository/main"
@@ -90,6 +91,7 @@ sed \
   -e "s/^STACK_ID=.*/STACK_ID=$wiki_id/" \
   -e "s/^KARPATHY_WIKI_VERSION=.*/KARPATHY_WIKI_VERSION=$version/" \
   -e "s/^OPENCODE_PASSWORD=.*/OPENCODE_PASSWORD=$opencode_password/" \
+  -e "s/^OPENCHAMBER_UI_PASSWORD=.*/OPENCHAMBER_UI_PASSWORD=$openchamber_password/" \
   "$temporary_dir/.env" >"$temporary_dir/.env.pinned"
 mv "$temporary_dir/.env.pinned" "$temporary_dir/.env"
 

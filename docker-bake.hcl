@@ -15,15 +15,15 @@ variable "RCLONE_VERSION" {
 }
 
 group "default" {
-  targets = ["opencode", "ingest", "ingest-webdav", "ingest-audio", "ingest-speech", "ingest-paperless"]
+  targets = ["opencode", "openchamber", "ingest", "ingest-webdav", "ingest-audio", "ingest-speech", "ingest-paperless"]
 }
 
 group "release" {
-  targets = ["opencode-release", "ingest-release", "ingest-webdav-release", "ingest-audio-release", "ingest-speech-release", "ingest-paperless-release"]
+  targets = ["opencode-release", "openchamber-release", "ingest-release", "ingest-webdav-release", "ingest-audio-release", "ingest-speech-release", "ingest-paperless-release"]
 }
 
 group "stable" {
-  targets = ["opencode-stable", "ingest-stable", "ingest-webdav-stable", "ingest-audio-stable", "ingest-speech-stable", "ingest-paperless-stable"]
+  targets = ["opencode-stable", "openchamber-stable", "ingest-stable", "ingest-webdav-stable", "ingest-audio-stable", "ingest-speech-stable", "ingest-paperless-stable"]
 }
 
 target "common" {
@@ -37,7 +37,16 @@ target "opencode" {
   inherits = ["common"]
   context = "."
   dockerfile = "opencode/Dockerfile"
+  target = "opencode"
   tags = ["karpathy-wiki-opencode:test"]
+}
+
+target "openchamber" {
+  inherits = ["common"]
+  context = "."
+  dockerfile = "opencode/Dockerfile"
+  target = "openchamber"
+  tags = ["karpathy-wiki-openchamber:test"]
 }
 
 target "ingest" {
@@ -95,6 +104,11 @@ target "opencode-release" {
   tags = ["${REGISTRY}/karpathy-wiki-opencode:${IMAGE_VERSION}"]
 }
 
+target "openchamber-release" {
+  inherits = ["openchamber"]
+  tags = ["${REGISTRY}/karpathy-wiki-openchamber:${IMAGE_VERSION}"]
+}
+
 target "ingest-release" {
   inherits = ["ingest"]
   tags = ["${REGISTRY}/karpathy-wiki-ingest:${IMAGE_VERSION}"]
@@ -123,6 +137,11 @@ target "ingest-paperless-release" {
 target "opencode-stable" {
   inherits = ["opencode"]
   tags = ["${REGISTRY}/karpathy-wiki-opencode:${IMAGE_VERSION}", "${REGISTRY}/karpathy-wiki-opencode:latest"]
+}
+
+target "openchamber-stable" {
+  inherits = ["openchamber"]
+  tags = ["${REGISTRY}/karpathy-wiki-openchamber:${IMAGE_VERSION}", "${REGISTRY}/karpathy-wiki-openchamber:latest"]
 }
 
 target "ingest-stable" {

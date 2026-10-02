@@ -2,6 +2,14 @@ version: 2
 
 updates:
   - package-ecosystem: npm
+    directory: /openchamber
+    schedule:
+      interval: weekly
+    groups:
+      chat-runtime:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
     directory: /
     schedule:
       interval: weekly

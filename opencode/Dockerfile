@@ -1,4 +1,4 @@
-FROM debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251
+FROM debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251 AS opencode
 
 # The OpenCode CLI is downloaded from the npm registry and verified against
 # these pinned sha512 digests (hex, one per supported target architecture).
@@ -50,3 +50,26 @@ RUN chmod 0755 /etc/opencode/init.sh /usr/local/bin/karpathy-wiki-entrypoint /us
 ENV HOME=/home/opencode
 USER app
 ENTRYPOINT ["karpathy-wiki-entrypoint"]
+
+# Both images share the same checksum-verified CLI; external-server mode still
+# needs it for version discovery. Never download a second independent CLI pin.
+FROM node:22-bookworm-slim@sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddfe4238355d3a30b772c AS openchamber
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates git \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /opt/chat
+COPY openchamber/package.json openchamber/package-lock.json ./
+# Integrity-locked dependencies only; lifecycle scripts may fetch unverified
+# binaries. node-pty ships its Linux x64/arm64 prebuilds in the locked tarball.
+RUN npm ci --omit=dev --ignore-scripts \
+    && node -e "require('node-pty')" \
+    && npm cache clean --force
+COPY --from=opencode /usr/local/bin/opencode /usr/local/bin/opencode
+COPY openchamber/bootstrap.mjs openchamber/healthcheck.mjs /etc/openchamber/
+COPY openchamber/entrypoint.sh /usr/local/bin/karpathy-wiki-chat
+RUN chmod 0755 /usr/local/bin/karpathy-wiki-chat \
+    && install -d -o 1000 -g 1000 /home/openchamber/.config/openchamber /knowledge/wiki
+ENV HOME=/home/openchamber NODE_ENV=production OPENCHAMBER_DATA_DIR=/home/openchamber/.config/openchamber
+USER 1000:1000
+WORKDIR /knowledge/wiki
+ENTRYPOINT ["karpathy-wiki-chat"]

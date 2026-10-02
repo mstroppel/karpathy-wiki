@@ -31,6 +31,7 @@ jobs:
           python -m pip install --no-deps ./ingest/core ./ingest/webdav ./ingest/paperless ./ingest/audio ./ingest/speech
           python -m unittest discover -s tests -v
           node --test tests/test_wiki_ingest_status.mjs tests/test_contract_fixtures.mjs
+          node --test tests/test_chat_bootstrap.mjs
           (cd ingest && python -m unittest discover -s tests -v)
 
   lint:
@@ -53,9 +54,20 @@ jobs:
       - name: Run lint and formatting checks
         run: scripts/lint.sh
 
+  chat-integration:
+    name: Primary chat integration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build and test chat images
+        run: |
+          docker build --target opencode -t kw-opencode:integration -f opencode/Dockerfile .
+          docker build --target openchamber -t kw-openchamber:integration -f opencode/Dockerfile .
+          sh tests/integration/chat.sh
+
   pre-release:
     name: Pre-release
-    needs: [tests, lint]
+    needs: [tests, lint, chat-integration]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

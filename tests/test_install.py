@@ -20,6 +20,7 @@ case "$out" in
     'COMPOSE_PROJECT_NAME=karpathy-wiki' \
     'STACK_ID=karpathy-wiki' \
     'OPENCODE_PASSWORD=' \
+    'OPENCHAMBER_UI_PASSWORD=' \
     'KARPATHY_WIKI_VERSION=latest' > "$out" ;;
   *api.github.com/repos/*/tags*)
     printf '%s\n' \
@@ -123,6 +124,9 @@ class InstallTests(unittest.TestCase):
             self.assertIn("STACK_ID=my-wiki\n", environment)
             self.assertIn("KARPATHY_WIKI_VERSION=1.2.3\n", environment)
             self.assertRegex(environment, r"OPENCODE_PASSWORD=[0-9a-f]{48}\n")
+            self.assertRegex(environment, r"OPENCHAMBER_UI_PASSWORD=[0-9a-f]{48}\n")
+            values = dict(line.split("=", 1) for line in environment.splitlines())
+            self.assertNotEqual(values["OPENCODE_PASSWORD"], values["OPENCHAMBER_UI_PASSWORD"])
             self.assertTrue((directory / "karpathy-wiki.sh").exists())
             self.assertEqual((directory / ".gitignore").read_text(), ".cache/\n.env.bak\n")
 
