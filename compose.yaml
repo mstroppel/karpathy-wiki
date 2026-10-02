@@ -243,13 +243,58 @@ services:
     depends_on:
       init:
         condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -u \"opencode:$$OPENCODE_PASSWORD\" http://127.0.0.1:4096/api/info >/dev/null"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 1m
+    extra_hosts:
+      - "${PAPERLESS_BLOCKED_HOSTNAME:-paperless.example.invalid}:127.0.0.1"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  openchamber:
+    image: ghcr.io/mstroppel/karpathy-wiki-openchamber:${KARPATHY_WIKI_VERSION:-latest}
+    user: "${PUID:-1000}:${PGID:-1000}"
+    init: true
+    restart: unless-stopped
+    working_dir: /knowledge/wiki
+    environment:
+      HOME: /home/openchamber
+      TZ: ${TZ:-UTC}
+      WIKI_NAME: ${WIKI_NAME:-Karpathy Wiki}
+      OPENCHAMBER_DATA_DIR: /home/openchamber/.config/openchamber
+      OPENCHAMBER_UI_PASSWORD: ${OPENCHAMBER_UI_PASSWORD:?OPENCHAMBER_UI_PASSWORD is required}
+      OPENCODE_HOST: http://opencode:4096
+      OPENCODE_SKIP_START: "true"
+      OPENCODE_PASSWORD: ${OPENCODE_PASSWORD:?OPENCODE_PASSWORD is required by OpenCode v2}
+      OPENCHAMBER_OPENCODE_CWD: /knowledge/wiki
+      OPENCHAMBER_RELAY_HOST: "off"
+      OPENCODE_DISABLE_EXTERNAL_SKILLS: "1"
+      OPENCODE_DISABLE_CLAUDE_CODE_SKILLS: "1"
+    volumes:
+      - ${DATA_ROOT:-./data}/wiki:/knowledge/wiki:ro
+      - ${DATA_ROOT:-./data}/openchamber:/home/openchamber/.config/openchamber:rw
+    depends_on:
+      opencode:
+        condition: service_healthy
     networks:
       default:
       webproxy:
         aliases:
-          - ${STACK_ID:-karpathy-wiki}-opencode
-    extra_hosts:
-      - "${PAPERLESS_BLOCKED_HOSTNAME:-paperless.example.invalid}:127.0.0.1"
+          - ${STACK_ID:-karpathy-wiki}-openchamber
+    healthcheck:
+      test: ["CMD", "node", "/etc/openchamber/healthcheck.mjs"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 1m
+    read_only: true
+    tmpfs:
+      - /tmp
     cap_drop:
       - ALL
     security_opt:

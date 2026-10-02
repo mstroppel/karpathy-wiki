@@ -25,6 +25,7 @@ ${DATA_ROOT}/
 │   ├── webdav/             # Content-free WebDAV error reports
 │   ├── audio/              # Content-free audio error reports
 │   └── paperless/          # Content-free Paperless error reports
+├── openchamber/             # Private chat UI settings (not backend sessions)
 └── opencode/
     ├── config/             # OpenCode configuration and generated policy
     ├── data/               # Credentials, sessions, messages, and logs

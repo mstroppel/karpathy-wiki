@@ -1,0 +1,9 @@
+{
+  "name": "karpathy-wiki-chat",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@openchamber/web": "2.1.0"
+  }
+}

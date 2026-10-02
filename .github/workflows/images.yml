@@ -23,6 +23,11 @@ jobs:
       - uses: actions/checkout@v7
       - uses: docker/setup-qemu-action@v4
       - uses: docker/setup-buildx-action@v4
+      - name: Validate primary chat before publication
+        run: |
+          docker build --target opencode -t kw-opencode:integration -f opencode/Dockerfile .
+          docker build --target openchamber -t kw-openchamber:integration -f opencode/Dockerfile .
+          sh tests/integration/chat.sh
       - name: Log in to GHCR
         uses: docker/login-action@v4
         with:

@@ -69,8 +69,9 @@ mkdir -p "$sources/webdav" \
   "$wiki/concepts" \
   "$wiki/analyses" \
   "$KNOWLEDGE_ROOT/opencode/config" \
-  "$KNOWLEDGE_ROOT/opencode/data" \
-  "$KNOWLEDGE_ROOT/opencode/state"
+    "$KNOWLEDGE_ROOT/opencode/data" \
+    "$KNOWLEDGE_ROOT/opencode/state" \
+    "$KNOWLEDGE_ROOT/openchamber"
 
 if [ "$PAPERLESS_ENABLED" = true ]; then
   mkdir -p "$sources/paperless" "$KNOWLEDGE_ROOT/quarantine/paperless"
@@ -85,6 +86,7 @@ chown -R "$PUID:$PGID" "$KNOWLEDGE_ROOT"
 # Drafts can contain unredacted answers. Keep the inbox traversable only by
 # the configured user, including when init is rerun on an existing data tree.
 chmod 0700 "$KNOWLEDGE_ROOT/incoming/answers"
+chmod 0700 "$KNOWLEDGE_ROOT/openchamber"
 
 # Install generated files through a hard link so an existing path, including a
 # concurrently created path, can never be replaced.

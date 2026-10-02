@@ -12,7 +12,8 @@ when reproducible upgrades are required.
 | `STACK_ID` | Unique DNS alias prefix on the proxy network |
 | `WIKI_NAME` | Human-readable title written during first initialization |
 | `WIKI_PUBLIC_URL` | Browser-visible SilverBullet base URL |
-| `OPENCODE_PUBLIC_URL` | Browser-visible OpenCode base URL |
+| `OPENCHAMBER_PUBLIC_URL` | Browser-visible OpenChamber chat URL (proxy documentation; not read by the service) |
+| `OPENCHAMBER_UI_PASSWORD` | Separate strong password for browser sign-in |
 | `OPENCODE_PASSWORD` | Stable OpenCode v2 server password shared with internal API clients |
 | `DATA_ROOT` | Persistent instance directory; absolute paths are recommended |
 | `PUID`, `PGID` | Host identity used by long-running services |
@@ -28,9 +29,10 @@ Use an absolute path in production, for example
 OpenCode v2 requires server authentication even behind a reverse proxy. Fresh
 installs and `karpathy-wiki.sh update` generate `OPENCODE_PASSWORD` when it is
 missing; manual deployments must replace the example value with a strong random
-secret. Keep it private. Open the pairing URL shown by
-`docker compose exec opencode opencode pair` once to save the credential in the
-browser.
+secret. Keep it private: only internal API clients use this credential.
+Fresh installs also generate a separate `OPENCHAMBER_UI_PASSWORD`. Existing or
+manual installations must set that value themselves before starting this release.
+Sign in to OpenChamber with the UI password; no OpenCode browser pairing is needed.
 
 ## Profiles
 
@@ -266,58 +268,17 @@ Compose creates these aliases on `WEBPROXY_NETWORK`:
 
 ```text
 ${STACK_ID}-silverbullet
-${STACK_ID}-opencode
+${STACK_ID}-openchamber
 ${STACK_ID}-raw-files
 ```
 
-The corresponding ports are `3000`, `4096`, and `8080`. Apply authentication and
+The corresponding ports are `3000`, `3000`, and `8080`. Apply authentication and
 source-network restrictions at the reverse proxy. Do not publish container ports
 directly from Compose.
 
-### Caddy without browser pairing
-
-OpenCode v2 always requires Basic Auth, but Caddy can supply that credential to
-the upstream so users do not need to enter or store the OpenCode password in
-their browsers. First generate the value for the Basic Auth header from the
-running container:
-
-```bash
-docker compose exec -T opencode sh -c \
-  'printf "opencode:%s" "$OPENCODE_PASSWORD" | base64 | tr -d "\n"'
-```
-
-Store the output as `OPENCODE_UPSTREAM_AUTH` in Caddy's environment, not in the
-Caddyfile or this repository. Pass it to the Caddy container if Caddy also runs
-through Compose:
-
-```yaml
-services:
-  caddy:
-    environment:
-      OPENCODE_UPSTREAM_AUTH: ${OPENCODE_UPSTREAM_AUTH}
-```
-
-Authenticate public requests using Caddy's `basic_auth`, `forward_auth`, or an
-equivalent trusted access-control handler, then replace the header sent to
-OpenCode:
-
-```caddyfile
-chat.example.com {
-    # Configure basic_auth, forward_auth, or another access policy here.
-
-    reverse_proxy karpathy-wiki-opencode:4096 {
-        header_up Authorization "Basic {$OPENCODE_UPSTREAM_AUTH}"
-    }
-}
-```
-
-The alias must match `${STACK_ID}-opencode`, and Caddy must be attached to
-`WEBPROXY_NETWORK`. The `header_up` rule deliberately replaces any client-sent
-`Authorization` header. Never use this rule on a publicly accessible route
-without separate authentication: Caddy would otherwise grant every visitor
-access to OpenCode. Restart or reload Caddy after changing the environment. If
-`OPENCODE_PASSWORD` changes, regenerate `OPENCODE_UPSTREAM_AUTH` before restarting
-OpenCode to avoid locking out proxy traffic.
+OpenChamber uses its own browser login. OpenCode stays on the private stack
+network; do not proxy it or inject backend credentials into browser requests.
+See [chat deployment](chat.md) for the Caddy example and SSE/WebSocket requirements.
 
 ## Upgrades
 

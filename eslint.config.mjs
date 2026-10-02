@@ -5,7 +5,13 @@ export default [
   { ignores: ['node_modules/', 'temp/'] },
   js.configs.recommended,
   {
-    files: ['config/**/*.js', 'config/**/*.mjs', 'tests/**/*.mjs', 'eslint.config.mjs'],
+    files: [
+      'config/**/*.js',
+      'config/**/*.mjs',
+      'openchamber/**/*.mjs',
+      'tests/**/*.mjs',
+      'eslint.config.mjs',
+    ],
     languageOptions: {
       ecmaVersion: 2024,
       sourceType: 'module',
