@@ -1,6 +1,6 @@
 ---
 name: wiki-ingest
-description: Liest ausdrücklich angeforderte neue oder geänderte Quellen in das Wiki ein.
+description: Liest ausdrücklich angeforderte neue oder geänderte Quellen ein und kann ausdrücklich zur erneuten Auswertung angeforderte aktuelle Quellen erneut lesen.
 ---
 
 # Wiki-Quelle einlesen
@@ -15,11 +15,25 @@ auf. Lies `AGENTS.md` und vor Änderungen Git-Status und Historie sowie `index.m
 
 1. Ermittle mit `wiki_ingest_status` den Status. Bei `new` oder `outdated`
    verwende ausschließlich dessen `adapter`, `source_key`, `source_path`,
-   `source_revision`, `wiki_path` und `frontmatter`. Rufe unmittelbar vor jeder
-   Änderung `wiki_ingest_status` mit `adapter` und `source_key` erneut auf:
-   Bearbeite nur dieselbe `new`- oder `outdated`-Revision und stoppe, wenn die
-   globalen Zähler `invalid` oder `conflict` ungleich null sind. Bei `current`
-   ändere nichts. Brich bei unlesbarem Format oder mehrdeutiger Auswahl ab.
+   `source_revision`, `wiki_path` und `frontmatter`. Bearbeite `current`-Quellen
+   nur, wenn der Benutzer ausdrücklich genau diese Quelle erneut einlesen oder
+   auswerten lassen will; ein normaler Auftrag für alle neuen/geänderten Quellen
+   schließt `current` weiterhin aus. Ermittle dafür aktuelle Einträge mit
+   `include_current: true` und `status_state: current`; bei einer Anfrage per
+   Quellpfad blättere durch die Adapterseiten (`adapter`, `offset`, `limit`) und
+   suche nach dem exakten `source_path`. Leite `adapter` und `source_key` aus
+   genau diesem Statusdatensatz ab; Quellpfad und Quellschlüssel sind nicht
+   zwingend identisch. Brich ab, wenn kein eindeutiger Treffer vorliegt.
+   Verwende danach den gezielten Statusabruf mit `adapter` und `source_key` und
+   verfahre wie bei `new`/`outdated`. Lies die Quelle vollständig neu und aktualisiere
+   ihre bestehende revisionsbezogene Wiki-Seite, statt eine Duplikatseite für
+   dieselbe Revision anzulegen. Rufe unmittelbar vor jeder Änderung
+   `wiki_ingest_status` mit `include_current: true`, `adapter` und `source_key`
+   erneut auf: Bearbeite nur denselben Eintrag und dieselbe `source_revision`
+   (Status darf `new`, `outdated` oder bei ausdrücklich angeforderter
+   Neuauswertung `current` sein) und stoppe, wenn die globalen Zähler `invalid`
+   oder `conflict` ungleich null sind. Brich bei unlesbarem Format oder
+   mehrdeutiger Auswahl ab.
 2. Lies die vollständige Quelle. Schreibe das gelieferte Frontmatter unverändert
    als YAML; erhalte bestehende Felder. Nenne den exakten Quellpfad und
    Fundstellen. Bei `paperless_url`: HTTPS-Feld erhalten und im Seitentext als
