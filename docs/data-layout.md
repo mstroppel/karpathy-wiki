@@ -13,7 +13,9 @@ ${DATA_ROOT}/
 ├── wiki/                   # SilverBullet space and independent Git repository
 ├── incoming/
 │   ├── audio/              # Private rclone snapshot of WebDAV recordings
-│   └── answers/            # Confirmed Q&A drafts, private to OpenCode and answer provider
+│   ├── answers/            # Confirmed Q&A drafts, private to OpenCode and answer provider
+│   └── ingest-journal/     # Private wiki ingestion journal: per-source result
+│       └── runs/<run-id>/  #   records, run state, and assembled reports
 ├── speech/                 # Speech worker store: recordings, queue, failures,
 │   └── cache/              #   and structured results (unredacted, private)
 ├── models/
@@ -104,6 +106,21 @@ distinct publish jobs cannot hold live leases simultaneously, and an expired
 holder cannot renew or complete its job. The serialized publisher that will
 consume these leases is still planned; these metrics do not imply automatic
 wiki publication.
+
+## Wiki ingestion journal
+
+Bulk wiki ingestion records its per-source results in
+`incoming/ingest-journal/runs/<run-id>/`: append-only result records, the run
+state with its working-context budget, and the assembled per-source report.
+These records hold source-derived summaries of processed sources, so they live
+in the private `incoming/` area alongside the answer drafts instead of the
+content-free state store. The directory is private to OpenCode and its operator
+(`0700`), only `incoming/ingest-journal` is mounted into the OpenCode container
+(`/knowledge/incoming/ingest-journal`), and nothing from it is published to the
+wiki, to source directories, or into fixtures and diagnostics. Include it in
+backups of `DATA_ROOT` to keep completed reports. See
+[ingestion reports](ingest-reports.md) for the record schema, resume behavior,
+and the report contract.
 
 ## Removed data directories
 

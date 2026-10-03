@@ -45,13 +45,31 @@ auf. Lies `AGENTS.md` und vor Änderungen Git-Status und Historie sowie `index.m
    Tatsachen übernehmen; verbleibende Konflikte ausdrücklich melden.
 3. Aktualisiere `overview.md`, `index.md` und `log.md`. Prüfe Diff, Links und
    Herkunftsnachweise; committe genau einmal pro Quelle. Melde Erfolg erst
-   nach dem Commit und halte die Details für den Abschlussbericht fest.
+   nach dem Commit und halte die Details für den Ergebnisdatensatz fest.
+
+## Ergebnisdatensatz je Quelle
+
+Schreibe nach dem verifizierten Commit genau einen Ergebnisdatensatz über
+`wiki_ingest_journal` (`operation: record`) in den Lauf deines Auftrags
+(`run_id`): `adapter`, `source_key`, `source_path`, `source_revision`,
+`wiki_path`, `status: ingested`, `commit`, `changed_pages`, `content`,
+`contradictions`, `extraction_limits` und `source_unmodified: true`. Der
+Datensatz ist die dauerhafte Grundlage des Abschlussberichts: Halte hier die
+interpretativen Feststellungen fest, die Git nicht rekonstruieren kann.
+
+Ein Datensatz entsteht erst nach dem Commit und nie davor. Was nicht verifiziert
+ist, wird nicht beschönigt: Schreibe `status: blocked` mit konkretem `blocker`
+und nenne den Grund, statt einen halben Erfolg zu melden. Ein Datensatz
+überschreitet nie sein Byte-Budget; kürze Detailtexte bewusst und weise jede
+Kürzung in `extraction_limits` aus. Inhalte fallen nie still weg.
 
 ## Abschlussbericht
 
 Beginne mit „Einlesen erfolgreich abgeschlossen.“ oder kennzeichne den Auftrag
-als unvollständig. Gib auch bei Sammelaufträgen in der Abschlussantwort je Quelle
-einen Detailblock aus; Zwischenmeldungen oder Sammelzusammenfassungen reichen nicht:
+als unvollständig.
+
+Für eine ausdrückliche Einzelquelle gib in der Abschlussantwort einen
+Detailblock aus:
 
 - **Quelle:** Exakter `source_path`.
 - **Commit:** Mit Git verifizierter kurzer Hash oder „Kein Commit“ mit Grund.
@@ -61,32 +79,33 @@ einen Detailblock aus; Zwischenmeldungen oder Sammelzusammenfassungen reichen ni
 - **Extraktionsgrenzen:** Fehlende/unlesbare/teilweise erfasste Inhalte; „Keine
   festgestellt“ nur nach vollständigem Lesen. Quelldatei unverändert bestätigen.
 
+Für einen Batch-Auftrag (der Auftrag nennt eine Quellenliste und `run_id` und
+verlangt eine kompakte Rückmeldung) gib je Quelle nur eine Zeile mit
+`source_path`, `commit` und Status aus. Die Detailblöcke stehen vollständig in
+den Ergebnisdatensätzen und gehören nicht in die Rückmeldung.
+
 Keine Details erfinden; Unbekanntes als „Nicht ermittelt“ angeben.
 
-## Alle neuen und geänderten Quellen
+## Sammelaufträge
 
-- Starte mit `wiki_ingest_status` (`summary_only: true`). Bei `invalid` oder
-  `conflict` melde die Diagnosen und stoppe vor Änderungen. Melde `revoked` und
-  `orphaned` separat; bereinige sie nicht ohne ausdrücklichen Auftrag. Hole
-  Diagnose-Statusarten mit `status_state` und blättere mit `page.next_offset`.
-- Hole je Adapter Seiten mit `adapter`, `offset: 0`, `limit: 10`. Bearbeite
-  `new` und `outdated` nacheinander mit jeweils eigenem Commit. Nach jedem
-  Commit beginne beim selben Adapter wieder bei Offset 0, weil erledigte
-  Einträge aus der Liste fallen. `page.next_offset` dient nur zum Blättern in
-  einer unveränderten Liste; Quellenpfade kommen aus dem Status, nicht aus
-  einer Dateisuche.
-- Bei `page.blocked` hole `oversized_records` über `adapter`,
-  `record_chunk_state`, `record_chunk_offset`, `record_chunk_index` und ggf.
-  `source_key` stückweise. Füge `record.json` in Offset-Reihenfolge bis
-  `next_offset: null` zusammen. Verarbeite blockierte Quellen normal und starte
-  danach bei Offset 0. Hole Diagnosen mit `status_state` separat und setze nach
-  einem blockierten Diagnoseeintrag bei `record.index + 1` fort. Wenn keine
-  Datensätze genannt werden, grenze die Abfrage auf einen Adapter ein. Verwende
-  keine Tool-Output-Datei als Ersatz.
-- Prüfe zum Schluss erneut `summary_only: true` und arbeite weiter bis
-  `new=0` und `outdated=0`. Bei einem Blocker melde den fehlgeschlagenen
-  Befehl, die genaue Fehlermeldung und alle offenen Quellen als unvollständig.
-- Gib abschließend alle Quellen-Detailblöcke aus, danach den zuletzt geprüften
-  Gesamtstatus mit `new` und `outdated` sowie separat `revoked` und `orphaned`
-  (unverändert belassen). Wurde keine Quelle bearbeitet, melde dies ausdrücklich
-  zusammen mit dem Gesamtstatus; erzeuge keine leeren Detailblöcke.
+- Bearbeite ausschließlich die Quellen, die dein Auftrag nennt, strikt
+  nacheinander mit jeweils eigenem Commit. Beginne nie eine zweite Quelle vor
+  dem Commit der vorigen.
+- Plane keine eigenen Batches und sammle keine weiteren Quellen über
+  Statusseiten; die Planung macht der Orchestrator mit `next_batch`. Ein
+  Auftrag ohne Quellenliste für alle neuen/geänderten Quellen gehört nach
+  `/ingest-new`; verarbeite daraus höchstens eine Quelle und verweise auf den
+  Sammelauftrag.
+- Bei `page.blocked` rufe große Einträge stückweise über `record_chunk_offset`
+  ab und füge sie in Offset-Reihenfolge zusammen. Verwende keine Tool-Output-
+  Datei als Ersatz.
+- Einzelne Quellenfehler (unlesbares Format, mehrdeutige Auswahl, fehlender
+  Commit) hältst du als `record` (`status: blocked`) mit konkretem Blocker fest
+  und fährst mit der nächsten Quelle deines Auftrags fort. Globale `invalid`-
+  oder `conflict`-Befunde stoppen sofort; melde sie und bearbeite nichts mehr.
+- Übersteigt eine Quelle oder ihr Seitenumfang das Kontextbudget, lies sie in
+  validierten Abschnitten (`read` mit `offset` und `limit`) und verarbeite sie
+  vollständig oder melde einen konkreten Blocker. Kürze nie still und behaupte
+  nie vollständige Extraktion bei ungelösten Grenzen.
+- Beende den Auftrag mit dem erreichten Stand: bearbeitete Quellen, offene
+  Blocker und für jede Quelle den passenden Ergebnisdatensatz.

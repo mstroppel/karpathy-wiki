@@ -89,6 +89,25 @@ with `adapter`, `record_chunk_state`, and `record_chunk_offset`, plus
 `source_key` or `record_chunk_index`, then append chunks by offset before
 parsing. If no record is listed, narrow the query to one adapter.
 
+## Ingestion Runs
+
+`/ingest-new` orchestrates bulk wiki ingestion in bounded batches. The batch
+planner sizes each worker session by an estimated token budget, not by a bare
+source count, and stores per-source results in the private journal mounted at
+`/knowledge/incoming/ingest-journal` (see [data layout](data-layout.md)). Tune the
+budget for the configured model:
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `WIKI_INGEST_BATCH_BUDGET_TOKENS` | `32000` | Estimated working context per worker session |
+| `WIKI_INGEST_BATCH_MAX_SOURCES` | `4` | Maximum sources per batch |
+| `WIKI_INGEST_RUN_MAX_BATCHES` | `12` | Batches per run before a clean rollover (`0` = unlimited) |
+
+Token values are documented estimates, not measured model tokens; see
+[ingestion reports](ingest-reports.md) for the budget model, the report
+contract, resume and rollover behavior, and the opt-in real-model acceptance
+run.
+
 ## Secrets
 
 WebDAV uses rclone's obscured password format. Obscuring is not encryption;

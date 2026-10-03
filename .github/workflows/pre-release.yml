@@ -30,7 +30,7 @@ jobs:
           python -m pip install -r requirements-dev.txt
           python -m pip install --no-deps ./ingest/core ./ingest/webdav ./ingest/paperless ./ingest/audio ./ingest/speech
           python -m unittest discover -s tests -v
-          node --test tests/test_wiki_ingest_status.mjs tests/test_contract_fixtures.mjs
+          node --test tests/test_wiki_ingest_status.mjs tests/test_contract_fixtures.mjs tests/test_wiki_ingest_journal.mjs tests/test_ingest_context_budget.mjs
           node --test tests/test_chat_bootstrap.mjs
           (cd ingest && python -m unittest discover -s tests -v)
 

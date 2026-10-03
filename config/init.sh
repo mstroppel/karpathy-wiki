@@ -62,6 +62,7 @@ mkdir -p "$sources/webdav" \
   "$KNOWLEDGE_ROOT/incoming/webdav" \
   "$KNOWLEDGE_ROOT/incoming/answers" \
   "$KNOWLEDGE_ROOT/state" \
+  "$KNOWLEDGE_ROOT/incoming/ingest-journal" \
   "$wiki/assets" \
   "$wiki/sources/webdav" \
   "$wiki/sources/answers" \
@@ -87,6 +88,9 @@ chown -R "$PUID:$PGID" "$KNOWLEDGE_ROOT"
 # the configured user, including when init is rerun on an existing data tree.
 chmod 0700 "$KNOWLEDGE_ROOT/incoming/answers"
 chmod 0700 "$KNOWLEDGE_ROOT/openchamber"
+# Ingest journal and reports hold source-derived summaries of processed
+# sources. They are private to OpenCode and its operator, never published.
+chmod 0700 "$KNOWLEDGE_ROOT/incoming/ingest-journal"
 
 # Install generated files through a hard link so an existing path, including a
 # concurrently created path, can never be replaced.
@@ -132,11 +136,12 @@ Markdown-Wiki. Neue Quellen liegen ausschließlich unter
 unter \`/knowledge/sources/answers\`.$paperless_summary
 
 Der primäre Agent delegiert ausdrückliche Einleseaufträge an \`wiki-ingest\`,
-Prüf- und Wartungsaufträge an \`wiki-lint\`, ausdrücklich wissenschaftliche
-Analysen an \`wiki-analysis\` und das Speichern fertiger Analysen an
-\`wiki-analysis-save\`. Interaktive Lückenprüfungen mit Antwortaufnahme
-führt der primäre Agent über \`wiki-gap-review\` selbst aus. Jede andere
-Anfrage bleibt eine Wiki-Abfrage.
+Sammelaufträge für alle neuen und geänderten Quellen an
+\`wiki-ingest-orchestrator\`, Prüf- und Wartungsaufträge an \`wiki-lint\`,
+ausdrücklich wissenschaftliche Analysen an \`wiki-analysis\` und das Speichern
+fertiger Analysen an \`wiki-analysis-save\`. Interaktive Lückenprüfungen mit
+Antwortaufnahme führt der primäre Agent über \`wiki-gap-review\` selbst aus.
+Jede andere Anfrage bleibt eine Wiki-Abfrage.
 
 ## Sicherheitsgrenzen
 
