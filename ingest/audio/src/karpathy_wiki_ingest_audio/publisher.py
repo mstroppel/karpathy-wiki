@@ -91,7 +91,7 @@ GENERATION_METADATA_FILENAME = ".generation.json"
 STAGING_PREFIX = ".staging-"
 TRANSCRIPT_DIRECTORY = "recordings"
 
-RENDERER_VERSION = 1
+RENDERER_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -313,6 +313,7 @@ def sanitize_into_generation(
                     source_revision=revision,
                     frontmatter={
                         "source_adapter": SOURCE_NAME,
+                        "audio_source_id": work.source_id,
                         "source_path": safe_origin,
                         "source_revision": revision,
                     },

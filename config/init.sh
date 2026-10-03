@@ -116,7 +116,7 @@ if [ "$PAPERLESS_ENABLED" = true ]; then
   paperless_security='
 - Greife niemals direkt auf Paperless, dessen API oder Originaldokumente zu.
 - Versuche niemals, anonymisierte Platzhalter auf reale Identitäten zurückzuführen.
-- Lies vor schreibenden Paperless-Vorgängen `/knowledge/sources/paperless/revoked.md` und bereinige widerrufenes Wissen nur auf ausdrücklichen Auftrag.'
+- Prüfe vor schreibenden Paperless-Vorgängen widerrufene Quellen mit `wiki_ingest_status` (`adapter: paperless`, `status_state: revoked`); blättere mit `page.next_offset`. Bereinige widerrufenes Wissen nur auf ausdrücklichen Auftrag.'
   paperless_structure='
 - `sources/<von>-<bis>/`: Paperless-Zusammenfassungen in Bereichen von jeweils 1000 IDs; bewahre `paperless_id`, `paperless_url` und `source_revision` aus der anonymisierten Quelle und rendere den Paperless-Link sichtbar auf der Quellenseite.'
 fi
