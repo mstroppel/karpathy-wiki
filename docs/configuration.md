@@ -146,12 +146,16 @@ is refreshed; the name is reserved there.
 
 With the `audio` profile enabled, a second connector synchronizes a
 WebDAV folder of recordings (`AUDIO_WEBDAV_PATH`, default `Recordings`) into
-its own private snapshot, transcribes locally through the
+its own private snapshot, transcribes through the
 [`audio-speech` worker](audio.md), applies the shared redactions (including
 matches that span transcript segments), and publishes sanitized Markdown to
 `sources/audio` as coherent generations. Raw audio, unredacted transcripts,
 and the speech-result cache stay in private directories that are never
-mounted into OpenCode; no audio or transcript is sent to a cloud API.
+mounted into OpenCode. The default local backend sends no audio or
+transcript to a cloud API; the opt-in hosted backend
+(`SPEECH_BACKEND=mistral`) uploads the raw recording to the Mistral
+speech-to-text service before redaction, with its own service limits,
+per-minute costs, and data-handling terms.
 See [audio ingest](audio.md) for all options, the source identity model,
 and retention.
 
@@ -241,9 +245,24 @@ path when possible:
 PAPERLESS_TOKEN_FILE=/private/personal-wiki/paperless-token
 ```
 
+The hosted transcription API key uses the same file pattern:
+
+```env
+MISTRAL_API_KEY_FILE=/private/personal-wiki/mistral-api-key
+```
+
+It is mounted into the speech worker service alone; the audio provider,
+OpenCode, logs, published metadata, and cache/worker fingerprints never see
+it. Only the request header carries the key (see [audio ingest](audio.md)).
+Compose needs this secret file to exist even in local-only mode, so the
+unset default is the tracked, intentionally empty placeholder
+`secrets/mistral-api-key.example`; hosted mode then fails content-free until
+a real key file is configured. The `MISTRAL_API_KEY` environment variable is
+read only when the worker runs outside Compose.
+
 `REDACTIONS_FILE` is shared by all ingestion providers and should also use an
 absolute path, for example `/private/personal-wiki/redactions.json`. Apply mode
-`0600` to both files. Never place real values below the repository's `secrets/`
+`0600` to these files. Never place real values below the repository's `secrets/`
 directory in a commit.
 
 For structured `people` entries, the configured first and last names are redacted

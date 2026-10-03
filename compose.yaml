@@ -72,7 +72,7 @@ services:
       HEALTH_PATH: /tmp/health.json
       INGEST_STATE_PATH: /data/state/ingest.sqlite3
       AUDIO_SYNC_INTERVAL: ${AUDIO_SYNC_INTERVAL:-1h}
-      AUDIO_LANGUAGE: ${AUDIO_LANGUAGE}
+      AUDIO_LANGUAGE: ${AUDIO_LANGUAGE:-}
       AUDIO_DIARIZE: ${AUDIO_DIARIZE:-0}
       AUDIO_MAX_BYTES: ${AUDIO_MAX_BYTES}
       AUDIO_MAX_DURATION_SECONDS: ${AUDIO_MAX_DURATION_SECONDS}
@@ -122,11 +122,22 @@ services:
       SPEECH_POLL_SECONDS: ${SPEECH_POLL_SECONDS:-5}
       SPEECH_MAX_BYTES: ${AUDIO_MAX_BYTES}
       SPEECH_MAX_DURATION_SECONDS: ${AUDIO_MAX_DURATION_SECONDS}
+      # Opt-in hosted transcription (SPEECH_BACKEND=mistral): the worker-only
+      # API secret is mounted below and never reaches the audio provider.
+      SPEECH_MISTRAL_MODEL: ${SPEECH_MISTRAL_MODEL:-}
+      SPEECH_MISTRAL_BASE_URL: ${SPEECH_MISTRAL_BASE_URL:-}
+      SPEECH_MISTRAL_TIMEOUT_SECONDS: ${SPEECH_MISTRAL_TIMEOUT_SECONDS:-}
+      SPEECH_MISTRAL_MAX_ATTEMPTS: ${SPEECH_MISTRAL_MAX_ATTEMPTS:-}
+      SPEECH_MISTRAL_MAX_BYTES: ${SPEECH_MISTRAL_MAX_BYTES:-}
+      SPEECH_MISTRAL_MAX_DURATION_SECONDS: ${SPEECH_MISTRAL_MAX_DURATION_SECONDS:-}
+      MISTRAL_API_KEY_FILE: /run/secrets/mistral_api_key
       HF_HOME: /models
       HUGGINGFACE_TOKEN: ${HUGGINGFACE_TOKEN}
     volumes:
       - ${DATA_ROOT:-./data}/speech:/data/speech:rw
       - ${DATA_ROOT:-./data}/models/audio:/models:rw
+    secrets:
+      - mistral_api_key
     healthcheck:
       test: ["CMD", "python", "-m", "karpathy_wiki_speech",
              "--health-check", "/data/speech/worker-health.json"]
@@ -348,6 +359,11 @@ secrets:
     file: ${PAPERLESS_TOKEN_FILE:-./secrets/paperless-token}
   redactions:
     file: ${REDACTIONS_FILE:-./secrets/redactions.json}
+  # Defaults to the tracked, intentionally empty placeholder so local-only
+  # audio starts without any Mistral credential (Compose requires the file to
+  # exist). Hosted mode points this at the real key file.
+  mistral_api_key:
+    file: ${MISTRAL_API_KEY_FILE:-./secrets/mistral-api-key.example}
 
 networks:
   webproxy:

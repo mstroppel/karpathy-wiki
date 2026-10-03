@@ -155,6 +155,21 @@ class IngestPackageTests(unittest.TestCase):
                 self.assertIn(name, pins)
                 self.assertGreaterEqual(len(pins[name]), 2, "missing amd64/arm64 wheel hashes")
 
+    def test_speech_optional_dependencies_are_hash_pinned(self):
+        """Every speech extra installs from the hash-pinned runtime lockfile."""
+        requirements = read(ROOT / "ingest" / "speech" / "requirements.txt")
+        pinned = {
+            (line.split("==", 1)[0].replace("-", "_").lower(), line.split("==", 1)[1].split()[0])
+            for line in requirements.replace("\\\n", " ").splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        }
+        for extra, dependencies in read_ingest_project("speech")["optional-dependencies"].items():
+            for dependency in dependencies:
+                with self.subTest(extra=extra, dependency=dependency):
+                    self.assertRegex(dependency, r"^[\w-]+==\d[\w.]*$")
+                    name, version = dependency.split("==", 1)
+                    self.assertIn((name.replace("-", "_").lower(), version), pinned)
+
     def test_build_backends_are_pinned(self):
         requires_pin = f"setuptools=={ingest_setuptools_version()}"
         for directory in ("core", "webdav", "audio", "speech", "paperless"):
