@@ -118,8 +118,8 @@ deployments configure the key through the file.
 | `SPEECH_MISTRAL_MODEL` | `voxtral-mini-latest` | Hosted model selection (transcription model id) |
 | `MISTRAL_API_KEY_FILE` | `secrets/mistral-api-key.example` | Worker-only API secret file, mounted into the speech worker alone |
 | `SPEECH_MISTRAL_BASE_URL` | `https://api.mistral.ai/v1` | Transcription endpoint |
-| `SPEECH_MISTRAL_MAX_BYTES` | `524288000` | Hosted service input size limit (500 MB) |
-| `SPEECH_MISTRAL_MAX_DURATION_SECONDS` | `3600` | Hosted service input duration limit (60 min) |
+| `SPEECH_MISTRAL_MAX_BYTES` | `524288000` | Input size limit (500 MB conservative default) |
+| `SPEECH_MISTRAL_MAX_DURATION_SECONDS` | `3600` | Input duration limit (60 min conservative default) |
 | `SPEECH_MISTRAL_TIMEOUT_SECONDS` | `600` | Per-request timeout |
 | `SPEECH_MISTRAL_MAX_ATTEMPTS` | `4` | Bounded retry budget for transient failures |
 
@@ -152,17 +152,21 @@ configuration change plus a restart of the speech worker.
 
 ### Service input limits
 
-The hosted service accepts WAV, MP3, FLAC, OGG, and WEBM, at most 500 MB
-and 60 minutes per request (Mistral's documented limits). Those limits are
+The hosted service accepts WAV, MP3, FLAC, OGG, and WEBM. The shipped input
+limits (500 MB, 60 minutes per request) follow Mistral's documented
+guarantees and are deliberately conservative: current Mistral documentation
+describes prerecorded transcription of up to three hours, so treat one hour
+as an installation default, not as a service maximum. The limits are
 enforced alongside the installation's own recording limits
 (`AUDIO_MAX_BYTES`, `AUDIO_MAX_DURATION_SECONDS`): the tighter bound wins,
 and a recording that violates them is rejected content-free before anything
-is uploaded or billed. The defaults can be lowered per host
-(`SPEECH_MISTRAL_MAX_BYTES`, `SPEECH_MISTRAL_MAX_DURATION_SECONDS`);
-raising them above the documented service limits only moves the rejection
-to the API. Note that the general extension list also allows `.m4a`, `.mp4`,
-and `.opus`, which this service does not document support for; recordings
-in those formats fail content-free in this mode.
+is uploaded or billed. Lower them per host with
+`SPEECH_MISTRAL_MAX_BYTES` and `SPEECH_MISTRAL_MAX_DURATION_SECONDS`;
+raising them is possible, but a recording the account does not accept is
+then rejected by the API instead (content-free, after the upload started).
+Note that the general extension list also allows `.m4a`, `.mp4`, and
+`.opus`, which this service does not document support for; recordings in
+those formats fail content-free in this mode.
 
 ### Timestamps, language, and speakers
 

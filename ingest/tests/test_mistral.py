@@ -291,12 +291,34 @@ class TimestampConversionTests(unittest.TestCase):
             [{"text": "x", "start": True, "end": 1}],
             [{"text": "x", "start": -1, "end": 1}],
             [{"text": "x", "start": 2, "end": 1}],
+            [{"text": "x", "start": float("inf"), "end": 1}],
+            [{"text": "x", "start": 0, "end": float("nan")}],
         ]
         for segments in broken:
             with self.subTest(segments=segments):
                 with self.assertRaises(HostedResponseError) as caught:
                     parse_transcription(transcript(segments=segments), diarize=False)
                 self.assertNotIn("Guten", str(caught.exception))
+
+    def test_transcript_text_that_no_timed_segment_carries_is_rejected(self):
+        with self.assertRaises(HostedResponseError):
+            parse_transcription(
+                transcript(text="Guten Morgen.", segments=[{"text": "   ", "start": 0, "end": 1}]),
+                diarize=False,
+            )
+
+    def test_timed_text_is_kept_even_when_some_segments_are_blank(self):
+        segments, _, _ = parse_transcription(
+            transcript(
+                text="Guten Morgen.",
+                segments=[
+                    {"text": "  ", "start": 0, "end": 1},
+                    {"text": "Morgen.", "start": 1, "end": 2},
+                ],
+            ),
+            diarize=False,
+        )
+        self.assertEqual([segment.text for segment in segments], ["", "Morgen."])
 
 
 class ResponseValidationTests(RecordingCase):

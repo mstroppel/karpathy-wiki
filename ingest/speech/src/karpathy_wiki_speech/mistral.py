@@ -26,6 +26,7 @@ the request header and nowhere else.
 from __future__ import annotations
 
 import json
+import math
 import os
 import time
 from collections.abc import Callable, Iterable, Iterator, Mapping
@@ -49,10 +50,11 @@ TRANSCRIPTION_PATH = "/audio/transcriptions"
 TIMESTAMP_GRANULARITY = "segment"
 DIARIZATION_MODE = "service-speakers"
 
-# Hosted-service input limits, as documented by Mistral for audio
-# transcription (formats WAV/MP3/FLAC/OGG/WEBM, 60 minutes, 500 MB). They
-# are enforced alongside the installation's own recording limits and can be
-# lowered per host; raising them may simply move the rejection to the API.
+# Hosted-service input limits: the documented formats plus conservative
+# size and duration defaults (Mistral documents prerecorded transcription
+# of up to three hours; one hour is kept as a safe installation default).
+# They are enforced alongside the installation's own recording limits and
+# can be lowered per host; raising them may move the rejection to the API.
 SERVICE_MAX_BYTES = 500 * 1024 * 1024
 SERVICE_MAX_DURATION_SECONDS = 60 * 60
 SERVICE_ALLOWED_EXTENSIONS: tuple[str, ...] = (".flac", ".mp3", ".ogg", ".webm", ".wav")
@@ -280,7 +282,7 @@ def decode_response(raw: bytes) -> dict[str, Any]:
 
 def _seconds(value: object, field: str) -> int:
     """Convert one API timestamp in seconds to whole milliseconds."""
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
         raise HostedResponseError(f"the hosted service returned no {field} timestamp")
     if value < 0:
         raise HostedResponseError(f"the hosted service returned a negative {field} timestamp")
@@ -329,8 +331,10 @@ def parse_transcription(
             )
         )
         labeled = labeled or raw.get("speaker_id") is not None
-    if text.strip() and not segments:
-        raise HostedResponseError("the hosted service returned no timed segments")
+    if text.strip() and not any(segment.text for segment in segments):
+        # Transcript text that no timed segment carries would be silently
+        # dropped by the timed-segment contract: refuse it instead.
+        raise HostedResponseError("the hosted service returned no timed transcript text")
     if diarize and segments and not labeled:
         raise DiarizationUnavailableError(
             "the hosted service returned no speaker labels for a diarization request"
