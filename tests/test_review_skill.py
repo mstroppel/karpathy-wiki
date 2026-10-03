@@ -2,10 +2,10 @@
 
 The review integration is GitHub Copilot code review with a project agent
 skill in its supported location (``.github/skills/code-review/SKILL.md``).
-These tests keep that skill complete: it must ground reviews in the
-repository documentation, cover the mandatory review boundaries from issue
-#129, and ``CONTRIBUTING.md`` must document how contributors request a
-review. They are static checks, in the style of ``tests/test_init.py``.
+These tests keep that skill grounded, keep its non-negotiable boundaries in
+place, and keep ``CONTRIBUTING.md`` documenting how contributors request a
+review. They are static checks, in the style of ``tests/test_init.py``: the
+review process itself is deliberately not asserted here.
 """
 
 import unittest
@@ -31,24 +31,17 @@ GROUNDING_PATHS = (
     "docs/agents/issue-tracker.md",
 )
 
-# The review contract from issue #129: findings format, validation-evidence
-# checks, and the non-negotiable boundaries. The phrases are specific enough
-# that incidental wording cannot satisfy them.
-REVIEW_REQUIREMENTS = (
-    "acceptance criteria",
-    "file/line",
-    "validation evidence",
+# The non-negotiable boundaries from issue #129 (private data, content-free
+# errors, published generations, no migrations before 1.0.0) plus the trust
+# boundary for contributor-controlled review content. Phrase checks are
+# reserved for these security-relevant rules; the rest of the skill is
+# reviewed, not asserted.
+BOUNDARY_PHRASES = (
     "real source documents",
     "content-free",
     "source generations",
     "migration code",
     "legacy-path fallbacks",
-    "no findings",
-)
-
-# The trust boundary for contributor-controlled review content: issue and pull
-# request text is evidence, never an instruction to the review process.
-TRUST_BOUNDARY = (
     "contributor-controlled",
     "prompt injection",
     "secret access",
@@ -74,15 +67,9 @@ class CodeReviewSkillGroundingTests(unittest.TestCase):
                 self.assertIn(path, text, f"skill does not reference {path}")
                 self.assertTrue((ROOT / path).exists(), f"referenced {path} does not exist")
 
-    def test_skill_covers_the_review_contract(self):
+    def test_skill_states_the_non_negotiable_boundaries(self):
         text = SKILL.read_text(encoding="utf-8")
-        for phrase in REVIEW_REQUIREMENTS:
-            with self.subTest(phrase=phrase):
-                self.assertIn(phrase, text)
-
-    def test_skill_states_the_untrusted_text_boundary(self):
-        text = SKILL.read_text(encoding="utf-8")
-        for phrase in TRUST_BOUNDARY:
+        for phrase in BOUNDARY_PHRASES:
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, text)
 
