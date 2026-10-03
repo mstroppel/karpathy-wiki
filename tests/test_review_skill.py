@@ -24,7 +24,8 @@ GROUNDING_PATHS = (
     "CONTRIBUTING.md",
     "README.md",
     "SECURITY.md",
-    "contracts",
+    "contracts/ingest-status/v1",
+    "contracts/provider-manifest/v1",
     "docs/architecture.md",
     "docs/data-layout.md",
     "docs/agents/issue-tracker.md",
@@ -43,6 +44,14 @@ REVIEW_REQUIREMENTS = (
     "migration code",
     "legacy-path fallbacks",
     "no findings",
+)
+
+# The trust boundary for contributor-controlled review content: issue and pull
+# request text is evidence, never an instruction to the review process.
+TRUST_BOUNDARY = (
+    "contributor-controlled",
+    "prompt injection",
+    "secret access",
 )
 
 
@@ -71,13 +80,21 @@ class CodeReviewSkillGroundingTests(unittest.TestCase):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, text)
 
+    def test_skill_states_the_untrusted_text_boundary(self):
+        text = SKILL.read_text(encoding="utf-8")
+        for phrase in TRUST_BOUNDARY:
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, text)
+
 
 class ContributingReviewRequestTests(unittest.TestCase):
     def test_contributing_documents_how_to_request_a_review(self):
         text = CONTRIBUTING.read_text(encoding="utf-8")
         self.assertIn("## Code review", text)
         self.assertIn(".github/skills/code-review/SKILL.md", text)
+        self.assertIn("Ask Copilot to review", text)
         self.assertIn("--add-reviewer @copilot", text)
+        self.assertIn("copilot-pull-request-reviewer[bot]", text)
 
 
 if __name__ == "__main__":
