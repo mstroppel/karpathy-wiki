@@ -454,11 +454,23 @@ class LimitTests(RecordingCase):
         )
 
     def test_hosted_format_limit_is_enforced(self):
-        path = Path(self.directory.name) / "recording.m4a"
+        path = Path(self.directory.name) / "recording.txt"
         path.write_bytes(RECORDING)
         with self.assertRaises(HostedInputLimitError):
             self.transcribe(make_backend(self.transport, self.sleeps), path=path)
         self.assertEqual(self.transport.calls, [])
+
+    def test_m4a_is_uploaded_with_a_generic_name_and_mp4_content_type(self):
+        for extension in (".m4a", ".M4A"):
+            with self.subTest(extension=extension):
+                path = Path(self.directory.name) / f"private-recording{extension}"
+                path.write_bytes(RECORDING)
+                result = self.transcribe(make_backend(self.transport, self.sleeps), path=path)
+                self.assertEqual(len(result.segments), 2)
+                self.assertIn(b'filename="audio.m4a"', self.transport.body)
+                self.assertIn(b"Content-Type: audio/mp4\r\n", self.transport.body)
+                self.assertIn(RECORDING, self.transport.body)
+                self.assertNotIn(b"private-recording", self.transport.body)
 
     def test_limits_can_be_tightened_per_installation(self):
         self.assert_rejected(

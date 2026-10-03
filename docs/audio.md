@@ -1,11 +1,10 @@
 # Audio ingest
 
-Issue #15: selected WebDAV audio recordings become transcribed,
+Selected WebDAV audio recordings become transcribed,
 optionally speaker-diarized Markdown sources. Transcription runs on the
 speech worker of this stack with one of two explicitly selected backends:
 the default local backend (faster-whisper with CTranslate2) keeps every
-recording on this host, while the opt-in hosted backend
-([#134](https://github.com/mstroppel/karpathy-wiki/issues/134)) uploads the
+recording on this host, while the opt-in hosted backend uploads the
 raw recording to the Mistral speech-to-text service **before** redaction.
 The existing wiki ingest flow imports the published sources; transcription
 alone never writes wiki pages.
@@ -82,8 +81,7 @@ happens, diarization-enabled requests fail content-free.
 
 ## Hosted transcription (opt-in, Mistral)
 
-Issue [#134](https://github.com/mstroppel/karpathy-wiki/issues/134) adds a
-second backend that transcribes through Mistral's hosted speech-to-text
+The Mistral backend transcribes through Mistral's hosted speech-to-text
 service instead of a local model. It is off by default and only used when
 explicitly selected:
 
@@ -152,7 +150,7 @@ configuration change plus a restart of the speech worker.
 
 ### Service input limits
 
-The hosted service accepts WAV, MP3, FLAC, OGG, and WEBM. The shipped input
+The hosted backend accepts WAV, MP3, M4A, FLAC, OGG, and WEBM. The shipped input
 limits (500 MB, 60 minutes per request) follow Mistral's documented
 guarantees and are deliberately conservative: current Mistral documentation
 describes prerecorded transcription of up to three hours, so treat one hour

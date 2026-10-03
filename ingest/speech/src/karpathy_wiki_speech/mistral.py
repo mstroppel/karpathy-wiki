@@ -57,7 +57,7 @@ DIARIZATION_MODE = "service-speakers"
 # can be lowered per host; raising them may move the rejection to the API.
 SERVICE_MAX_BYTES = 500 * 1024 * 1024
 SERVICE_MAX_DURATION_SECONDS = 60 * 60
-SERVICE_ALLOWED_EXTENSIONS: tuple[str, ...] = (".flac", ".mp3", ".ogg", ".webm", ".wav")
+SERVICE_ALLOWED_EXTENSIONS: tuple[str, ...] = (".flac", ".m4a", ".mp3", ".ogg", ".webm", ".wav")
 
 DEFAULT_TIMEOUT_SECONDS = 600.0
 DEFAULT_MAX_ATTEMPTS = 4
@@ -66,6 +66,7 @@ MAX_BACKOFF_SECONDS = 60.0
 
 CONTENT_TYPES: dict[str, str] = {
     ".flac": "audio/flac",
+    ".m4a": "audio/mp4",
     ".mp3": "audio/mpeg",
     ".ogg": "audio/ogg",
     ".opus": "audio/ogg",
