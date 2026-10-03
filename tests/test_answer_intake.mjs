@@ -5,19 +5,26 @@ import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 import {
+  probePublishedSource,
   scanIngestStatus,
   waitForPublishedSource,
 } from '../config/tools/wiki_ingest_status_core.mjs'
 
 test('publication wait retries until the submitted source appears', async () => {
   let scans = 0
+  let probes = 0
   const published = { adapters: { answers: { new: [{ source_key: 'review-1.md' }] } } }
   const result = await waitForPublishedSource(
-    async () => (++scans === 1 ? { adapters: {} } : published),
+    async () => {
+      scans++
+      return published
+    },
     { adapter: 'answers', sourceKey: 'review-1.md', waitSeconds: 2 },
+    async () => ++probes > 1,
   )
   assert.equal(result, published)
-  assert.equal(scans, 2)
+  assert.equal(probes, 2)
+  assert.equal(scans, 1)
 })
 
 test('publication wait returns current and invalid results immediately', async () => {
@@ -38,6 +45,7 @@ test('publication wait returns current and invalid results immediately', async (
           sourceKey: 'review-1.md',
           waitSeconds: 2,
         },
+        async () => true,
       ),
       status,
     )
@@ -48,25 +56,115 @@ test('publication wait returns current and invalid results immediately', async (
 test('publication wait is bounded, validates inputs, and respects cancellation', async () => {
   const scan = async () => ({ adapters: {} })
   assert.deepEqual(
-    await waitForPublishedSource(scan, {
-      adapter: 'answers',
-      sourceKey: 'missing.md',
-      waitSeconds: 1,
-    }),
+    await waitForPublishedSource(
+      scan,
+      {
+        adapter: 'answers',
+        sourceKey: 'missing.md',
+        waitSeconds: 1,
+      },
+      async () => false,
+    ),
     { adapters: {} },
   )
   for (const options of [{ waitSeconds: 121 }, { waitSeconds: 1 }, { waitSeconds: -1 }]) {
     await assert.rejects(waitForPublishedSource(scan, options))
   }
   const controller = new AbortController()
-  const pending = waitForPublishedSource(scan, {
-    adapter: 'answers',
-    sourceKey: 'missing.md',
-    waitSeconds: 2,
-    signal: controller.signal,
-  })
+  const pending = waitForPublishedSource(
+    scan,
+    {
+      adapter: 'answers',
+      sourceKey: 'missing.md',
+      waitSeconds: 2,
+      signal: controller.signal,
+    },
+    async () => false,
+  )
   controller.abort()
   await assert.rejects(pending, { name: 'AbortError' })
+})
+
+test('cancellation during a pending probe or full scan rejects matching results', async () => {
+  for (const phase of ['probe', 'scan']) {
+    const controller = new AbortController()
+    let release
+    const deferred = new Promise((resolve) => {
+      release = resolve
+    })
+    let started
+    const ready = new Promise((resolve) => {
+      started = resolve
+    })
+    const pendingWork = async () => {
+      started()
+      await deferred
+    }
+    const pending = waitForPublishedSource(
+      async () => {
+        if (phase === 'scan') await pendingWork()
+        return { adapters: { answers: { new: [{ source_key: 'review-1.md' }] } } }
+      },
+      { adapter: 'answers', sourceKey: 'review-1.md', waitSeconds: 2, signal: controller.signal },
+      async () => {
+        if (phase === 'probe') await pendingWork()
+        return true
+      },
+    )
+    await ready
+    controller.abort()
+    release()
+    await assert.rejects(pending, { name: 'AbortError' })
+  }
+})
+
+test('zero wait skips publication probes and performs one scan', async () => {
+  let scans = 0
+  await waitForPublishedSource(
+    async () => {
+      scans++
+      return { adapters: {} }
+    },
+    {},
+    async () => {
+      assert.fail('ordinary status calls must not probe')
+    },
+  )
+  assert.equal(scans, 1)
+})
+
+test('publication probe reads only the target manifest and exposes diagnostics', async () => {
+  const sourceRoot = await mkdtemp(path.join(os.tmpdir(), 'kw-probe-'))
+  try {
+    const options = { sourceRoot, adapter: 'answers', sourceKey: 'review-1.md' }
+    assert.equal(await probePublishedSource(options), false)
+    await mkdir(path.join(sourceRoot, 'answers'))
+    const filename = path.join(sourceRoot, 'answers', 'manifest.json')
+    const manifest = {
+      contract: 'karpathy-wiki-provider-manifest',
+      version: 1,
+      source: 'answers',
+      generated_at: 1,
+      items: [],
+      revoked: [],
+      errors: [],
+      wiki_root: 'answers',
+    }
+    await writeFile(filename, JSON.stringify(manifest))
+    assert.equal(await probePublishedSource(options), false)
+    manifest.revoked = [{ source_key: 'review-1.md', claim: { source_path: 'review-1.md' } }]
+    await writeFile(filename, JSON.stringify(manifest))
+    assert.equal(await probePublishedSource(options), true)
+    manifest.revoked = []
+    manifest.errors = [{ error: 'provider failure' }]
+    await writeFile(filename, JSON.stringify(manifest))
+    assert.equal(await probePublishedSource(options), true)
+    await writeFile(filename, '{')
+    assert.equal(await probePublishedSource(options), true)
+    await assert.rejects(probePublishedSource({ ...options, adapter: '../answers' }))
+  } finally {
+    await rm(sourceRoot, { recursive: true, force: true })
+  }
 })
 
 test('confirmed answer travels through the provider manifest and wiki status', async () => {
@@ -104,6 +202,14 @@ test('confirmed answer travels through the provider manifest and wiki status', a
     assert.equal(status.summary.invalid, 0)
     assert.equal(status.summary.conflict, 0)
     const record = status.adapters.answers.new[0]
+    assert.equal(
+      await probePublishedSource({ sourceRoot, adapter: 'answers', sourceKey: 'review-1.md' }),
+      true,
+    )
+    assert.equal(
+      await probePublishedSource({ sourceRoot, adapter: 'answers', sourceKey: 'missing.md' }),
+      false,
+    )
     assert.equal(record.source_key, 'review-1.md')
     assert.equal(record.wiki_path, path.join(wikiSourceRoot, 'answers', 'review-1', 'index.md'))
     assert.ok((await readFile(record.source_path, 'utf8')).includes('[PERSON]'))

@@ -91,6 +91,7 @@ export default {
                 includeCurrent: args.include_current || args.wait_seconds > 0,
               }),
             {
+              sourceRoot: '/knowledge/sources',
               adapter: args.adapter,
               sourceKey: args.source_key,
               waitSeconds: args.wait_seconds,
