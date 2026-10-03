@@ -163,6 +163,12 @@ for a consistent backup and a separate-instance restore check.
 
 Report vulnerabilities according to [SECURITY.md](SECURITY.md).
 
+## Roadmap
+
+Work is planned in [GitHub roadmap issue #150](https://github.com/mstroppel/karpathy-wiki/issues/150).
+Milestones define release commitments, priority labels define execution order,
+and `roadmap:post-1.0` identifies the uncommitted post-1.0 backlog.
+
 ## Development
 
 Run the same checks CI runs:
