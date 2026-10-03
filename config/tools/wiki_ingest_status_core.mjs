@@ -1,5 +1,6 @@
 import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
+import { setTimeout as delay } from 'node:timers/promises'
 
 // Generic ingest status scanner. It consumes only the versioned provider
 // manifest (contracts/provider-manifest/v1/contract.json) written by every
@@ -26,6 +27,37 @@ export const MANIFEST_VERSION = 1
 export const MANIFEST_FILENAME = 'manifest.json'
 export const STATUS_OUTPUT_BUDGET_BYTES = 12 * 1024
 export const RECORD_CHUNK_BYTES = 1536
+
+// Provider publication is asynchronous. Wait only for a specifically named
+// source; an empty scan says nothing about whether a provider is running.
+export async function waitForPublishedSource(
+  scan,
+  { adapter, sourceKey, waitSeconds = 0, signal },
+) {
+  if (!Number.isInteger(waitSeconds) || waitSeconds < 0 || waitSeconds > 120) {
+    throw new Error('wait_seconds muss zwischen 0 und 120 liegen')
+  }
+  if (waitSeconds && (!adapter || !sourceKey)) {
+    throw new Error('wait_seconds benötigt adapter und source_key')
+  }
+  const deadline = performance.now() + waitSeconds * 1000
+  while (true) {
+    signal?.throwIfAborted()
+    const result = await scan()
+    const states = result.adapters[adapter]
+    if (
+      !waitSeconds ||
+      RESULT_NAMES.some((state) =>
+        states?.[state]?.some((record) => record.source_key === sourceKey),
+      ) ||
+      states?.invalid?.length ||
+      performance.now() >= deadline
+    ) {
+      return result
+    }
+    await delay(Math.min(1000, deadline - performance.now()), undefined, { signal })
+  }
+}
 
 function errorMessage(error) {
   return error instanceof Error ? error.message : String(error)

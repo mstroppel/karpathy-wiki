@@ -4,7 +4,70 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
-import { scanIngestStatus } from '../config/tools/wiki_ingest_status_core.mjs'
+import {
+  scanIngestStatus,
+  waitForPublishedSource,
+} from '../config/tools/wiki_ingest_status_core.mjs'
+
+test('publication wait retries until the submitted source appears', async () => {
+  let scans = 0
+  const published = { adapters: { answers: { new: [{ source_key: 'review-1.md' }] } } }
+  const result = await waitForPublishedSource(
+    async () => (++scans === 1 ? { adapters: {} } : published),
+    { adapter: 'answers', sourceKey: 'review-1.md', waitSeconds: 2 },
+  )
+  assert.equal(result, published)
+  assert.equal(scans, 2)
+})
+
+test('publication wait returns current and invalid results immediately', async () => {
+  for (const states of [
+    { current: [{ source_key: 'review-1.md' }] },
+    { invalid: [{ error: 'invalid manifest' }] },
+  ]) {
+    let scans = 0
+    const status = { adapters: { answers: states } }
+    assert.equal(
+      await waitForPublishedSource(
+        async () => {
+          scans++
+          return status
+        },
+        {
+          adapter: 'answers',
+          sourceKey: 'review-1.md',
+          waitSeconds: 2,
+        },
+      ),
+      status,
+    )
+    assert.equal(scans, 1)
+  }
+})
+
+test('publication wait is bounded, validates inputs, and respects cancellation', async () => {
+  const scan = async () => ({ adapters: {} })
+  assert.deepEqual(
+    await waitForPublishedSource(scan, {
+      adapter: 'answers',
+      sourceKey: 'missing.md',
+      waitSeconds: 1,
+    }),
+    { adapters: {} },
+  )
+  for (const options of [{ waitSeconds: 121 }, { waitSeconds: 1 }, { waitSeconds: -1 }]) {
+    await assert.rejects(waitForPublishedSource(scan, options))
+  }
+  const controller = new AbortController()
+  const pending = waitForPublishedSource(scan, {
+    adapter: 'answers',
+    sourceKey: 'missing.md',
+    waitSeconds: 2,
+    signal: controller.signal,
+  })
+  controller.abort()
+  await assert.rejects(pending, { name: 'AbortError' })
+})
 
 test('confirmed answer travels through the provider manifest and wiki status', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'kw-answers-'))

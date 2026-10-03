@@ -42,8 +42,14 @@ Ergänze keine privaten Originalwerte und deanonymisiere keine Platzhalter.
 Der Anbieter redigiert lokal nach Deny-Liste; unbekannte sensible Werte können
 bleiben. Schließe die Datei mit `<!-- END CONFIRMED ANSWERS -->` ab.
 
-Prüfe die Veröffentlichung mit `wiki_ingest_status` (`adapter: answers`,
-`source_key: <name>.md`). Delegiere **nur diesen** `new`-/`outdated`-Eintrag an
+Prüfe die asynchrone Veröffentlichung mit `wiki_ingest_status`
+(`adapter: answers`, `source_key: <name>.md`, `wait_seconds: 60`,
+`include_current: true`). Ein fehlender Eintrag nach dem Warten bedeutet
+„noch nicht veröffentlicht“; daraus folgt kein deaktiviertes Profil. Nenne
+bei Timeout die Prüfung von Dienststatus, Anbieterlogs und Sync-Intervall als
+nächsten Schritt. Behalte den Dateinamen zum erneuten Prüfen; der bestätigte
+Entwurf bleibt im Eingang und wird nicht erneut geschrieben.
+Delegiere **nur diesen** `new`-/`outdated`-Eintrag an
 `wiki-ingest`: Nutzerangaben mit Herkunft und offenen Konflikten in betroffene
 Seiten, `index.md`, `overview.md` und `log.md` übernehmen. Prüfe erneut:
 Erfolg nur bei `current` und gemeldetem Commit. Bei fehlender Veröffentlichung,

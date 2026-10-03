@@ -1,6 +1,7 @@
 import {
   scanIngestStatus,
   selectIngestStatus,
+  waitForPublishedSource,
 } from '/etc/opencode/tools/wiki_ingest_status_core.mjs'
 
 export default {
@@ -27,6 +28,13 @@ export default {
               type: 'string',
               description:
                 'Quellschlüssel für eine gezielte Revisionsprüfung (zusammen mit adapter)',
+            },
+            wait_seconds: {
+              type: 'integer',
+              minimum: 0,
+              maximum: 120,
+              description:
+                'Mit adapter und source_key auf asynchrone Veröffentlichung warten (Standard: 0). Ein Timeout belegt kein deaktiviertes Profil.',
             },
             status_state: {
               type: 'string',
@@ -74,12 +82,21 @@ export default {
           additionalProperties: false,
         },
         options: { codemode: false },
-        execute: async (args) => {
-          const result = await scanIngestStatus({
-            sourceRoot: '/knowledge/sources',
-            wikiSourceRoot: '/knowledge/wiki/sources',
-            includeCurrent: args.include_current,
-          })
+        execute: async (args, context) => {
+          const result = await waitForPublishedSource(
+            () =>
+              scanIngestStatus({
+                sourceRoot: '/knowledge/sources',
+                wikiSourceRoot: '/knowledge/wiki/sources',
+                includeCurrent: args.include_current || args.wait_seconds > 0,
+              }),
+            {
+              adapter: args.adapter,
+              sourceKey: args.source_key,
+              waitSeconds: args.wait_seconds,
+              signal: context.signal,
+            },
+          )
           // The tool definition declares no output schema, so the result must
           // not carry a structured `output` field (OpenCode rejects that with
           // "Tool result declared output without an output schema"). The model
