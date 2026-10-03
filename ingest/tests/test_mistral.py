@@ -41,6 +41,7 @@ from karpathy_wiki_speech.mistral import (
     MistralBackend,
     MultipartBody,
     TimestampLanguageConflictError,
+    api_key_from_env,
     parse_transcription,
 )
 from karpathy_wiki_speech.types import (
@@ -753,6 +754,33 @@ class RedactionContractTests(Harness):
         )
         self.assertEqual([segment.text for segment in segments], ["[ICH]", ""])
         self.assertEqual(counts, {"PERSON": 1})
+
+
+class SecretHandlingTests(unittest.TestCase):
+    def test_missing_or_empty_key_file_fails_content_free(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesRegex(ValueError, "not configured"):
+                api_key_from_env()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "key"
+            path.write_text("", encoding="utf-8")
+            with mock.patch.dict(os.environ, {"MISTRAL_API_KEY_FILE": str(path)}, clear=True):
+                with self.assertRaisesRegex(ValueError, "is empty") as caught:
+                    api_key_from_env()
+            self.assertNotIn(str(path), str(caught.exception))
+            missing = Path(directory) / "missing"
+            with mock.patch.dict(os.environ, {"MISTRAL_API_KEY_FILE": str(missing)}, clear=True):
+                with self.assertRaisesRegex(ValueError, "not readable"):
+                    api_key_from_env()
+
+    def test_key_is_read_from_the_file_or_the_environment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "key"
+            path.write_text("  sk-file-value \n", encoding="utf-8")
+            with mock.patch.dict(os.environ, {"MISTRAL_API_KEY_FILE": str(path)}, clear=True):
+                self.assertEqual(api_key_from_env(), "sk-file-value")
+        with mock.patch.dict(os.environ, {"MISTRAL_API_KEY": "sk-env-value"}, clear=True):
+            self.assertEqual(api_key_from_env(), "sk-env-value")
 
 
 class SmokeTests(unittest.TestCase):
