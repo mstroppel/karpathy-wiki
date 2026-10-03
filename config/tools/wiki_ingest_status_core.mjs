@@ -1,5 +1,6 @@
 import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
+import { setTimeout as delay } from 'node:timers/promises'
 
 // Generic ingest status scanner. It consumes only the versioned provider
 // manifest (contracts/provider-manifest/v1/contract.json) written by every
@@ -26,6 +27,56 @@ export const MANIFEST_VERSION = 1
 export const MANIFEST_FILENAME = 'manifest.json'
 export const STATUS_OUTPUT_BUDGET_BYTES = 12 * 1024
 export const RECORD_CHUNK_BYTES = 1536
+
+// Only the targeted manifest is read during polling. Malformed manifests and
+// provider errors end the wait so the full scanner can report diagnostics.
+export async function probePublishedSource({ sourceRoot, adapter, sourceKey, signal }) {
+  if (typeof adapter !== 'string' || !/^[a-z0-9_-]+$/.test(adapter)) {
+    throw new Error('adapter ist ungültig')
+  }
+  try {
+    const raw = await readFile(path.join(sourceRoot, adapter, MANIFEST_FILENAME), {
+      encoding: 'utf8',
+      signal,
+    })
+    const manifest = parseManifest(adapter, JSON.parse(raw))
+    return (
+      manifest.items.some((item) => item.source_key === sourceKey) ||
+      manifest.revoked.some((item) => item.source_key === sourceKey) ||
+      manifest.errors.length > 0
+    )
+  } catch (error) {
+    if (signal?.aborted || error?.name === 'AbortError') throw error
+    return error?.code !== 'ENOENT'
+  }
+}
+
+// An empty manifest says nothing about whether a provider is running. Perform
+// one full scan only after publication, diagnostics, or expiration of the wait.
+export async function waitForPublishedSource(
+  scan,
+  { sourceRoot, adapter, sourceKey, waitSeconds = 0, signal },
+  probe = probePublishedSource,
+) {
+  if (!Number.isInteger(waitSeconds) || waitSeconds < 0 || waitSeconds > 120) {
+    throw new Error('wait_seconds muss zwischen 0 und 120 liegen')
+  }
+  if (waitSeconds && (!adapter || !sourceKey)) {
+    throw new Error('wait_seconds benötigt adapter und source_key')
+  }
+  const deadline = performance.now() + waitSeconds * 1000
+  while (waitSeconds) {
+    signal?.throwIfAborted()
+    const published = await probe({ sourceRoot, adapter, sourceKey, signal })
+    signal?.throwIfAborted()
+    if (published || performance.now() >= deadline) break
+    await delay(Math.min(1000, deadline - performance.now()), undefined, { signal })
+  }
+  signal?.throwIfAborted()
+  const result = await scan()
+  signal?.throwIfAborted()
+  return result
+}
 
 function errorMessage(error) {
   return error instanceof Error ? error.message : String(error)
