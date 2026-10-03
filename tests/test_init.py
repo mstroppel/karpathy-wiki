@@ -133,7 +133,9 @@ class InitTests(unittest.TestCase):
             root = Path(directory) / "knowledge"
             self.run_init(root, COMPOSE_PROFILES="paperless")
             agents = (root / "wiki" / "AGENTS.md").read_text()
-            self.assertIn("/knowledge/sources/paperless/revoked.md", agents)
+            self.assertIn("wiki_ingest_status", agents)
+            self.assertIn("status_state: revoked", agents)
+            self.assertNotIn("/knowledge/sources/paperless/revoked.md", agents)
             self.assertTrue((root / "sources" / "paperless").is_dir())
             self.assertTrue((root / "quarantine" / "paperless").is_dir())
 

@@ -690,6 +690,27 @@ class DaemonSchedulingTests(CycleHarness):
 
 
 class PublicationTests(CycleHarness):
+    def test_renderer_change_republishes_frontmatter_without_retranscription(self):
+        from karpathy_wiki_ingest_audio import publisher
+
+        write_recording(self.incoming, "meeting.mp3")
+        with mock.patch.object(publisher, "RENDERER_VERSION", 1):
+            self.assertEqual(self.cycle(), (1, 0, False))
+        generation = self.active()
+        item = self.manifest()["items"][0]
+        manifest = self.manifest()
+        del manifest["items"][0]["frontmatter"]["audio_source_id"]
+        (self.sanitized / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+        with mock.patch.object(ScriptedBackend, "transcribe") as transcribe:
+            self.assertEqual(self.cycle(), (0, 0, False))
+        transcribe.assert_not_called()
+        self.assertNotEqual(self.active(), generation)
+        current = self.manifest()["items"][0]
+        self.assertEqual(current["source_revision"], item["source_revision"])
+        self.assertEqual(current["frontmatter"]["audio_source_id"], item["source_key"])
+        self.assertEqual(self.cycle(), (0, 0, False))
+
     def test_fully_redacted_segment_keeps_timestamp_without_diarization(self):
         self.transcripts[audio_digest()] = [
             Segment(0, 1000, "Max"),
@@ -717,10 +738,13 @@ class PublicationTests(CycleHarness):
         self.assertEqual(frontmatter["source_adapter"], "audio")
         self.assertEqual(frontmatter["source_path"], "Meetings/kickoff.mp3")
         self.assertEqual(frontmatter["source_revision"], item["source_revision"])
+        for name, value in item["claim"].items():
+            self.assertEqual(str(frontmatter[name]), value)
         self.assertEqual(
             frontmatter,
             {
                 "source_adapter": "audio",
+                "audio_source_id": item["source_key"],
                 "source_path": "Meetings/kickoff.mp3",
                 "source_revision": item["source_revision"],
             },

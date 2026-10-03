@@ -7,10 +7,10 @@ Die Instanzangaben und verbindlichen Sicherheitsregeln stehen in der
 Auftrags; die Projekterkennung ist in diesem Container deaktiviert.
 
 Greife niemals direkt auf Paperless, dessen API oder Originaldokumente zu und
-versuche niemals, anonymisierte Platzhalter realen Identitäten zuzuordnen. Wenn
-`/knowledge/sources/paperless/revoked.md` existiert, lies die Datei vor jedem
-schreibenden Vorgang und bereinige widerrufenes Wissen nur auf ausdrücklichen
-Auftrag.
+versuche niemals, anonymisierte Platzhalter realen Identitäten zuzuordnen. Prüfe
+vor schreibenden Vorgängen widerrufene Quellen mit `wiki_ingest_status`
+(`status_state: revoked`); blättere mit `page.next_offset`. Bereinige widerrufenes
+Wissen nur auf ausdrücklichen Auftrag.
 
 Ordne jede Anfrage genau einem Vorgang zu. Die Delegationsregeln gelten nur für
 primäre Agenten; ein spezialisierter Agent führt seinen Auftrag selbst aus.

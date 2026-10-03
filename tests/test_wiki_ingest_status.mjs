@@ -83,6 +83,64 @@ async function writePage(wikiSourceRoot, pagePath, frontmatterLines, body = '\n#
   await writeFile(destination, `---\n${frontmatterLines.join('\n')}\n---\n${body}`)
 }
 
+test('tracks audio identity through unchanged frontmatter and revocation', async () => {
+  const { root, sourceRoot, wikiSourceRoot } = await fixture()
+  try {
+    const sourceKey = 'recording-id'
+    const audio = {
+      source_key: sourceKey,
+      source_path: `generations/current/recordings/${sourceKey}.md`,
+      wiki_path: `audio/recording-${sourceKey}/index.md`,
+      source_revision: REVISION,
+      frontmatter: {
+        source_adapter: 'audio',
+        audio_source_id: sourceKey,
+        source_path: '[PERSON]/meeting.mp3',
+        source_revision: REVISION,
+      },
+      claim: { audio_source_id: sourceKey },
+    }
+    await writeManifest(sourceRoot, 'audio', { wiki_root: 'audio', items: [audio] })
+    const scan = () => scanIngestStatus({ sourceRoot, wikiSourceRoot, includeCurrent: true })
+    assert.equal((await scan()).summary.new, 1)
+    await writePage(
+      wikiSourceRoot,
+      audio.wiki_path,
+      Object.entries(audio.frontmatter).map(([name, value]) => `${name}: ${JSON.stringify(value)}`),
+    )
+    let result = await scan()
+    assert.equal(result.summary.current, 1)
+    assert.equal(result.summary.new, 0)
+    assert.equal(result.summary.orphaned, 0)
+    await writeManifest(sourceRoot, 'audio', {
+      wiki_root: 'audio',
+      items: [
+        {
+          ...audio,
+          source_revision: OTHER_REVISION,
+          frontmatter: {
+            ...audio.frontmatter,
+            source_revision: OTHER_REVISION,
+          },
+        },
+      ],
+    })
+    assert.equal((await scan()).summary.outdated, 1)
+    await writeManifest(sourceRoot, 'audio', {
+      wiki_root: 'audio',
+      revoked: [{ source_key: sourceKey, claim: audio.claim }],
+    })
+    result = await scan()
+    assert.equal(result.summary.revoked, 1)
+    assert.equal(result.summary.orphaned, 0)
+    assert.deepEqual(result.adapters.audio.revoked[0].wiki_paths, [
+      path.join(wikiSourceRoot, audio.wiki_path),
+    ])
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('tracks WebDAV pages by the provider manifest', async () => {
   const { root, sourceRoot, wikiSourceRoot } = await fixture()
   try {
