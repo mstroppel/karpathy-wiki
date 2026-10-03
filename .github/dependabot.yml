@@ -51,6 +51,9 @@ updates:
     directory: /ingest
     schedule:
       interval: weekly
+    ignore:
+      - dependency-name: huggingface-hub
+        update-types: ["version-update:semver-major"]
     groups:
       ingest-build-tooling:
         patterns: ["*"]
