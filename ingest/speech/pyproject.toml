@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "karpathy-wiki-speech"
 version = "0.1.0"
-description = "Local speech processing interface for Karpathy Wiki: timed transcription and optional diarization"
+description = "Speech processing interface for Karpathy Wiki: timed transcription and optional diarization, local or hosted"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"
@@ -17,6 +17,9 @@ Source = "https://github.com/mstroppel/karpathy-wiki"
 
 [project.optional-dependencies]
 whisper = ["faster-whisper==1.2.1"]
+# Hosted Mistral transcription talks to the REST API over the pinned httpx
+# client; every dependency is hash-pinned in requirements.txt.
+mistral = ["httpx==0.28.1"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

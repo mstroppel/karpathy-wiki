@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "karpathy-wiki-ingest-audio"
 version = "0.1.0"
-description = "WebDAV audio ingest plugin for Karpathy Wiki: local transcription, redaction, and publication"
+description = "WebDAV audio ingest plugin for Karpathy Wiki: speech handoff, redaction, and publication"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"

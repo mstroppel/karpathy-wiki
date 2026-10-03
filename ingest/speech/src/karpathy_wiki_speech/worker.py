@@ -13,7 +13,10 @@ never audio or transcript content.
 Provider-requested options (language, diarize) decide the cache key; worker
 configuration (backend, model, device, compute type) is stamped into every
 result, so a changed worker image supersedes older results for otherwise
-identical requests without invalidating shared caches.
+identical requests without invalidating shared caches. The backend is
+explicitly selected (``SPEECH_BACKEND``): local transcription with
+faster-whisper by default, the opt-in hosted Mistral backend, or the
+deterministic fake backend for tests and CI.
 """
 
 from __future__ import annotations
@@ -30,6 +33,7 @@ from pathlib import Path
 from typing import Any
 
 from karpathy_wiki_speech.backends import FakeBackend, FasterWhisperBackend, SpeechBackend
+from karpathy_wiki_speech.mistral import MistralBackend
 from karpathy_wiki_speech.types import (
     DecodedAudio,
     TranscriptionOptions,
@@ -40,17 +44,27 @@ from karpathy_wiki_speech.types import (
 LOG = logging.getLogger("karpathy-wiki-speech")
 
 
+def backend_name() -> str:
+    return os.getenv("SPEECH_BACKEND", "faster-whisper").strip().lower()
+
+
 def worker_backend() -> SpeechBackend:
-    name = os.getenv("SPEECH_BACKEND", "faster-whisper").strip().lower()
+    name = backend_name()
     if name == "fake":
         return FakeBackend()
     if name == "faster-whisper":
         return FasterWhisperBackend()
+    if name == "mistral":
+        # Opt-in hosted transcription: raw audio leaves the host before any
+        # redaction (see docs/audio.md). The API key stays worker-only.
+        return MistralBackend.from_env()
     raise ValueError(f"unsupported speech backend: {name}")
 
 
 def worker_pipeline_options() -> TranscriptionOptions:
     """Worker-side processing configuration (never provider-specified)."""
+    if backend_name() == "mistral":
+        return TranscriptionOptions(model=os.getenv("SPEECH_MISTRAL_MODEL", "").strip() or None)
     return TranscriptionOptions(
         model=os.getenv("SPEECH_MODEL", "").strip() or None,
         compute_type=os.getenv("SPEECH_COMPUTE_TYPE", "").strip() or None,

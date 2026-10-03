@@ -1,4 +1,9 @@
-"""Speech backend implementations for the timed-segment interface."""
+"""Speech backend implementations for the timed-segment interface.
+
+Local backends live here; the opt-in hosted Mistral backend (which uploads
+the staged recording to a cloud API) lives in
+:mod:`karpathy_wiki_speech.mistral` next to its request/answer handling.
+"""
 
 from __future__ import annotations
 

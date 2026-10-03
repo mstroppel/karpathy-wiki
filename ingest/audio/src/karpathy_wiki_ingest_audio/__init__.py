@@ -1,4 +1,4 @@
-"""WebDAV audio ingest plugin: local transcription, redaction, publication.
+"""WebDAV audio ingest plugin: speech handoff, redaction, publication.
 
 The connector synchronizes a WebDAV folder's audio files into one private
 immutable snapshot, hands each recording through the replaceable
@@ -9,8 +9,10 @@ boundaries), and publishes the sanitized Markdown as coherent generations
 behind an atomic ``current`` symlink with a versioned provider manifest.
 
 A failed cycle keeps the last successful generation active and reports the
-failure content-free. Raw audio and unredacted transcripts never leave the
-private input and cache directories.
+failure content-free. This plugin writes raw audio and unredacted transcripts
+only into the private input and cache directories; with the opt-in hosted
+speech backend the worker additionally uploads staged recordings to its
+transcription service before any redaction (see ``docs/audio.md``).
 """
 
 from karpathy_wiki_ingest_audio.publisher import (

@@ -2,7 +2,9 @@
 
 Status: the provider, worker handoff, redaction, and publication are
 implemented (see [audio ingest](audio.md)); the remaining items are the
-host-side model benchmark and the opt-in CUDA image (below).
+host-side model benchmark and the opt-in CUDA image (below). External hosted
+transcription is now an opt-in backend (#134) with its own privacy and cost
+documentation; the local path below is unchanged and remains the default.
 
 ## Goal and boundaries
 
@@ -107,7 +109,9 @@ Use an opt-in CUDA image/Compose override with an NVIDIA GPU reservation;
 leave CPU mode usable for CI and machines without a GPU. Pin compatible
 CUDA/CTranslate2/PyTorch/pyannote and model versions in the worker image, and
 keep model files in a persistent private cache with documented download and
-license/consent requirements. No audio or transcript is sent to a cloud API.
+license/consent requirements. No audio or transcript is sent to a cloud API
+on this local path; only the opt-in hosted backend (#134) uploads recordings,
+and it documents that exception explicitly.
 Keep WebDAV credentials in the connector; the GPU worker gets only its
 private audio snapshot, model cache, sanitized output, state and redactions.
 
@@ -133,6 +137,8 @@ private audio snapshot, model cache, sanitized output, state and redactions.
    opt-in host GPU smoke test for real models. Verify status transitions and
    import with the existing wiki flow.
 
-External transcription, named speaker identification and a correction UI are
-outside the initial scope. The speech backend remains replaceable if these
-capabilities become needed.
+External transcription was outside the initial #15 scope and is now available
+as the opt-in hosted backend (#134), which uploads recordings before redaction
+and documents its costs, limits, and data-handling terms. Named speaker
+identification and a correction UI remain outside the scope. The speech
+backend remains replaceable if further capabilities become needed.

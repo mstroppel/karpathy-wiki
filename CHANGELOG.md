@@ -35,6 +35,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unredacted transcripts never leave the private speech store. All failures
   are content-free and keep the last published generation active.
 
+- Optional hosted speech-to-text (#134): `SPEECH_BACKEND=mistral` transcribes
+  through the Mistral speech-to-text API (`SPEECH_MISTRAL_MODEL`, default
+  `voxtral-mini-latest`) instead of the local faster-whisper model. The
+  private staged recording is uploaded directly (no public recording URL, no
+  WebDAV file names or provider metadata), timestamps and returned speakers
+  are mapped onto the shared timed-segment contract, and the worker-only API
+  secret (`MISTRAL_API_KEY_FILE`) never reaches the audio provider, OpenCode,
+  logs, published metadata, or cache fingerprints. Hosted-service input
+  limits are enforced alongside the recording limits, transient failures use
+  bounded retry/backoff, and every failure stays content-free and keeps the
+  last published generation. Backend, model, and endpoint are part of the
+  processing identity, so switching local/hosted backends or models
+  reprocesses unchanged recordings without mixing cache results, while valid
+  results replay without another paid request. Raw audio reaches Mistral
+  before transcript redaction: this mode is opt-in, billed per audio minute,
+  and documented with its service limits and data-handling terms in
+  `docs/audio.md`.
+
 ### Fixed
 
 - `/analysis-save` can now save the latest finished analysis and subsequent

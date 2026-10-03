@@ -118,7 +118,7 @@ Set `COMPOSE_PROFILES` in `.env`; profiles can be enabled independently:
 | Profile | Purpose |
 | --- | --- |
 | `webdav` | Mirror and locally redact a selected WebDAV folder |
-| `audio` | Transcribe WebDAV recordings locally and publish redacted transcripts |
+| `audio` | Transcribe WebDAV recordings and publish redacted transcripts (local by default, opt-in hosted backend) |
 | `answers` | Publish confirmed Q&A drafts from the local answer inbox |
 | `paperless` | Export tagged OCR text and redact configured personal data |
 | `raw-files` | Expose source files to a trusted reverse proxy |
