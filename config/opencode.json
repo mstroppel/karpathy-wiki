@@ -25,6 +25,43 @@
         }
       ]
     },
+    "wiki-ingest-orchestrator": {
+      "description": "Orchestriert die Aufnahme neuer und geänderter Quellen in kontextbegrenzten Batches.",
+      "mode": "all",
+      "system": "Orchestriere ausschließlich Einleseaufträge für das Wiki. Delegiere nicht erneut und lies Quellen nicht selbst ein. Lade einmal den Skill wiki-ingest-orchestrator, befolge ihn vollständig und führe den Auftrag selbst aus. Änderungen am Wiki führt ausschließlich der Subagent wiki-ingest aus.",
+      "permissions": [
+        {
+          "action": "edit",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "shell",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "webfetch",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "websearch",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "wiki-ingest",
+          "effect": "allow"
+        }
+      ]
+    },
     "wiki-lint": {
       "description": "Prüft und wartet das Wiki.",
       "mode": "subagent",
@@ -61,6 +98,11 @@
           "action": "subagent",
           "resource": "*",
           "effect": "deny"
+        },
+        {
+          "action": "wiki_ingest_journal",
+          "resource": "*",
+          "effect": "deny"
         }
       ]
     },
@@ -78,6 +120,11 @@
           "action": "shell",
           "resource": "*",
           "effect": "allow"
+        },
+        {
+          "action": "wiki_ingest_journal",
+          "resource": "*",
+          "effect": "deny"
         }
       ]
     }
@@ -91,9 +138,9 @@
     },
     "ingest-new": {
       "description": "Alle neuen und geänderten Quellen einlesen",
-      "agent": "wiki-ingest",
-      "subagent": true,
-      "template": "Lies alle neuen und geänderten Quellen unter /knowledge/sources strikt nacheinander ein. Arbeite alle Adapter und Einträge der Statusliste ab; beende den Auftrag erst nach einer abschließenden Statusprüfung mit new=0 und outdated=0 oder benenne einen konkreten Blocker und die offenen Quellen. Gib in der Abschlussantwort für jede bearbeitete Quelle einen eigenen Detailblock gemäß wiki-ingest aus (Quelle, Commit, Geänderte Seiten, Inhalt, Widersprüche/offene Fragen, Extraktionsgrenzen), danach den Gesamtstatus. Ersetze die Detailblöcke nicht durch eine reine Sammelzusammenfassung."
+      "agent": "wiki-ingest-orchestrator",
+      "subagent": false,
+      "template": "Lade den Skill wiki-ingest-orchestrator und orchestriere die Aufnahme aller neuen und geänderten Quellen unter /knowledge/sources in geplanten Batches. Bearbeite Quellen ausschließlich über den Subagenten wiki-ingest, streng sequenziell und mit genau einem Commit je Quelle; halte die Ergebnisdatensätze in wiki_ingest_journal fest. Beende den Auftrag erst nach einer abschließenden Statusprüfung mit new=0 und outdated=0 oder benenne einen konkreten Blocker und die offenen Quellen. Gib in der Abschlussantwort den Gesamtstatus, die offenen Quellen mit ihren Blockern und den Pfad zum vollständigen Bericht an. Die Detailblöcke je Quelle stehen vollständig im Bericht; ersetze sie nicht durch eine reine Sammelzusammenfassung und erfinde keine Details."
     },
     "lint": {
       "description": "Wiki prüfen",
@@ -228,11 +275,21 @@
     },
     {
       "action": "skill",
+      "resource": "wiki-ingest-orchestrator",
+      "effect": "allow"
+    },
+    {
+      "action": "skill",
       "resource": "wiki-lint",
       "effect": "allow"
     },
     {
       "action": "wiki_ingest_status",
+      "resource": "*",
+      "effect": "allow"
+    },
+    {
+      "action": "wiki_ingest_journal",
       "resource": "*",
       "effect": "allow"
     },
@@ -244,6 +301,11 @@
     {
       "action": "external_directory",
       "resource": "/knowledge/sources/**",
+      "effect": "allow"
+    },
+    {
+      "action": "external_directory",
+      "resource": "/knowledge/incoming/ingest-journal/**",
       "effect": "allow"
     },
     {

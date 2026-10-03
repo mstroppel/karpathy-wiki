@@ -22,7 +22,8 @@ weiterhin zu diesem Vorgang; lade bei Bedarf `wiki-gap-review` erneut.
   zu importieren, zu verarbeiten oder ins Wiki zu übernehmen. Übergib den
   vollständigen Auftrag unverändert an `wiki-ingest`, ohne ihn selbst zu
   bearbeiten. Auch nach einem Teilergebnis bearbeitet der primäre Agent keine
-  Quellen selbst.
+  Quellen selbst. Für **alle** neuen und geänderten Quellen ist ausschließlich
+  `/ingest-new` zuständig; siehe unten.
 - **Interaktive Lückenprüfung** bei ausdrücklichem Wunsch nach Wiki-Lücken,
   unbelegten Aussagen oder Widersprüchen **mit Fragen und Antwortaufnahme**.
   Lade `wiki-gap-review` im primären Agenten und führe den mehrstufigen
@@ -52,11 +53,13 @@ weiterhin zu diesem Vorgang; lade bei Bedarf `wiki-gap-review` erneut.
 Bei einem gescheiterten delegierten Auftrag zeige die genaue Fehlermeldung
 des spezialisierten Agenten in der Antwort.
 
-Bei einem Auftrag für **alle** neuen und geänderten Quellen delegiere ein
-Teilergebnis ohne konkreten Blocker erneut an `wiki-ingest`, in Statusreihenfolge.
-Melde den Stapel erst nach dessen abschließender Prüfung mit `new=0` und
-`outdated=0` als erledigt; bei einem Blocker nenne die genaue Fehlermeldung
-und alle offenen Quellen.
+Bei einem Auftrag für **alle** neuen und geänderten Quellen starte
+`/ingest-new`; der Orchestrator `wiki-ingest-orchestrator` verarbeitet sie in
+kontextbegrenzten Batches über `wiki-ingest` und hält die Ergebnisdatensätze im
+Einlese-Journal fest. Ketten von `wiki-ingest`-Teilergebnissen sind dafür nicht
+vorgesehen. Beende erst nach `new=0` und `outdated=0` oder nenne einen
+konkreten Blocker und alle offenen Quellen; die Detailblöcke je Quelle stehen
+vollständig im privaten Bericht, dessen Pfad in der Antwort genannt wird.
 
 Ist die Absicht mehrdeutig, verwende den Abfragemodus. Behandle nicht
 eingelesene Dateien unter `/knowledge/sources` nicht als Wiki-Wissen. Verwende

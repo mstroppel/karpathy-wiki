@@ -87,10 +87,16 @@ OpenCode to import `/knowledge/sources/webdav`. Generated pages are written to
 ## Ingestion reports
 
 `/ingest-new` processes all new and changed sources sequentially, with one
-commit per source. Its final report includes a separate block for each source:
-source path, commit hash, changed wiki pages, content summary, contradictions or
-open questions, and extraction limits. The final status follows these details;
-blocked runs also identify unfinished sources.
+commit per source, in batches planned against a documented working-context
+budget. Every processed source leaves a durable result record in a private
+journal below `${DATA_ROOT}/incoming/ingest-journal`, and the complete per-source
+report is written there as a file: source path, commit hash, changed wiki
+pages, content summary, contradictions or open questions, and extraction
+limits. The final answer reports the overall status, unfinished sources with
+their blockers, and the report path; per-source details live in the report
+file. Blocked runs also identify unfinished sources. See
+[ingestion reports](docs/ingest-reports.md) for the budget model, resume
+behavior, and validation.
 
 ## Analyses
 
@@ -180,7 +186,7 @@ npm ci
 scripts/install-shellcheck.sh  # add ~/.local/bin to PATH if needed; Linux x86_64
 scripts/lint.sh
 scripts/test-python.sh
-node --test tests/test_wiki_ingest_status.mjs tests/test_contract_fixtures.mjs tests/test_answer_intake.mjs
+node --test tests/test_wiki_ingest_status.mjs tests/test_contract_fixtures.mjs tests/test_wiki_ingest_journal.mjs tests/test_ingest_context_budget.mjs tests/test_answer_intake.mjs
 node --test tests/test_chat_bootstrap.mjs
 docker build --target opencode -t kw-opencode:integration -f opencode/Dockerfile .
 docker build --target openchamber -t kw-openchamber:integration -f opencode/Dockerfile .

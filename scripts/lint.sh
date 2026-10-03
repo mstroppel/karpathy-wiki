@@ -47,7 +47,9 @@ find . \
 done
 
 # Shipped JavaScript and the full Compose configuration.
+node --check config/plugins/wiki-ingest-journal.js
 node --check config/plugins/wiki-ingest-status.js
+node --check config/tools/wiki_ingest_journal_core.mjs
 node --check config/tools/wiki_ingest_status_core.mjs
 docker compose --env-file .env.example config --quiet
 

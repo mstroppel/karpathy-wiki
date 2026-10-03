@@ -53,6 +53,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and documented with its service limits and data-handling terms in
   `docs/audio.md`.
 
+### Changed
+
+- `/ingest-new` now bounds model context during bulk ingestion (#152): a narrow
+  orchestrator plans batches against a documented working-context budget and
+  runs one `wiki-ingest` worker session per batch, strictly sequential with one
+  commit per source. Every processed source leaves a durable result record in
+  the new private journal below `${DATA_ROOT}/incoming/ingest-journal`, runs resume
+  after interruption or rollover, and the complete per-source report is written
+  there as a file. The bulk-run final answer now carries the overall status,
+  unfinished sources with blockers, and the report path instead of repeating
+  the per-source detail blocks inline (agreed contract change); explicit
+  single-source `/ingest` orders still answer with the inline detail block. The
+  budget is configured with `WIKI_INGEST_BATCH_BUDGET_TOKENS`,
+  `WIKI_INGEST_BATCH_MAX_SOURCES`, and `WIKI_INGEST_RUN_MAX_BATCHES`.
+
 ### Fixed
 
 - `/analysis-save` can now save the latest finished analysis and subsequent

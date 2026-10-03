@@ -230,8 +230,20 @@ class ConfigTests(unittest.TestCase):
         config = json.loads((ROOT / "config" / "opencode.json").read_text())
         template = config["commands"]["ingest-new"]["template"]
         skill = (ROOT / "config" / "skills" / "wiki-ingest" / "SKILL.md").read_text()
-        self.assertIn("für jede bearbeitete Quelle einen eigenen Detailblock", template)
+        orchestrator = (
+            ROOT / "config" / "skills" / "wiki-ingest-orchestrator" / "SKILL.md"
+        ).read_text()
+        renderer = (ROOT / "config" / "tools" / "wiki_ingest_journal_core.mjs").read_text()
+        # Bulk runs carry the complete per-source details in the report file and
+        # answer with status, unfinished sources, and the report path (agreed
+        # contract change for issue #152). Details are never replaced by an
+        # aggregate summary and nothing is invented.
+        self.assertIn("Pfad zum vollständigen Bericht", template)
+        self.assertIn("stehen vollständig im Bericht", template)
         self.assertIn("reine Sammelzusammenfassung", template)
+        self.assertIn("stehen vollständig im Bericht", orchestrator)
+        self.assertIn("Wurde keine Quelle bearbeitet", orchestrator)
+        self.assertIn("erfinde keine Details", orchestrator)
         for field in (
             "Quelle",
             "Commit",
@@ -240,27 +252,47 @@ class ConfigTests(unittest.TestCase):
             "Widersprüche/offene Fragen",
             "Extraktionsgrenzen",
         ):
-            self.assertIn(field, template)
             self.assertIn(f"**{field}:**", skill)
-        self.assertIn("Zwischenmeldungen oder Sammelzusammenfassungen reichen nicht", skill)
+        # The report renderer keeps every detail block; the source path itself
+        # is the block heading.
+        for field in (
+            "Commit",
+            "Geänderte Seiten",
+            "Inhalt",
+            "Widersprüche/offene Fragen",
+            "Extraktionsgrenzen",
+        ):
+            self.assertIn(f"**{field}:**", renderer)
+        self.assertIn("record.source_path", renderer)
         self.assertIn("Mit Git verifizierter", skill)
         self.assertIn("Wiki-Pfade aus dem tatsächlichen Quellen-Commit", skill)
         self.assertIn("Kein Commit", skill)
         self.assertIn("Nicht ermittelt", skill)
-        self.assertIn("Wurde keine Quelle bearbeitet", skill)
         self.assertIn("nur, wenn der Benutzer ausdrücklich genau diese Quelle", skill)
         self.assertIn("ein normaler Auftrag für alle neuen/geänderten Quellen", skill)
         self.assertIn("include_current: true", skill)
         self.assertIn("suche nach dem exakten `source_path`", skill)
         self.assertIn("Quellpfad und Quellschlüssel sind nicht", skill)
         self.assertIn("statt eine Duplikatseite für", skill)
+        # Evidence is durable per source, written only after the verified
+        # commit, and unverified results are recorded as blocked.
+        self.assertIn("wiki_ingest_journal", skill)
+        self.assertIn("status: blocked", skill)
+        self.assertIn("entsteht erst nach dem Commit und nie davor", skill)
 
     def test_skills_declare_matching_frontmatter(self):
         skills = ROOT / "config" / "skills"
         directories = sorted(path.name for path in skills.iterdir() if path.is_dir())
         self.assertEqual(
             directories,
-            ["wiki-analysis", "wiki-analysis-save", "wiki-gap-review", "wiki-ingest", "wiki-lint"],
+            [
+                "wiki-analysis",
+                "wiki-analysis-save",
+                "wiki-gap-review",
+                "wiki-ingest",
+                "wiki-ingest-orchestrator",
+                "wiki-lint",
+            ],
         )
         for directory in directories:
             text = (skills / directory / "SKILL.md").read_text()
