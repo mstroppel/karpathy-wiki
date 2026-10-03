@@ -94,18 +94,29 @@ SPEECH_MISTRAL_MODEL=voxtral-mini-latest
 MISTRAL_API_KEY_FILE=./secrets/mistral-api-key
 ```
 
-Create the key file outside the repository checkout and keep it private
-(mode `0600`), like the Paperless token:
+Create the key file and keep it private (mode `0600`), like the Paperless
+token:
 
 ```bash
 printf '%s' 'YOUR-MISTRAL-API-KEY' > ./secrets/mistral-api-key
 chmod 600 ./secrets/mistral-api-key
 ```
 
+`MISTRAL_API_KEY_FILE` names the *host* file that Compose mounts into the
+speech worker as `/run/secrets/mistral_api_key`. Without it, the secret falls
+back to the tracked, intentionally empty placeholder
+`secrets/mistral-api-key.example`, because Compose requires the secret file
+to exist even in local-only mode: the audio profile starts without any
+Mistral credential, and hosted mode then fails content-free (the key file is
+empty) until a real key file is configured. Running the worker outside
+Compose may instead set the `MISTRAL_API_KEY` environment variable; the
+standard Compose service does not pass that variable through, so Compose
+deployments configure the key through the file.
+
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `SPEECH_MISTRAL_MODEL` | `voxtral-mini-latest` | Hosted model selection (transcription model id) |
-| `MISTRAL_API_KEY_FILE` | – | Worker-only API secret file (or `MISTRAL_API_KEY`) |
+| `MISTRAL_API_KEY_FILE` | `secrets/mistral-api-key.example` | Worker-only API secret file, mounted into the speech worker alone |
 | `SPEECH_MISTRAL_BASE_URL` | `https://api.mistral.ai/v1` | Transcription endpoint |
 | `SPEECH_MISTRAL_MAX_BYTES` | `524288000` | Hosted service input size limit (500 MB) |
 | `SPEECH_MISTRAL_MAX_DURATION_SECONDS` | `3600` | Hosted service input duration limit (60 min) |
@@ -183,12 +194,14 @@ re-transcription cost.
 
 ### Failures
 
-Authentication errors, rate limits, timeouts, and server errors are retried
-with bounded exponential backoff (honoring `Retry-After`) within
-`SPEECH_MISTRAL_MAX_ATTEMPTS`; each retry may be billed as a new request, so
-the budget stays small. Rejected requests, malformed or untimed answers, and
-exhausted retries fail content-free: the worker writes an error *type* only
-(for example `speech:processing:HostedRateLimitError`) into
+Authentication failures and rejected requests are never retried: the API key
+is wrong, the account is out of scope, or the request itself cannot succeed,
+so a second attempt would only cost more. Rate limits, timeouts, an
+unreachable service, and server errors are retried with bounded exponential
+backoff (honoring `Retry-After`) within `SPEECH_MISTRAL_MAX_ATTEMPTS`; each
+retry may be billed as a new request, so the budget stays small. Malformed or
+untimed answers and exhausted retries fail content-free: the worker writes an
+error *type* only (for example `speech:processing:HostedRateLimitError`) into
 `speech/failures`, the source is quarantined, and the last successful
 published generation stays active.
 

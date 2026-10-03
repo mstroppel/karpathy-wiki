@@ -254,6 +254,11 @@ MISTRAL_API_KEY_FILE=/private/personal-wiki/mistral-api-key
 It is mounted into the speech worker service alone; the audio provider,
 OpenCode, logs, published metadata, and cache/worker fingerprints never see
 it. Only the request header carries the key (see [audio ingest](audio.md)).
+Compose needs this secret file to exist even in local-only mode, so the
+unset default is the tracked, intentionally empty placeholder
+`secrets/mistral-api-key.example`; hosted mode then fails content-free until
+a real key file is configured. The `MISTRAL_API_KEY` environment variable is
+read only when the worker runs outside Compose.
 
 `REDACTIONS_FILE` is shared by all ingestion providers and should also use an
 absolute path, for example `/private/personal-wiki/redactions.json`. Apply mode

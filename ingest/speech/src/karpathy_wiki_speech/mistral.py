@@ -28,7 +28,8 @@ from __future__ import annotations
 import json
 import os
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +40,7 @@ from karpathy_wiki_speech.types import (
     Segment,
     TranscriptionOptions,
     TranscriptionResult,
+    size_of,
 )
 
 DEFAULT_BASE_URL = "https://api.mistral.ai/v1"
@@ -69,9 +71,13 @@ CONTENT_TYPES: dict[str, str] = {
     ".webm": "audio/webm",
 }
 
-# ``(status, lowercase response headers, body)``; raises ``TimeoutError`` on
-# a request timeout and ``OSError`` on any other transport failure.
-Transport = Callable[[str, dict[str, str], bytes, float], tuple[int, dict[str, str], bytes]]
+# ``(status, lowercase response headers, body)`` for one request attempt;
+# the streamed body is single-use and rebuilt for every retry. Raises
+# ``TimeoutError`` on a request timeout and ``OSError`` on any other
+# transport failure.
+Transport = Callable[
+    [str, dict[str, str], Iterable[bytes], float], tuple[int, dict[str, str], bytes]
+]
 
 
 class HostedError(RuntimeError):
@@ -140,45 +146,87 @@ def api_key_from_env() -> str:
     return value
 
 
-def build_request_body(
-    *,
-    model: str,
-    diarize: bool,
-    filename: str,
-    content_type: str,
-    content: bytes,
-    boundary: str,
-) -> bytes:
-    """Multipart body for the transcription endpoint.
+MULTIPART_CHUNK_BYTES = 1 << 20
+
+
+@dataclass(frozen=True)
+class MultipartBody:
+    """One multipart/form-data upload, streamed from the staged recording.
 
     Only the requested model, the timestamp granularity, the diarization
     flag, and the audio bytes are sent. The upload name is generic
     (``audio.<ext>``), so no WebDAV file name or provider metadata is
-    transmitted.
+    transmitted. :meth:`chunks` opens the recording lazily and yields it in
+    blocks, so an accepted large recording is never materialized in memory;
+    every retry calls it again and re-reads the file from the start.
     """
-    fields: list[tuple[str, str]] = [
-        ("model", model),
-        ("timestamp_granularities", TIMESTAMP_GRANULARITY),
-    ]
-    if diarize:
-        fields.append(("diarize", "true"))
-    parts: list[bytes] = [
-        (
-            f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'
+
+    boundary: str
+    fields: tuple[tuple[str, str], ...]
+    filename: str
+    content_type: str
+    path: str
+
+    @classmethod
+    def for_recording(
+        cls,
+        path: str,
+        *,
+        model: str,
+        diarize: bool,
+        boundary: str | None = None,
+    ) -> MultipartBody:
+        fields: list[tuple[str, str]] = [
+            ("model", model),
+            ("timestamp_granularities", TIMESTAMP_GRANULARITY),
+        ]
+        if diarize:
+            fields.append(("diarize", "true"))
+        return cls(
+            boundary=boundary or f"karpathywiki{os.urandom(16).hex()}",
+            fields=tuple(fields),
+            filename=upload_filename(path),
+            content_type=content_type_of(path),
+            path=path,
+        )
+
+    def length(self) -> int:
+        """Exact ``Content-Length``; the recording itself is only statted."""
+        return (
+            len(self._field_parts())
+            + len(self._file_header())
+            + size_of(self.path)
+            + len(b"\r\n")
+            + len(self._closing())
+        )
+
+    def chunks(self) -> Iterator[bytes]:
+        yield self._field_parts()
+        yield self._file_header()
+        with open(self.path, "rb") as handle:
+            while block := handle.read(MULTIPART_CHUNK_BYTES):
+                yield block
+        yield b"\r\n"
+        yield self._closing()
+
+    def _field_parts(self) -> bytes:
+        return b"".join(
+            (
+                f'--{self.boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n'
+                f"{value}\r\n"
+            ).encode()
+            for name, value in self.fields
+        )
+
+    def _file_header(self) -> bytes:
+        return (
+            f"--{self.boundary}\r\n"
+            f'Content-Disposition: form-data; name="file"; filename="{self.filename}"\r\n'
+            f"Content-Type: {self.content_type}\r\n\r\n"
         ).encode()
-        for name, value in fields
-    ]
-    parts.append(
-        (
-            f"--{boundary}\r\n"
-            f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'
-            f"Content-Type: {content_type}\r\n\r\n"
-        ).encode()
-        + content
-        + b"\r\n"
-    )
-    parts.append(f"--{boundary}--\r\n".encode())
-    return b"".join(parts)
+
+    def _closing(self) -> bytes:
+        return f"--{self.boundary}--\r\n".encode()
 
 
 def upload_filename(path: str) -> str:
@@ -195,7 +243,7 @@ def default_transport() -> Transport:
     """HTTP transport backed by the pinned ``httpx`` runtime dependency."""
 
     def post(
-        url: str, headers: dict[str, str], body: bytes, timeout: float
+        url: str, headers: dict[str, str], body: Iterable[bytes], timeout: float
     ) -> tuple[int, dict[str, str], bytes]:
         try:
             import httpx  # type: ignore[import-not-found]
@@ -352,21 +400,14 @@ class MistralClient:
         self._sleep = sleep
 
     def transcribe(self, path: str, *, model: str, diarize: bool) -> dict[str, Any]:
-        with open(path, "rb") as handle:
-            content = handle.read()
-        boundary = f"karpathywiki{os.urandom(16).hex()}"
-        body = build_request_body(
-            model=model,
-            diarize=diarize,
-            filename=upload_filename(path),
-            content_type=content_type_of(path),
-            content=content,
-            boundary=boundary,
-        )
+        upload = MultipartBody.for_recording(path, model=model, diarize=diarize)
         headers = {
             "Accept": "application/json",
             "Authorization": f"Bearer {self._api_key}",
-            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "Content-Type": f"multipart/form-data; boundary={upload.boundary}",
+            # A known length lets the transport stream the recording instead
+            # of buffering it; every attempt re-reads the file from the start.
+            "Content-Length": str(upload.length()),
         }
         url = f"{self._base_url}{TRANSCRIPTION_PATH}"
         attempt = 0
@@ -375,7 +416,7 @@ class MistralClient:
             last = attempt >= self._max_attempts
             try:
                 status, response_headers, raw = self._transport(
-                    url, headers, body, self._timeout_seconds
+                    url, headers, upload.chunks(), self._timeout_seconds
                 )
             except TimeoutError:
                 if last:

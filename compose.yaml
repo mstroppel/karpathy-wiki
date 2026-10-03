@@ -359,8 +359,11 @@ secrets:
     file: ${PAPERLESS_TOKEN_FILE:-./secrets/paperless-token}
   redactions:
     file: ${REDACTIONS_FILE:-./secrets/redactions.json}
+  # Defaults to the tracked, intentionally empty placeholder so local-only
+  # audio starts without any Mistral credential (Compose requires the file to
+  # exist). Hosted mode points this at the real key file.
   mistral_api_key:
-    file: ${MISTRAL_API_KEY_FILE:-./secrets/mistral-api-key}
+    file: ${MISTRAL_API_KEY_FILE:-./secrets/mistral-api-key.example}
 
 networks:
   webproxy:

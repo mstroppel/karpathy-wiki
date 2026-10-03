@@ -13,6 +13,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from collections.abc import Iterable
 from pathlib import Path
 from unittest import mock
 
@@ -25,6 +26,7 @@ from karpathy_wiki_speech.backends import FakeBackend
 from karpathy_wiki_speech.mistral import (
     DEFAULT_BASE_URL,
     DEFAULT_MODEL,
+    MULTIPART_CHUNK_BYTES,
     SERVICE_MAX_BYTES,
     SERVICE_MAX_DURATION_SECONDS,
     DiarizationUnavailableError,
@@ -37,6 +39,7 @@ from karpathy_wiki_speech.mistral import (
     HostedServiceError,
     HostedTimeoutError,
     MistralBackend,
+    MultipartBody,
     TimestampLanguageConflictError,
     parse_transcription,
 )
@@ -81,15 +84,19 @@ class FakeTransport:
     """Scripted transport: records every call and replays scripted answers.
 
     Entries are ``(status, headers, body)`` tuples or exception instances to
-    raise; the last entry repeats once the script is exhausted.
+    raise; the last entry repeats once the script is exhausted. The streamed
+    request body is drained and joined per call, exactly as a real send would
+    consume it.
     """
 
     def __init__(self, *script: object) -> None:
         self.script: list[object] = list(script) if script else [answered(transcript())]
         self.calls: list[tuple[str, dict[str, str], bytes, float]] = []
 
-    def __call__(self, url: str, headers: dict[str, str], body: bytes, timeout: float) -> Answer:
-        self.calls.append((url, dict(headers), body, timeout))
+    def __call__(
+        self, url: str, headers: dict[str, str], body: Iterable[bytes], timeout: float
+    ) -> Answer:
+        self.calls.append((url, dict(headers), b"".join(body), timeout))
         entry = self.script.pop(0) if len(self.script) > 1 else self.script[0]
         if isinstance(entry, BaseException):
             raise entry
@@ -182,6 +189,22 @@ class RequestConstructionTests(RecordingCase):
         self.assertIn('name="file"; filename="audio.mp3"', body)
         self.assertIn(RECORDING.decode("utf-8"), body)
         self.assertIn("Content-Type: audio/mpeg", body)
+        self.assertEqual(self.transport.headers["Content-Length"], str(len(self.transport.body)))
+
+    def test_recording_is_streamed_in_blocks_and_never_buffered_whole(self):
+        payload = b"x" * (3 * MULTIPART_CHUNK_BYTES + 7)
+        path = Path(self.directory.name) / "large.mp3"
+        path.write_bytes(payload)
+        upload = MultipartBody.for_recording(
+            str(path), model=DEFAULT_MODEL, diarize=False, boundary="BOUND"
+        )
+        blocks = list(upload.chunks())
+        self.assertEqual(sum(len(block) for block in blocks), upload.length())
+        self.assertLess(max(len(block) for block in blocks), MULTIPART_CHUNK_BYTES + 256)
+        self.assertGreater(len(blocks), 4)
+        body = b"".join(blocks)
+        self.assertIn(b'filename="audio.mp3"', body)
+        self.assertNotIn(str(path).encode(), body)
 
     def test_request_carries_no_file_name_or_provider_metadata(self):
         path = Path(self.directory.name) / "Team Sync - Max Mustermann.mp3"

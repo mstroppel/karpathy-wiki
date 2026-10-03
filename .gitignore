@@ -12,6 +12,10 @@ coverage.xml
 htmlcov/
 secrets/*
 !secrets/.gitkeep
+# Intentionally empty Compose default for the hosted transcription API key:
+# the secret file must exist even in local-only mode. Real keys stay in the
+# gitignored ./secrets/mistral-api-key (MISTRAL_API_KEY_FILE).
+!secrets/mistral-api-key.example
 temp/
 node_modules/
 *.log
