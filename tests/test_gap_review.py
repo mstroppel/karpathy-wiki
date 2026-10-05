@@ -32,12 +32,12 @@ class GapReviewContractTests(unittest.TestCase):
                 self.assertIn(phrase, text)
 
     def test_resume_targets_the_existing_draft_and_handoff_includes_source_identity(self):
-        text = SKILL.read_text()
+        text = " ".join(SKILL.read_text().split())
         for phrase in (
             "source_key: <name>.md",
             "wait_seconds: 60",
             "denselben Dateinamen erneut",
-            "erneut geschrieben",
+            "wird nicht erneut geschrieben",
             "Andere aktuelle Antwortquellen belegen keinen Erfolg",
             "`invalid`, `conflict` oder `revoked`",
             "`source_key`, `source_revision`",
@@ -48,6 +48,7 @@ class GapReviewContractTests(unittest.TestCase):
         ):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, text)
+        self.assertNotIn("wird erneut geschrieben", text)
 
     def test_follow_up_keeps_primary_session_and_narrow_permissions(self):
         routing = (ROOT / "config/routing.md").read_text()
