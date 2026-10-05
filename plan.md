@@ -21,6 +21,9 @@ Planung; eine Implementierung ist noch nicht enthalten.
   zusätzlichen Modellrechte, Provider-Zugriffe oder Offenlegung von Zugangsdaten.
 - Keine Migrationen, Kompatibilitätsaliase oder automatischen Datenverschiebungen.
 - `revoked` und `orphaned` werden weiterhin berichtet, nicht automatisch bereinigt.
+- Zusätzlich vereinbart: Budget-Preflight je Batch, private Abschlussberichte
+  und ein optionaler generischer Benachrichtigungs-Webhook. Provider-spezifische
+  Guthabenabfragen sowie eigene E-Mail-/Messenger-/Push-Adapter bleiben Folgearbeit.
 
 ## Bestehende Integrationspunkte
 
@@ -85,6 +88,9 @@ im gepinnten Image** schreiben und ausführen:
    Semantik, Permission-Denial und Tool-Hooks einschließlich Kind-Sessions prüfen.
 4. Background-Shell, Interrupt und tatsächliches Ende der Ausführung prüfen.
 5. Timer-Cleanup, Reload, Neustart und Boot ohne geöffneten Chat prüfen.
+6. Verfügbarkeit und Semantik gemeldeter Token-/Kosten-Usage, Modellpreise und
+   Vorab-Guards über Orchestrator, Kinder, Nebenrequests und Provider-Retries
+   prüfen. Unbekannte Usage nicht als Nullverbrauch behandeln.
 
 Location-Plugins müssen auch ohne Browserzugriff geladen werden. Bevorzugt den
 bestehenden authentifizierten Healthcheck um einen modellfreien Location-Aufruf
@@ -113,6 +119,15 @@ Neue Variablen im Namespace `WIKI_AUTO_INGEST_*` vorsehen:
 - `INTERVAL_SECONDS` als positiver Prüf-/Ruheabstand, zunächst z. B. 300 Sekunden.
 - Endliche `MAX_ATTEMPTS`, `BACKOFF_SECONDS`, `MAX_RUN_SECONDS` und
   `MAX_MODEL_REQUESTS`; konkrete Defaults nach dem Runtime-Gate festlegen.
+- Konfigurierbare kumulative `BUDGET_TOKENS` und/oder `BUDGET_COST_USD`,
+  `BUDGET_PERIOD` (`day`/`month`), `BUDGET_TIMEZONE` (standardmäßig UTC) sowie
+  eine dokumentierte Sicherheitsreserve für Vorabschätzungen. Namen und
+  Defaults beim Runtime-Gate abschließend festlegen; diese Limits ergänzen
+  die immer endlichen Ausführungsgrenzen, ersetzen sie nicht.
+- Webhook separat standardmäßig deaktiviert; Ziel, Ereignisauswahl, optionale
+  Authentifizierung über Secret-Datei und Detailfreigabe ausschließlich aus
+  vertrauenswürdiger Betreiberkonfiguration beziehen. Kein Modellwerkzeug zum
+  beliebigen Versenden von Nachrichten oder Auswählen eines Empfängers anbieten.
 
 Werte strikt prüfen. Fehlerhafte Aktivierung oder nicht verfügbares Modell führt
 zu sichtbarem `blocked`/`failed`, nicht zu einem Fallback-Modell. Das gewählte
@@ -129,13 +144,20 @@ endliche Batch-/Request-Limits haben, auch wenn manuelle Läufe unbegrenzt sein 
 3. Bei `invalid`/`conflict`: global stoppen und private Diagnosen bereitstellen.
 4. Fremde aktive Sitzungen, laufende Shells sowie Git-Index und Working Tree
    prüfen. Bei ungeklärtem Zustand oder fremden Änderungen nicht starten.
-5. Writer-Sperre atomar übernehmen; unter der Sperre Status/Git erneut prüfen.
-6. Startabsicht und Session-/Run-Zuordnung dauerhaft speichern, dann genau einmal
+5. Den nächsten Batch modellfrei planen und Kontext-, Verbrauchs-/Kostenbudget
+   einschließlich Reserve prüfen (siehe Abschnitt 5). Reicht es nicht, ohne
+   Modellstart pausieren. Planung dafür ohne Hochzählen dispatchter Batches
+   ermöglichen; ein abgelehnter Preflight verbraucht keine Batch-Zulassung.
+6. Writer-Sperre atomar übernehmen; unter der Sperre Status/Git und Budget erneut
+   prüfen, Reservierung und Startabsicht atomar speichern.
+7. Session-/Run-Zuordnung dauerhaft speichern, dann genau einmal
    `/ingest-new` zulassen. Admission-ID/Idempotenz gegen die Runtime prüfen.
-7. Während eines Laufs keine weiteren Starts; neue Quellen werden durch die
+8. Während eines Laufs keine weiteren Starts; neue Quellen werden durch die
    nächste frische Batchplanung oder den nächsten Prüfzyklus erfasst.
-8. Abschluss anhand von Status, Journal und Git prüfen, nicht anhand der letzten
-   Modellantwort oder eines erfolgreichen HTTP-Requests.
+9. Vor jedem weiteren Batch Budget und Reserve erneut prüfen. Den vorhandenen
+   Orchestrator-/Journal-Pfad verwenden; kein zweiter Batchplanner.
+10. Abschluss anhand von Status, Journal und Git prüfen, nicht anhand der letzten
+    Modellantwort oder eines erfolgreichen HTTP-Requests.
 
 ### 3. Koordination aller Wiki-Writer
 
@@ -178,7 +200,10 @@ gegen gleichzeitige Writes und unterbrochene Schreibvorgänge absichern.
 
 Persistieren: Zustand, Besitz-/Session-/Run-IDs, Startabsicht, letzte verifizierte
 Erfolge, ausstehende Arbeit/Blocker, Retry-Zähler, nächster zulässiger Versuch,
-verbrauchte Limits und Berichtspfade. Keine Quelltexte in Controller-Logs.
+verbrauchte Limits und Berichtspfade. Budgetperioden, Usage-Nachweise,
+Reservierungen und Versandzustand ebenfalls dauerhaft speichern. Keine
+Quelltexte in Controller-Logs. Budgetpausen halten den Journal-Lauf offen und
+stellen den Zwischenbericht bereit; sie sind kein endgültiger Quellenblocker.
 
 Nach Neustart vor jedem Dispatch:
 
@@ -195,7 +220,64 @@ Nach Neustart vor jedem Dispatch:
   der gespeicherten Limits fortsetzen. Fortschritt aus verifizierten Resultaten,
   nicht aus Kontext oder alten Status-Offsets übernehmen.
 
-### 5. Endliche Wiederholungen und Kosten
+### 5. Budget-Preflight, endliche Wiederholungen und Kosten
+
+Drei unterschiedliche Budgets ausdrücklich auseinanderhalten:
+
+| Budget | Prüfung / Grenze |
+| --- | --- |
+| Kontextfenster je Worker | Bestehende Schätzung aus #152 für Quelle, Wiki-Seiten und Arbeitsaufwand; Headroom für Ausgabe reservieren, Batch verkleinern oder Oversized-Vertrag anwenden |
+| Lokales Verbrauchs-/Kostenlimit | Dauerhafter Zähler für automatische Ingest-Arbeit je konfigurierter Tages-/Monatsperiode; geschätzten nächsten Batch plus Reserve gegen Restbudget prüfen |
+| Provider-Guthaben / Abo-Kontingent | Ohne passende Provider-Schnittstelle unbekannt; keine allgemeine Abfrage verbleibender Tokens voraussetzen |
+
+Das lokale Limit gilt zunächst für automatische Ingest-Sitzungsbäume dieser
+Instanz, nicht für sämtliche manuelle Chats oder die gesamte Providerrechnung.
+Zusätzlichen Verbrauch anderer Anwendungen kann der Controller nicht erkennen.
+Tokenverbrauch bezeichnet abgerechnete Input-/Output-Tokens einschließlich
+Caching-/Reasoning-Anteilen gemäß nachgewiesener Provider-Usage; Semantik und
+Vermeidung von Doppelzählung dokumentieren. Kosten separat anhand bekannter
+Preise/Usage ausweisen, niemals Kontexttokens mit Rechnungsbetrag gleichsetzen.
+
+**Vor jedem Batch:** Bedarf aus gemessenen Größen, Arbeits- und Ausgabeannahmen,
+erwarteten Wiederholungen des Kontexts und ggf. verifizierten bisherigen
+Verbrauchswerten vergleichbarer Batches schätzen. Schätzung mit Unsicherheit und
+Reserve ausweisen; reine Quelldateigröße unterschätzt mehrere Modellrequests.
+Bei bekannten Preisen auch Kosten schätzen, ohne Cache-Hits als sicher anzunehmen.
+Passt der Batch nicht, ihn innerhalb des #152-Planners verkleinern. Passt selbst
+die nächste Quelle mit Reserve nicht, pausieren statt sie halb zu schreiben.
+
+Reservierung und tatsächliche Usage atomar und idempotent nachführen, auch für
+Kinder, Nebenrequests und Retries. Nach jedem gemeldeten Verbrauch den nächsten
+Batch neu beurteilen. Eine offene Reservierung nach Crash oder verzögerte/fehlende
+Usage bleibt ungeklärt und reduziert verfügbares Budget; sie wird weder durch
+Neustart noch durch automatische Wiederaufnahme gelöscht. Sind Preise/Usage für
+ein aktiviertes Limit nicht zuverlässig ermittelbar, mit `budget_unknown`
+blockieren und konkrete Abhilfe nennen, nicht Nullkosten behaupten.
+
+Budget-Prüfungen an Batchgrenzen sind keine harten Token-/Kostenlimits während
+einer Quelle. Unterstützte Request-Guards und endliche Request-/Zeitgrenzen
+ergänzen sie; bei Überschreitung keine neue Quelle bzw. keinen neuen Batch
+beginnen. Unterbrechungen weiterhin nach dem Dirty-Tree-/Recovery-Vertrag behandeln.
+
+Budgetpausen als `blocked` mit separatem Grund darstellen:
+
+- `local_budget_exhausted`: lokales Limit bzw. Reserve reicht nicht; Verbrauch,
+  Schätzung, Restarbeit und nächste Periodengrenze berichten.
+- `provider_quota_exhausted`: eindeutige Kontingentmeldung des Providers;
+  nicht jede Rate-Limit-Antwort (429) als aufgebrauchtes Guthaben deuten.
+- `budget_unknown`: erforderlicher Verbrauchs-/Preisnachweis fehlt. Der bloß
+  unbekannte Provider-Kontostand blockiert dagegen nicht, solange keine
+  Provider-Guthabenprüfung zugesichert ist und lokale Guards funktionieren.
+
+Periodengrenzen in konfigurierter Zeitzone berechnen und persistieren; nur das
+periodische Budget wird dann erneuert. Ungeklärte Reservierungen sicher zuordnen,
+nicht still wegsetzen. Bei lokalem Budget nach Reset frischen Preflight ausführen;
+kein Budgetoverride durch gewöhnliches Resume. Providerkontingent nur nach
+nachgewiesenem Reset oder expliziter Bestätigung der Abhilfe erneut versuchen.
+Budgeterhöhung ist eine bewusste Betreiberentscheidung. Die Retry-Sperren
+unveränderter Quellen-/Recovery-Blocker bleiben davon unabhängig erhalten.
+
+**Endliche Wiederholungen:**
 
 - Transiente Runtime-/Providerfehler mit begrenzten Versuchen und gedeckeltem
   Backoff behandeln; Zähler vor Dispatch persistieren.
@@ -218,6 +300,9 @@ Nach Neustart vor jedem Dispatch:
 
 `idle`, `running`, `blocked`, `failed`, letzte verifizierte erfolgreiche
 Verarbeitung, nächste Prüfung/Retry, offene Quellen und Berichtspfade anbieten.
+Zusätzlich Verbrauchsperiode, gemeldete Usage, Kostenschätzung, Reservierungen,
+Restbudget, Pausengrund und ggf. Resetzeit anzeigen; Messwerte, Schätzungen und
+Unbekanntes klar trennen. Versandstatus nicht mit Ingeststatus vermischen.
 Einen begrenzt ausgebenden Status-/Resume-Zugang vorsehen; Status ist lesend,
 Rearm ausdrücklich und nur ohne aktiven Writer. Keine neue öffentliche Route.
 Direkter Operator-Zugriff auf private Dateien bleibt möglich.
@@ -232,6 +317,57 @@ explizit festlegen: regulär zu Ende laufen lassen; separater Stop unterbricht
 kontrolliert, ohne uncommittete Änderungen zu verwerfen. `/ingest-new` bleibt
 manuell nutzbar und respektiert dieselbe Writer-Koordination.
 
+### 7. Modellfreie Benachrichtigungen und optionaler Webhook
+
+Ergebnis und vollständiger Bericht bleiben privat zugänglich, vorzugsweise über
+die Ingest-Sitzung in OpenChamber und den bestehenden Journalzugang. Keine
+ungeprüfte native Browser-/Push-Unterstützung zusichern. Nachrichten entstehen
+deterministisch aus Controllerzustand und verifiziertem Journal, ohne zweiten
+Modelllauf zur Zusammenfassung oder zum Versand.
+
+Ereignisse:
+
+- **Erfolgreicher Lauf:** Zahl neu eingelesener/aktualisierter Quellen, Restarbeit,
+  verfügbare Verbrauchswerte sowie privater Sitzungs-/Berichtsverweis.
+- **Teilabschluss:** verifizierte bearbeitete Quellen, offene Arbeit und Blocker.
+- **Budgetpause:** Limittyp, bekannter Verbrauch, Restarbeit und Reset-/Resume-
+  Hinweis. Prognostizierte Budgetknappheit nicht als gemessene Erschöpfung melden.
+- **Fehler/Konflikt:** konkreter Handlungsbedarf ohne rohe Providerfehler.
+- Leere Prüfläufe erzeugen keine Nachricht; derselbe unveränderte Blocker wird
+  nicht bei jedem Poll erneut gemeldet. Einen Teilabschluss mit Budgetpause
+  möglichst in einer Nachricht zusammenfassen.
+
+Der erste Zustelladapter ist ein **optional aktivierter generischer Webhook**,
+z. B. für einen eigenen Empfänger, Home Assistant oder n8n. E-Mail, Matrix,
+ntfy/Gotify und Provider-Guthabenadapter sind dokumentierte Erweiterungsoptionen,
+nicht zusätzliche direkte Integrationen in #157.
+
+Extern standardmäßig nur Ereignistyp, Zähler, Budgetangaben und opake Kennung
+senden. Quellnamen/-pfade, private URLs, Commitdetails und Inhaltszusammenfassungen
+sind potenziell privat und bleiben standardmäßig ausgeschlossen. Erst ausdrückliche
+Detailfreigabe erlaubt ausgewählte Angaben aus verifizierten Journalrecords;
+Inhalte begrenzen, nicht erfinden und niemals rohe Quellen/Sessionexports versenden.
+Ein privater Dateipfad ist kein extern erreichbarer Berichtlink; keine neue
+öffentliche Berichtsroute zur Zustellung einführen.
+
+Payload versionieren und stabile Ereignis-ID vorsehen. Durable Outbox im privaten
+Controllerverzeichnis speichert Versandstatus, nächste Versuche und gewählte
+Payload; Detailpayloads ebenfalls nur privat. Eventerzeugung idempotent anhand
+Run-/Pausenkennung und Zustandswechsel, auch nach Neustart. Versand außerhalb der
+Writer-Sperre mit Timeout, gedeckeltem Backoff und endlichen Versuchen; nach
+Ausschöpfung sichtbarer Versandfehler und separates manuelles Wiederholen.
+
+Ein Versandfehler **startet niemals einen neuen Ingest**, setzt keine Budgets
+zurück und macht keinen verifizierten Commit rückgängig. Netzwerkzustellung ist
+keine Exactly-once-Garantie: bei verlorener Bestätigung kann ein Retry doppelt
+ankommen; Empfänger kann anhand der stabilen Ereignis-ID deduplizieren.
+
+Ziel-URL fest aus Betreiberkonfiguration, HTTPS standardmäßig, keine Redirects
+zu anderen Zielen; HTTP für lokale Dienste nur mit bewusstem Opt-in. Secret-Datei
+nicht dem Modell offenlegen. URLs, Authorization, Payloads und Antwortbodies nicht
+loggen. Begrenzte Antwortgröße/Timeouts sowie verlässliche Abbruch- und
+Datenschutzregeln testen; Quellen können weder Empfänger noch Header ändern.
+
 ## Umsetzung in überprüfbaren Schritten
 
 1. **Runtime-Gate:** modellfreien Probe-/Integrationstest für 2.0.23 ergänzen;
@@ -244,15 +380,21 @@ manuell nutzbar und respektiert dieselbe Writer-Koordination.
    Scanner und Persistenz; Pluginadapter
    `config/plugins/wiki-auto-ingest.js` für Timer, Dispatch und Lifecycle.
 4. **Recovery und Grenzen:** Restart-Reconciliation, idempotente Admission,
-   sourcebezogene Retry-Sperren, Rollover und Abbruchgrenzen integrieren.
-5. **Deployment und Bedienung:** `.env.example`, `compose.yaml`, Initialisierung
+   sourcebezogene Retry-Sperren, Rollover und Abbruchgrenzen integrieren. Budget-
+   Preflight je Batch, persistente Usage/Reservierungen und Periodenreset ergänzen.
+5. **Benachrichtigungen:** modellfreie Ereigniserzeugung, private Durable Outbox
+   und optionalen Webhookadapter mit Datenschutz-Defaults und begrenztem Versand
+   implementieren; keine zusätzlichen Push-/Messenger- oder Guthabenadapter.
+6. **Deployment und Bedienung:** `.env.example`, `compose.yaml`, Initialisierung
    und gegebenenfalls Startpfad ergänzen. Status-/Resume-Zugang anbinden;
    Routing und relevante Skills an den Koordinationsvertrag anpassen, ohne
    Kontext-/Provenienzregeln aus #152 abzuschwächen.
-6. **Dokumentation:** `docs/auto-ingest.md` für Opt-in, Modellvoraussetzungen,
+7. **Dokumentation:** `docs/auto-ingest.md` für Opt-in, Modellvoraussetzungen,
    Grenzen, Berichtsabruf, Disable/Stop, Busy-/Dirty-/Conflict-Fälle und Resume;
+   Budgetarten/-periode/-scope, Schätzunsicherheit, unbekanntes Providerkontingent,
+   Webhook-/Secret-Konfiguration, Payload-Datenschutz und Versand-Recovery erklären.
    README sowie Konfigurations-, Architektur-, Datenlayout- und Reportdocs verlinken.
-7. **Gesamtvalidierung:** CI-Anbindung neuer Tests, Docker-Integration und
+8. **Gesamtvalidierung:** CI-Anbindung neuer Tests, Docker-Integration und
    ausdrücklich aktivierbaren Realmodell-Smoke-Test ergänzen; vor einem später
    beauftragten PR alle README-Checks ausführen und Evidenz dokumentieren.
 
@@ -278,11 +420,20 @@ Orchestrationstests erweitern; relevante statische Verträge in Python prüfen.
 | Unveränderter Quellenblocker / neue unabhängige Quelle | Kein Kostenloop; alte Retry-Sperre bleibt bestehen |
 | Transiente Fehler / Retry-Limit / Restart | Endliches Backoff, persistente Versuchszähler |
 | Request-/Zeit-/Batchlimit und Rollover | Keine grenzenlose Fortsetzung; sichere Wiederaufnahme |
+| Budget reicht / Batch zu groß / einzelne Quelle zu teuer | Vorab reservieren, Batch verkleinern oder ohne Modell-/Write-Start pausieren |
+| Wiederholter Kontext, Worker, Nebenrequests, Retries | Gemeldete Usage korrekt und idempotent zählen; Schätzung nicht als Messwert ausgeben |
+| Fehlende Preise/Usage / verzögerte Abrechnung / Crash | Aktiviertes Limit nicht mit Nullverbrauch umgehen; ungeklärte Reservierung bleibt wirksam |
+| Periodenreset, Zeitzone, Restart und Resume | Budget konsistent erneuern; gewöhnliches Resume umgeht Limit nicht; Quellenblocker bleiben bestehen |
+| Unbekanntes Providerguthaben / Quota-Fehler / temporäres 429 | Unterschiedliche Diagnosen; keine falsche Erschöpfungsmeldung oder unendliche Retry-Schleife |
 | Restart vor/nach Admission, vor/nach Commit/Record | Keine Doppelzulassung/-commits; fehlende Details blockieren |
 | Gefälschter/fehlender Commit oder Pfadnachweis | Kein verifizierter Erfolg |
 | Bounded-context-/Oversized-Fälle aus #152 | Budget und vollständiger Bericht bleiben erhalten |
 | Disable, Stop, Resume und Berichtszugriff | Definierter Lifecycle; private Speicherrechte eingehalten |
 | Logs und Rechte | Keine privaten Inhalte/Secrets; Quellen read-only; keine Rechteausweitung |
+| Erfolg, Teilabschluss, Budgetpause und leerer Poll | Verifizierte modellfreie Nachricht je relevantem Zustandswechsel; leere Polls still |
+| Webhook aus / Defaultpayload / explizite Details | Ohne Opt-in kein Versand; standardmäßig keine Quellnamen/-inhalte/private Links |
+| Webhook-Timeout/Fehler, Neustart und verlorene Bestätigung | Durable Outbox, begrenzte Retries und stabile Ereignis-ID; niemals erneuter Ingest |
+| Manipulierte Quelle / Redirect / Webhook-Secret | Nur konfiguriertes Ziel; kein frei wählbarer Empfänger, Credential- oder Payload-Logging |
 
 Docker-Integration prüft zusätzlich die ausgelieferte Plugin-Erkennung,
 Boot-Aktivierung ohne Chat, Guard-Wirkung, Neustartpersistenz und Default-off.
@@ -305,6 +456,10 @@ fehlende Migrationen und Testevidenz im späteren PR beschreiben.
   sowie Background-/Kind-Lifecycle in 2.0.23.
 - Sichere, modellfreie Location-Aktivierung beim Serverstart.
 - Idempotente Command-Admission und Requestzählung über Sessionbäume.
+- Nachgewiesene Usage-/Preissemantik, Budgetreservierung über Crashgrenzen und
+  Guards vor Requests, ohne einen harten Provider-Spend-Cap zu behaupten.
 - Konkrete Limit-Defaults und die kleinste sichere Status-/Rearm-Oberfläche.
+- Konkrete Webhook-Konfiguration und Payload-Version; direkte Zustelladapter
+  und Provider-Guthabenabfragen bleiben außerhalb des ersten Umfangs.
 
 Diese Punkte sind Implementierungsgates, keine behaupteten Runtime-Garantien.
