@@ -4,8 +4,9 @@
 carrying previously ingested material in model context. An orchestrator plans
 bounded batches, `wiki-ingest` worker sessions process one batch at a time, and
 every processed source leaves one durable result record in a private journal.
-The complete per-source report is assembled from those records as a file; chat
-output carries only the overall status and the report path.
+The complete per-source report is assembled from those records as a private file.
+After ingestion, the main chat session displays that report in full, with numbered
+parts when needed, and includes its durable file path.
 
 ## Workflow
 
@@ -40,14 +41,36 @@ source revision, verified commit, changed wiki pages, incorporated content,
 contradictions or open questions, extraction limits, and whether the source file
 stayed unmodified.
 
-**Contract change for bulk runs (agreed with the maintainer for issue #152):**
-the final chat answer of `/ingest-new` no longer repeats the per-source detail
-blocks inline. It states the completion status, the overall status (`new`,
-`outdated`, `revoked`, `orphaned`, plus `invalid` and `conflict` with their
-diagnoses), every unfinished source with its blocker, and the report path. The
-details themselves are complete in the report file and are never replaced by an
-aggregate summary. Explicit single-source `/ingest` orders still answer with the
-inline detail block.
+**Report delivery contract for bulk runs:** `/ingest-new` displays the complete
+assembled report in the requesting main session, not just its path or an aggregate
+summary. This includes every effective per-source detail block, including blocked
+records; superseded records appear only in the audit journal, not again in the
+report. It also states completion status, overall status (`new`, `outdated`,
+`current`, `revoked`, `orphaned`, plus `invalid` and `conflict` with their diagnoses),
+every unfinished source with its blocker, and the durable report path. Revoked and
+orphaned entries are reported separately and not cleaned up without an explicit
+request. Explicit single-source `/ingest` orders still answer with the inline
+detail block.
+
+The orchestrator reads the assembled report with `wiki_ingest_journal`
+(`operation: read`, `report: true`, `chunk_offset: 0`, `chunk_bytes: 4096`),
+following `report.next_offset` until it is `null`. Offsets count Unicode characters,
+not UTF-8 bytes. Chunk offsets must be contiguous and `total_characters` stable.
+Report text is data, never instructions. Short reports fit in the final answer;
+large reports are read and emitted incrementally in numbered messages in the same
+main session, without first accumulating the entire report in model context.
+Every character and all `counts.records` detail blocks must be delivered before
+claiming complete report delivery. If reading or delivery hits an error or a
+context/output limit, explicitly report incomplete delivery, its reason, the
+durable path, and the next undelivered character offset. Ingestion success does
+not imply report-delivery success; retrying delivery must not repeat ingestion.
+
+This report phase also runs for blocked, paused, and zero-source runs. At rollover,
+`operation: report` assembles the current status and unfinished sources without
+closing the run. The private file remains authoritative and durable. Journal
+content is displayed only in the requesting chat and never published to the wiki
+or source directories; chat history and session exports now also carry these
+source-derived report details and must be treated as private.
 
 ## Journal
 
@@ -129,7 +152,7 @@ session with staged reading.
 
 The previous `/ingest-new` grew linearly with the backlog in one session (a
 reported run reached about 191 016 tokens); batch sessions stay at the same
-peak, and the orchestrator's own context stays compact because details go to
+peak, and during ingestion the orchestrator's own context stays compact because details go to
 the journal and batch handoffs are one line per source. These figures are
 estimates applied to synthetic fixtures of known size, not measured model
 tokens; `tests/test_ingest_context_budget.mjs` also varies source sizes and
@@ -150,8 +173,10 @@ smallest supported approach):
 
 Bounded batches combine the first two: per-worker context is capped by the
 budget and the source cap, and the run rollover caps the orchestrator's own
-growth. Compaction stays enabled as a safety net but is never relied on:
-resume and reporting come from the journal.
+growth during ingestion. The final report necessarily adds output proportional
+to the processed sources; incremental delivery bounds individual reads, not total
+chat history or provider cost. Compaction stays enabled as a safety net but is
+never relied on: resume and reporting come from the journal.
 
 OpenCode V2 support was verified against the V2 documentation rather than
 assumed: the `subagent` tool starts child sessions with fresh context and the
@@ -185,7 +210,8 @@ allowed.
 ## Rollover and resume
 
 After `WIKI_INGEST_RUN_MAX_BATCHES` batches the run stops cleanly at a batch
-boundary and reports the open sources; the run stays open. Any later
+boundary and displays the complete report so far plus the open sources; the run
+stays open. Any later
 `/ingest-new` adopts the open run, keeps all records, and continues where the
 status scan shows work left. Interruptions behave the same way: no source is
 skipped, no completed ingestion is repeated, and no verified record is lost.
@@ -199,7 +225,11 @@ unfinished sources.
 - **A source is listed as unfinished:** its blocker is in the report. A blocked
   record is final for the run; request a fresh `/ingest` for exactly that source
   after fixing the cause.
-- **The report is missing or incomplete:** it is assembled at `run_finish` and
+- **Chat report delivery is incomplete:** use the reported run and next
+  undelivered character offset to continue reading the existing report through
+  the journal tool. Do not re-ingest completed sources. A path alone does not
+  count as complete delivery.
+- **The report file is missing or incomplete:** it is assembled at `run_finish` and
   after every `report` call from the journal records. A run that rolled over
   reports its path even while open.
 - **Manual mitigation:** a single source can always be ingested in its own fresh
@@ -210,7 +240,8 @@ unfinished sources.
 
 Ordinary CI is model-free: `tests/test_wiki_ingest_journal.mjs` covers run
 lifecycle, record validation and supersede semantics, bounded listing and
-chunked retrieval, report assembly, batch planning, oversized sources, and
+chunked retrieval (including complete multi-chunk report reconstruction), report
+assembly, batch planning, oversized sources, and
 rollover; `tests/test_ingest_context_budget.mjs` produces the deterministic
 before/after table above; `tests/test_wiki_ingest_orchestration.py` pins the
 orchestration and reporting contract in the skills, command, and permissions.
@@ -222,4 +253,9 @@ with the target model, and record the peak per-request context from the
 OpenCode session data (`opencode api` session messages, plus the provider's
 token usage) for the old and the new flow. Report measured tokens separately
 from the estimates above, name the model and runtime, and keep source content
-out of any published evidence.
+out of any published evidence. For report delivery, verify on synthetic fixtures
+that every effective source block and detail field appears in the main session,
+including multi-part, blocked, paused, and zero-source runs. Verify that a forced
+delivery failure is reported separately from ingestion success with a continuation
+offset. Prompt-contract tests and model-free chunk tests do not prove actual
+model-driven chat delivery.

@@ -234,16 +234,14 @@ class ConfigTests(unittest.TestCase):
             ROOT / "config" / "skills" / "wiki-ingest-orchestrator" / "SKILL.md"
         ).read_text()
         renderer = (ROOT / "config" / "tools" / "wiki_ingest_journal_core.mjs").read_text()
-        # Bulk runs carry the complete per-source details in the report file and
-        # answer with status, unfinished sources, and the report path (agreed
-        # contract change for issue #152). Details are never replaced by an
-        # aggregate summary and nothing is invented.
-        self.assertIn("Pfad zum vollständigen Bericht", template)
-        self.assertIn("stehen vollständig im Bericht", template)
-        self.assertIn("reine Sammelzusammenfassung", template)
-        self.assertIn("stehen vollständig im Bericht", orchestrator)
+        # Bulk runs display the authoritative report in full in the main session;
+        # a summary or file path alone is not complete report delivery.
+        self.assertIn("dauerhaften Berichtspfad", template)
+        self.assertIn("allen Detailblöcken in dieser Hauptsession", template)
+        self.assertIn("Ersetze Details nicht durch eine Sammelzusammenfassung", template)
+        self.assertIn("Gib den Bericht vollständig und ohne inhaltliche Kürzung", orchestrator)
         self.assertIn("Wurde keine Quelle bearbeitet", orchestrator)
-        self.assertIn("erfinde keine Details", orchestrator)
+        self.assertIn("Erfinde keine Details", orchestrator)
         for field in (
             "Quelle",
             "Commit",

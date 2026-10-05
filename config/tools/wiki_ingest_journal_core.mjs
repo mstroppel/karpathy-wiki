@@ -607,8 +607,8 @@ function normalizeUnfinished(unfinished, blockedRecords) {
   return entries
 }
 
-// Assemble the complete report from the durable records. This is the only
-// place the per-source detail blocks live: sessions never have to carry them.
+// Assemble the authoritative report from durable records. The orchestrator reads
+// it in bounded chunks for chat delivery only after ingestion (or at rollover).
 export async function assembleReport({
   root,
   runId,
