@@ -109,12 +109,13 @@ from which the browser's print dialog produces a shareable PDF. See
 
 ## Interactive gap review
 
-Enable the `answers` profile, then run `/gap-review` in OpenCode to review
-unsupported claims, contradictions, missing information, and stale syntheses.
-Answer or defer its numbered questions across turns. Only after you confirm
-the proposed answers does OpenCode submit a Markdown Q&A draft to the local
-answer inbox. The provider locally redacts and publishes it as a tracked
-source, which the normal wiki ingest flow uses to update the wiki. See
+Run `/gap-review` in OpenCode to review unsupported claims, contradictions,
+missing information, and stale syntheses. Answer or defer its numbered
+questions across turns. Only after you confirm the proposed answers does
+OpenCode save a Markdown Q&A draft to the local answer inbox; that local save
+works without the `answers` profile. Enable the profile for publication: the
+provider locally redacts and publishes the draft as a tracked source, which
+the normal wiki ingest flow uses to update the wiki. See
 [gap review](docs/gap-review.md) for setup and the submission boundary.
 
 ## Profiles

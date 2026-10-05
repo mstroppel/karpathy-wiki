@@ -70,6 +70,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `/gap-review` saves explicitly confirmed answers in the private inbox without
+  requiring a service-status check. Follow-up ingest requests stay in the primary
+  conversation; publication and import are verified for the exact answer source
+  and revision, with retries reusing the existing draft.
 - `/analysis-save` can now save the latest finished analysis and subsequent
   corrections from the current conversation without pasted arguments. It passes
   the complete text through the main agent and refuses truncated tool results.

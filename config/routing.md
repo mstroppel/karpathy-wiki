@@ -15,8 +15,11 @@ Wissen nur auf ausdrücklichen Auftrag.
 Ordne jede Anfrage genau einem Vorgang zu. Die Delegationsregeln gelten nur für
 primäre Agenten; ein spezialisierter Agent führt seinen Auftrag selbst aus.
 Wenn eine interaktive Lückenprüfung im laufenden Gespräch begonnen wurde,
-gehören Antworten, Aufschub und die abschließende Einreichungsbestätigung
-weiterhin zu diesem Vorgang; lade bei Bedarf `wiki-gap-review` erneut.
+gehören Antworten, Aufschub, Einreichungsbestätigung und Folgeaufträge wie
+„Speichere/ingeste die Antworten“ weiterhin zu diesem Vorgang, sofern sie sich
+auf diese Antworten beziehen. Lade `wiki-gap-review` erneut und setze dessen
+Einreichungsablauf im primären Agenten fort; diese Regel hat Vorrang vor
+**Einlesen**. Abschluss erst für die konkrete bestätigte Antwortquelle.
 
 - **Einlesen** nur bei einem ausdrücklichen Auftrag, Quellen einzulesen,
   zu importieren, zu verarbeiten oder ins Wiki zu übernehmen. Übergib den
