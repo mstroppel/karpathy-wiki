@@ -3,7 +3,8 @@
 Enable the local answer provider with `COMPOSE_PROFILES=answers` (or append
 `,answers` to existing profiles). Configure `REDACTIONS_FILE` as for WebDAV,
 then restart the stack. The profile is optional; the initial review works
-without it, but answer submission requires the running `answers-ingest` service.
+without it. Confirmed drafts can be saved locally without a service-status
+check; publication requires the running `answers-ingest` service.
 
 In OpenCode, use `/gap-review` or explicitly ask for an interactive gap review.
 The first pass reads the wiki and reports numbered, evidence-linked questions
@@ -12,11 +13,13 @@ syntheses. Reply with answers, skips, or deferrals in the same conversation.
 Review the summary and explicitly confirm submission; answering a question
 alone does not submit it.
 
-The confirmed Markdown Q&A is saved in
+After explicit confirmation, the primary agent immediately saves the Markdown Q&A in
 `${DATA_ROOT}/incoming/answers/<unique-name>.md` (mounted at
 `/knowledge/incoming/answers` for OpenCode). Each answered question includes
 its finding, affected pages, evidence, and attribution to the user. Unanswered
-questions and unresolved conflicts remain marked as open. The provider reads
+questions and unresolved conflicts remain marked as open. Follow-up requests such
+as “ingest the answers” continue this workflow in the primary agent, rather than
+dispatching a context-free ingest request. The provider reads
 this inbox read-only, applies the configured local redaction rules, and writes
 complete source revisions plus a versioned manifest under
 `${DATA_ROOT}/sources/answers`. The source tree is read-only to OpenCode;
@@ -35,8 +38,13 @@ the asynchronous provider to publish before passing
 the published source to `wiki-ingest`; only a completed wiki commit and
 `current` status count as an imported answer. If publication is delayed or
 blocked, check service health, provider logs, and `ANSWERS_SYNC_INTERVAL`, then
-retry the status check for the same filename. An absent entry alone does not
-mean the profile is disabled. Drafts are retained in
+retry the status check for the same filename, without writing a duplicate draft
+or asking for confirmation again for unchanged answers. The agent reports the
+inbox path and distinguishes **saved locally**, **published**, and **imported**.
+An absent entry alone does not mean the profile is disabled. Other current
+answer sources do not prove that this draft was imported. The ingest handoff
+includes the exact source key, revision, and published path; success requires
+that revision to be `current` and its commit to be verified. Drafts are retained in
 the inbox so restarts and redaction-rule changes can republish them. Do not
 delete a submitted draft while it is published: a missing draft makes the
 provider unhealthy rather than silently dropping its source. The provider

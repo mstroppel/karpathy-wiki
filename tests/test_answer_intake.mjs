@@ -175,14 +175,17 @@ test('confirmed answer travels through the provider manifest and wiki status', a
     const wikiSourceRoot = path.join(root, 'wiki', 'sources')
     const redactions = path.join(root, 'redactions.json')
     await mkdir(inbox)
+    await mkdir(sourceRoot)
     await mkdir(wikiSourceRoot, { recursive: true })
     await writeFile(
       redactions,
       JSON.stringify({ people: [{ values: ['Ada Lovelace'], replacement: '[PERSON]' }] }),
     )
     const draft = path.join(inbox, 'review-1.md')
-    const submit = async (text) => {
+    const stage = async (text) => {
       await writeFile(draft, `${text}\n<!-- END CONFIRMED ANSWERS -->\n`)
+    }
+    const publish = () => {
       const result = spawnSync(
         'python3',
         [
@@ -196,8 +199,19 @@ test('confirmed answer travels through the provider manifest and wiki status', a
       )
       assert.equal(result.status, 0, result.stderr)
     }
-    await submit('1. Ada Lovelace answered the question.')
     const scan = () => scanIngestStatus({ sourceRoot, wikiSourceRoot, includeCurrent: true })
+    // Saving is independent of the provider: retain this exact draft on timeout.
+    await stage('1. Ada Lovelace answered the question.')
+    const pending = await waitForPublishedSource(
+      scan,
+      { adapter: 'answers', sourceKey: 'review-1.md', waitSeconds: 1 },
+      () => probePublishedSource({ sourceRoot, adapter: 'answers', sourceKey: 'review-1.md' }),
+    )
+    assert.equal(pending.summary.new, 0)
+    const savedDraft = await readFile(draft, 'utf8')
+    assert.ok(savedDraft.endsWith('<!-- END CONFIRMED ANSWERS -->\n'))
+    // Resume by publishing and checking the existing filename, not by resubmitting.
+    publish()
     let status = await scan()
     assert.equal(status.summary.invalid, 0)
     assert.equal(status.summary.conflict, 0)
@@ -213,6 +227,7 @@ test('confirmed answer travels through the provider manifest and wiki status', a
     assert.equal(record.source_key, 'review-1.md')
     assert.equal(record.wiki_path, path.join(wikiSourceRoot, 'answers', 'review-1', 'index.md'))
     assert.ok((await readFile(record.source_path, 'utf8')).includes('[PERSON]'))
+    assert.equal(await readFile(draft, 'utf8'), savedDraft)
     const fields = Object.entries(record.frontmatter)
       .map(([key, value]) => `${key}: ${JSON.stringify(value)}`)
       .join('\n')
@@ -220,7 +235,8 @@ test('confirmed answer travels through the provider manifest and wiki status', a
     await writeFile(record.wiki_path, `---\n${fields}\n---\n\n# Answer source\n`)
     status = await scan()
     assert.equal(status.adapters.answers.current.length, 1)
-    await submit('1. Ada Lovelace corrected the answer.')
+    await stage('1. Ada Lovelace corrected the answer.')
+    publish()
     status = await scan()
     assert.equal(status.adapters.answers.outdated.length, 1)
     assert.equal(status.summary.invalid, 0)
