@@ -127,6 +127,8 @@ class SkillContractTests(unittest.TestCase):
         )[0]
         for phrase in (
             "jeden Ergebnisdatensatz",
+            "Bei `status: blocked` berichte nur verifizierte Beobachtungen",
+            "erfolgreich verarbeitete Quellen mit verifiziertem Commit",
             "Detailblock einer",
             "Eine Themenliste allein ist keine Inhaltsauswertung",
             "Zeilen, Seiten oder Zeitmarken",
@@ -148,13 +150,11 @@ class SkillContractTests(unittest.TestCase):
         ):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, depth)
-        self.assertIn('gemäß „Inhaltliche\n  Berichtstiefe“', text)
+        self.assertIn("gemäß „Inhaltliche\n  Berichtstiefe“", text)
 
     def test_orchestrator_delegates_depth_and_distinguishes_report_links(self):
         text = ORCHESTRATOR_SKILL.read_text(encoding="utf-8")
-        handoff = text.split("4. Starte genau einen Subagenten", 1)[1].split(
-            "5. Glaube", 1
-        )[0]
+        handoff = text.split("4. Starte genau einen Subagenten", 1)[1].split("5. Glaube", 1)[0]
         self.assertIn("Inhaltliche Berichtstiefe", handoff)
         self.assertIn("auch wenn die Rückmeldung nur eine Zeile umfasst", handoff)
         self.assertIn("Verlinke den Laufbericht, nicht eine Wiki-Quellenseite", text)

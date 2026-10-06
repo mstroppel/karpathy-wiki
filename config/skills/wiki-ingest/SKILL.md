@@ -61,6 +61,10 @@ interpretativen Feststellungen fest, die Git nicht rekonstruieren kann.
 
 Diese Vorgaben gelten für jeden Ergebnisdatensatz und den Detailblock einer
 Einzelquelle. Die kompakte Batch-Rückmeldung begrenzt nicht die Berichtstiefe.
+Bei `status: blocked` berichte nur verifizierte Beobachtungen, den tatsächlich
+gelesenen Umfang und den konkreten Blocker; nicht gelesene Inhalte bleiben
+„Nicht ermittelt“. Vollständigkeits- und Diff-Prüfung unten gelten nur für
+erfolgreich verarbeitete Quellen mit verifiziertem Commit.
 
 - **`content`:** Gliedere die übernommenen Aussagen nach Themen, mit konkreten
   Beobachtungen, Entscheidungen, Empfehlungen und vereinbarten Folgeschritten,
