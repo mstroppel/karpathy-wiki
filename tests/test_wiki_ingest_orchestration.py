@@ -120,6 +120,61 @@ class SkillContractTests(unittest.TestCase):
         self.assertIn("nur eine Zeile", text)
         self.assertIn("gehören nicht in die Rückmeldung", text)
 
+    def test_worker_requires_substantive_budgeted_report_details(self):
+        text = WORKER_SKILL.read_text(encoding="utf-8")
+        depth = text.split("### Inhaltliche Berichtstiefe\n", 1)[1].split(
+            "\nEin Datensatz entsteht", 1
+        )[0]
+        for phrase in (
+            "jeden Ergebnisdatensatz",
+            "Bei `status: blocked` berichte nur verifizierte Beobachtungen",
+            "erfolgreich verarbeitete Quellen mit verifiziertem Commit",
+            "Detailblock einer",
+            "Eine Themenliste allein ist keine Inhaltsauswertung",
+            "Zeilen, Seiten oder Zeitmarken",
+            "betroffenen Wiki-Pfade",
+            "ergänzt, korrigiert, unverändert oder nicht mehr auswertbar",
+            "ältere Quellrevisionen",
+            "vollständiges Lesen von vollständiger Extraktion",
+            "Auslassungen",
+            "nicht als bestätigte Befunde",
+            "inhaltsarmen Testquelle",
+            "jeder in der Quelle erkannte wesentliche",
+            "Änderungsnachweis zum verifizierten Diff",
+            "einzeilige Texte",
+            "4 000 Unicode-Zeichen",
+            "8 KiB",
+            "aus Platzgründen verkürzten Themen",
+            "Fehlt eine solche",
+            "Anonymisierung",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, depth)
+        self.assertIn("gemäß „Inhaltliche\n  Berichtstiefe“", text)
+
+    def test_orchestrator_delegates_depth_and_distinguishes_report_links(self):
+        text = ORCHESTRATOR_SKILL.read_text(encoding="utf-8")
+        handoff = text.split("4. Starte genau einen Subagenten", 1)[1].split("5. Glaube", 1)[0]
+        self.assertIn("Inhaltliche Berichtstiefe", handoff)
+        self.assertIn("auch wenn die Rückmeldung nur eine Zeile umfasst", handoff)
+        self.assertIn("Verlinke den Laufbericht, nicht eine Wiki-Quellenseite", text)
+        self.assertIn("belegt keine Bearbeitung in diesem", text)
+
+    def test_report_depth_docs_state_limits_and_acceptance_gap(self):
+        text = REPORTS_DOC.read_text(encoding="utf-8")
+        for phrase in (
+            "authoritative writing and completeness",
+            "record schema and budgets are unchanged",
+            "cannot judge their semantic completeness",
+            "multi-topic",
+            "damaged transcript",
+            "record near the byte limit",
+            "acceptance remains pending user",
+            "not evidence that those sources were processed in this run",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, text)
+
 
 class CommandAndAgentTests(unittest.TestCase):
     config: dict[str, Any] = {}

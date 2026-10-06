@@ -41,6 +41,39 @@ source revision, verified commit, changed wiki pages, incorporated content,
 contradictions or open questions, extraction limits, and whether the source file
 stayed unmodified.
 
+### Content depth
+
+The worker's **Inhaltliche Berichtstiefe** section in
+`config/skills/wiki-ingest/SKILL.md` is the authoritative writing and completeness
+contract for both journal records and explicit single-source reports. A brief
+worker handoff or chat summary does not justify a brief private report.
+
+The existing `content` field carries thematic findings, evidence locations,
+affected wiki paths, and a comparison with the previous wiki. The
+`contradictions` field carries specific discrepancies and open questions;
+`extraction_limits` accounts for unreadable passages, deliberate omissions and
+report-budget compression. Machine-transcribed conversation statements remain
+attributed statements, not independently verified findings. Reading every line
+does not imply extracting every statement. A test source with little usable
+content should be described honestly rather than padded.
+
+The record schema and budgets are unchanged: text fields accept single-line
+text, at most 4,000 Unicode characters each, and the entire record must fit
+8 KiB. Workers use thematic labels and separators, reduce repetition first, and
+identify compressed topics with evidence locations and wiki paths to fuller
+extractions (or explicitly state that none exists). Deterministic assembly
+preserves those texts; it cannot judge their semantic completeness. Prompt
+contract tests protect the instructions, not actual model-driven report quality.
+
+For installation acceptance, use synthetic sources covering a multi-topic
+revision, unchanged substantive content, a damaged transcript, and a short test
+source. Check that every material topic is concretely represented or explicitly
+accounted for as an omission, changes match the source commit, and evidence
+locations and wiki references resolve. Verify that limitations qualify specific
+statements without replacing them. Include a record near the byte limit to
+check that any compression is disclosed. This acceptance remains pending user
+testing; historical delivery evidence does not validate content depth.
+
 **Report delivery contract for bulk runs:** `/ingest-new` links the complete
 private report and gives a short summary in the requesting main session. This
 user-approved change replaces complete inline bulk reporting to keep chat context
@@ -53,6 +86,10 @@ report path. Revoked and
 orphaned entries are reported separately and not cleaned up without an explicit
 request. Explicit single-source `/ingest` orders still answer with the inline
 detail block.
+
+The report link identifies this run's private journal report, not a wiki source
+page. Existing pages for revoked or orphaned sources are status diagnostics,
+not evidence that those sources were processed in this run.
 
 Use the actual `absolute_path` returned by `run_finish` or `report` as a Markdown
 link: `[Vollständiger Einlesebericht](<absolute_path>)`, substituting the returned

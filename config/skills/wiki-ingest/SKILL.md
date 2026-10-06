@@ -57,6 +57,52 @@ Schreibe nach dem verifizierten Commit genau einen Ergebnisdatensatz über
 Datensatz ist die dauerhafte Grundlage des Abschlussberichts: Halte hier die
 interpretativen Feststellungen fest, die Git nicht rekonstruieren kann.
 
+### Inhaltliche Berichtstiefe
+
+Diese Vorgaben gelten für jeden Ergebnisdatensatz und den Detailblock einer
+Einzelquelle. Die kompakte Batch-Rückmeldung begrenzt nicht die Berichtstiefe.
+Bei `status: blocked` berichte nur verifizierte Beobachtungen, den tatsächlich
+gelesenen Umfang und den konkreten Blocker; nicht gelesene Inhalte bleiben
+„Nicht ermittelt“. Vollständigkeits- und Diff-Prüfung unten gelten nur für
+erfolgreich verarbeitete Quellen mit verifiziertem Commit.
+
+- **`content`:** Gliedere die übernommenen Aussagen nach Themen, mit konkreten
+  Beobachtungen, Entscheidungen, Empfehlungen und vereinbarten Folgeschritten,
+  soweit vorhanden. Nenne Zahlen mit Einheiten, Zeitpunkte und Termine; fehlende
+  Einheiten bleiben ausdrücklich unbekannt. Ordne jedem Themenabschnitt
+  Fundstellen (Zeilen, Seiten oder Zeitmarken) und die betroffenen Wiki-Pfade zu.
+  Eine Themenliste allein ist keine Inhaltsauswertung.
+- **Änderungsnachweis in `content`:** Kennzeichne gegenüber dem bisherigen Wiki
+  ergänzt, korrigiert, unverändert oder nicht mehr auswertbar. Bei neuen Quellen
+  benenne die neu aufgenommenen Aussagen; bei unverändertem Inhalt beschreibe
+  trotzdem die konkreten Kernaussagen. Trenne ältere Quellrevisionen und
+  Nutzerklarstellungen von Aussagen der aktuell gelesenen Revision.
+- **`contradictions`:** Benenne jede festgestellte Abweichung oder offene Frage
+  mit betroffener Aussage und Fundstelle. Trenne widersprüchliche Angaben von
+  fehlenden Angaben und Transkriptionsfehlern; löse keine davon durch Vermutung.
+- **`extraction_limits`:** Nenne gelesenen Umfang und konkret nicht übernommene
+  oder nicht auswertbare Abschnitte mit Fundstellen und Grund. Unterscheide
+  vollständiges Lesen von vollständiger Extraktion. Halte auch bewusste
+  Auslassungen (etwa identifizierende Angaben oder maschinelle Dubletten) fest,
+  ohne geschützte Angaben zu wiederholen.
+- **Evidenzstatus:** Gib maschinelle Transkripte und Gesprächsaussagen als solche
+  wieder, nicht als bestätigte Befunde. Verbinde Unsicherheit mit der jeweiligen
+  Aussage; allgemeine Warnhinweise ersetzen keine konkrete Inhaltsauswertung.
+  Bei einer inhaltsarmen Testquelle beschreibe den belegten Zweck und das Fehlen
+  weiterer verwertbarer Inhalte, statt Details zu erfinden.
+
+Prüfe vor `operation: record`, dass jeder in der Quelle erkannte wesentliche
+Themenbereich entweder konkret ausgewertet oder mit Fundstelle und Grund als
+Auslassung erklärt ist und der Änderungsnachweis zum verifizierten Diff passt.
+Verwende die bestehenden Textfelder als einzeilige Texte mit Themenlabels und
+Semikola: höchstens 4 000 Unicode-Zeichen je Textfeld und 8 KiB für den gesamten
+Datensatz. Verdichte zuerst Wiederholungen und allgemeine Warnhinweise. Reicht
+das Budget nicht, priorisiere Kernaussagen, Änderungen und ungelöste Fragen;
+benenne in `extraction_limits` die aus Platzgründen verkürzten Themen samt
+Fundstellen und dem Wiki-Pfad ihrer ausführlichen Auswertung. Fehlt eine solche
+Auswertung, melde diese Grenze ausdrücklich statt einen vollständigen Bericht
+zu behaupten. Berichtstiefe hebt weder Anonymisierung noch Quellenregeln auf.
+
 Ein Datensatz entsteht erst nach dem Commit und nie davor. Was nicht verifiziert
 ist, wird nicht beschönigt: Schreibe `status: blocked` mit konkretem `blocker`
 und nenne den Grund, statt einen halben Erfolg zu melden. Ein Datensatz
@@ -74,7 +120,8 @@ Detailblock aus:
 - **Quelle:** Exakter `source_path`.
 - **Commit:** Mit Git verifizierter kurzer Hash oder „Kein Commit“ mit Grund.
 - **Geänderte Seiten:** Wiki-Pfade aus dem tatsächlichen Quellen-Commit.
-- **Inhalt:** Übernommene Aussagen knapp zusammenfassen, Werte mit Einheiten.
+- **Inhalt:** Konkrete Aussagen und Änderungsnachweis gemäß „Inhaltliche
+  Berichtstiefe“, mit Fundstellen und betroffenen Wiki-Pfaden.
 - **Widersprüche/offene Fragen:** Konkrete Unsicherheiten oder „Keine festgestellt“.
 - **Extraktionsgrenzen:** Fehlende/unlesbare/teilweise erfasste Inhalte; „Keine
   festgestellt“ nur nach vollständigem Lesen. Quelldatei unverändert bestätigen.

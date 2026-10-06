@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Ingestion report instructions now require concrete thematic findings with
+  evidence locations, changes against the previous wiki, and justified omissions
+  in the private per-source records. Compact chat summaries remain unchanged;
+  run-report links are explicitly distinguished from existing wiki source pages.
+  Journal schemas, size budgets, and access permissions are unchanged.
+
 ### Added
 
 - OpenChamber is now the default chat interface, with a release-built locked

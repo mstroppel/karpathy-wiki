@@ -91,8 +91,9 @@ commit per source, in batches planned against a documented working-context
 budget. Every processed source leaves a durable result record in a private
 journal below `${DATA_ROOT}/incoming/ingest-journal`, and the complete per-source
 report is written there as a file: source path, commit hash, changed wiki
-pages, content summary, contradictions or open questions, and extraction
-limits. After ingestion, the main session links the complete private report and
+pages, concrete thematic findings with evidence locations and changes from the
+previous wiki, contradictions or open questions, and justified omissions and
+extraction limits. After ingestion, the main session links the complete private report and
 gives a short summary: overall status, unfinished sources with their blockers,
 record count, run ID, and durable report path. Details stay in the file rather
 than growing chat context; they are read only on request. Local link support
