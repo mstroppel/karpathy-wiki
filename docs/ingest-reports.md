@@ -246,7 +246,11 @@ rollover; `tests/test_ingest_context_budget.mjs` produces the deterministic
 before/after table above; `tests/test_wiki_ingest_orchestration.py` pins the
 orchestration and reporting contract in the skills, command, and permissions.
 
-An opt-in acceptance run with a real model is not part of CI. To produce
+An opt-in acceptance run with a real model is not part of CI, but passing
+real-model evidence is a merge requirement for the reporting changes in #152;
+the absence of that evidence is an unmet acceptance criterion, not a known
+limitation that model-free tests can waive. The documented
+`tests/integration/run.sh` validation must also pass before merge. To produce
 measured evidence on a disposable installation: enable a source provider,
 publish synthetic non-sensitive fixtures at increasing counts, run `/ingest-new`
 with the target model, and record the peak per-request context from the
