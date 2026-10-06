@@ -475,6 +475,10 @@ test('reconstructs a multi-chunk report with effective records and Unicode detai
     assert.equal(Buffer.byteLength(text, 'utf8'), finished.report.bytes)
     assert.equal((text.match(/^## \d+\./gm) ?? []).length, finished.counts.records)
     assert.equal(finished.counts.records, 19)
+    assert.equal(finished.state, 'completed')
+    assert.equal((await loadRun({ root: journalRoot, runId: run.run_id })).state, 'completed')
+    assert.match(text, /\*\*Lauf:\*\* .*abgeschlossen\)/)
+    assert.doesNotMatch(text, /\*\*Lauf:\*\* .*laufend\)/)
     assert.doesNotMatch(text, /Ersetzte Aussage|aaa1111/)
     for (const item of effective) {
       for (const field of ['source_path', 'content', 'contradictions', 'extraction_limits']) {
@@ -535,6 +539,7 @@ test('renders the report with every detail block and the final status', async ()
     assert.match(text, /Unvollständige Quellen:.*offen\.md/)
     assert.match(text, /- \/knowledge\/sources\/webdav\/offen\.md: Lauf pausiert/)
     assert.equal(result.state, 'running', 'report delivery must not close a paused run')
+    assert.match(text, /\*\*Lauf:\*\* .*laufend\)/)
     assert.equal((await loadRun({ root: journalRoot, runId: run.run_id })).state, 'running')
     const first = await readChunk({ root: journalRoot, runId: run.run_id, report: true })
     assert.ok(first.report.text.includes('# Einlesebericht'))
@@ -602,6 +607,8 @@ test('reads a completed zero-source report through the same delivery API', async
     const { report } = await readChunk({ root: journalRoot, runId: run.run_id, report: true })
     assert.equal(report.next_offset, null)
     assert.equal(result.counts.records, 0)
+    assert.equal(result.state, 'completed')
+    assert.match(report.text, /\*\*Lauf:\*\* .*abgeschlossen\)/)
     assert.match(report.text, /Keine Quelle bearbeitet\./)
     assert.equal(report.text, await readFile(result.absolute_path, 'utf8'))
   } finally {

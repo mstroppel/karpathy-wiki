@@ -627,8 +627,9 @@ export async function assembleReport({
     unfinished === undefined ? run.unfinished : unfinished,
     blockedRecords,
   )
+  const state = completed ? 'completed' : run.state
   const text = renderReport({
-    run,
+    run: { ...run, state },
     records: run.effective,
     counts: run.counts,
     finalStatus: normalizedStatus,
@@ -640,7 +641,7 @@ export async function assembleReport({
   await writeFile(path.join(directory, REPORT_FILENAME), text, 'utf8')
   const update = runFileView({
     ...run,
-    state: completed ? 'completed' : run.state,
+    state,
     updated_at: nowIso(stamp),
     final_status: normalizedStatus,
     unfinished: normalizedUnfinished,
