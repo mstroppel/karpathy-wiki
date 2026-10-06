@@ -55,6 +55,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Temporarily ignore blocked Dependabot updates for the chat runtime's
+  `simple-git` and `@simple-git/argv-parser` dependencies pending upstream
+  compatibility with the patched major. Security alerts stay open; #168 tracks
+  the accepted risk and removal criteria. Runtime dependencies are unchanged.
+
 - `/ingest-new` now bounds model context during bulk ingestion (#152): a narrow
   orchestrator plans batches against a documented working-context budget and
   runs one `wiki-ingest` worker session per batch, strictly sequential with one

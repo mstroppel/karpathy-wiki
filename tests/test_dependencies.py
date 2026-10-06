@@ -319,6 +319,18 @@ class PackageLockTests(unittest.TestCase):
 
 
 class DependabotCoverageTests(unittest.TestCase):
+    def test_chat_security_exception_is_scoped_to_blocked_dependencies(self):
+        blocks = read(DEPENDABOT).split("- package-ecosystem:")[1:]
+        chat = next(block for block in blocks if "directory: /openchamber\n" in block)
+        ignored = re.findall(r"dependency-name: [\"']?([^\s\"']+)", chat)
+        self.assertEqual(ignored, ["simple-git", "@simple-git/argv-parser"])
+        self.assertIn("#168", chat)
+        self.assertIn("chat-runtime:", chat)
+        for block in blocks:
+            if block != chat:
+                self.assertNotIn("dependency-name: simple-git", block)
+                self.assertNotIn("@simple-git/argv-parser", block)
+
     def test_all_package_sources_are_covered(self):
         config = read(DEPENDABOT)
         for ecosystem, directory in (
