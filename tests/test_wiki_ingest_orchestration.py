@@ -95,6 +95,8 @@ class SkillContractTests(unittest.TestCase):
             "niemals den zuletzt gelesenen Offset",
             "Journal-Tool-Aufruf im selben aktiven Auftrag",
             "Benutzerantwort fort",
+            "konservativer Wiederholoffset",
+            "exakter erster fehlender Offset nicht",
             "report.next_offset",
             "report.offset",
             "report.total_characters",

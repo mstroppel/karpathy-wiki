@@ -71,6 +71,9 @@ claiming complete report delivery. If reading or delivery hits an error or a
 context/output limit, explicitly report incomplete delivery, its reason, the
 durable path, and the next undelivered character offset. Ingestion success does
 not imply report-delivery success; retrying delivery must not repeat ingestion.
+If an output interruption leaves partial delivery unobservable, label the start
+of that chunk as a conservative replay offset, not a verified first-undelivered
+offset, and warn that replay may repeat an already displayed prefix.
 
 This report phase also runs for blocked, paused, and zero-source runs. At rollover,
 `operation: report` assembles the current status and unfinished sources without
@@ -270,3 +273,6 @@ including multi-part, blocked, paused, and zero-source runs. Verify that a force
 delivery failure is reported separately from ingestion success with a continuation
 offset. Prompt-contract tests and model-free chunk tests do not prove actual
 model-driven chat delivery.
+
+See [main-session report acceptance evidence](ingest-report-acceptance.md) for the
+opt-in synthetic run, measured model usage, passing scenarios, and failed probes.
