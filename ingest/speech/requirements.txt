@@ -1,17 +1,17 @@
 # Speech runtime: faster-whisper with its CTranslate2/PyAV stack.
 # Hash-pinned; installed with --require-hashes in ingest/Dockerfile.
-# CPython 3.12 on Linux amd64 and arm64; native hashes are amd64 then arm64.
+# CPython 3.14 on Linux amd64 and arm64; native hashes are amd64 then arm64.
 # Regenerate for each arch in x86_64 aarch64 with:
-#   pip download faster-whisper==<pin> --only-binary=:all: --python-version 3.12 \
-#     --implementation cp --abi cp312 --platform manylinux_2_28_${arch} \
+#   pip download faster-whisper==<pin> --only-binary=:all: --python-version 3.14 \
+#     --implementation cp --abi cp314 --platform manylinux_2_28_${arch} \
 #     --platform manylinux_2_27_${arch} --platform manylinux2014_${arch} \
 #     --platform manylinux_2_17_${arch} --dest wheels/${arch}
 # Compute each wheel's SHA-256 and verify against pypi.org/pypi/<name>/<pin>/json.
 faster_whisper==1.2.1 --hash=sha256:79a66ad50688c0b794dd501dc340a736992a6342f7f95e5811be60b5224a26a7
-ctranslate2==4.8.2 --hash=sha256:554a0b2abf098a11c66ef7930c0a05b3de683a455e8ea3f2e6ab6966aaabc136 --hash=sha256:781f835da7fdc4adcc38f9d674dbe9b37eaf3c9aee3b2bc17d684342ff59d549
+ctranslate2==4.8.2 --hash=sha256:573dcf5d96034dd9bcf7ee0db1657af490a52292ffc77dfb4b104da1e93322ad --hash=sha256:1e866ccf5f5668f7302c39b535d19d7e5811f3f00d6246faf6ed6fa070fa1af3
 av==19.0.0 --hash=sha256:9cd9f692c28990ee234ddde69f72725bbff93831ffa6d2492518d4b193dda0c8 --hash=sha256:07f81500bda7636798dfaae26e5fe8a426b1b6ef1affbbef9f688e16149a7409
 tokenizers==0.23.2 --hash=sha256:41c2f84d172449b4dadb9cdc508e3e364076613c35b16e76ecfe47a60d1e3305 --hash=sha256:a37039b5dfc4af84eb3ef0a92f4307e28936c8f9adccba2629d36f652e9bf7a2
-onnxruntime==1.30.0 --hash=sha256:fa688e7891a6aa206636fe7372e27ee75fd17713289f6b4fc7b190e0a7de9328 --hash=sha256:6c32a000d5139a38ba9349030b0032e3331acb559d596b22738d9d2b343a2b83
+onnxruntime==1.30.0 --hash=sha256:8b611d24db2954545ce6bd9acd4670183cb368e4642450de7a9ab6474eb374ec --hash=sha256:d2184fddb6798136e7c478244391ca82443f5c757f59f15bb9e5ad2da5e03175
 huggingface_hub==1.33.0 --hash=sha256:04e434b06e100eddbce9a6e817d72693a7884b10a79bd67ab48080d5c07eb899
 anyio==4.15.1 --hash=sha256:6152fdbbf9a77fdec97731721bebf7c4c44f7c29b424b0065826173efc7ed101
 certifi==2026.7.22 --hash=sha256:62f22742b58a1a33014a2b6b706588a8d7e2a88ae7bd1a6ebe8c992928483775
@@ -24,9 +24,9 @@ hf_xet==1.6.0 --hash=sha256:d62671bb130879cef0ee4c9ebe47a14af6c66ec53e6d84dc1593
 httpcore==1.0.9 --hash=sha256:2d400746a40668fc9dec9810239072b40b4484b640a8c38fd654a024c7a1bf55
 httpx==0.28.1 --hash=sha256:d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad
 idna==3.20 --hash=sha256:ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c
-numpy==2.5.3 --hash=sha256:b7e18c623bb5c95acb3b3328861272816ba199fb531921c5d6d0b675f1fde9e3 --hash=sha256:76c2c1e6bfa5c84adc6434dfbf013aa92096a7985221762c8f11fedfd20fff58
+numpy==2.5.3 --hash=sha256:b0521d0f4aebb6e06189451025fa17a913287b13c03d5fe05c017333b654ea5b --hash=sha256:be5a8381859b6da607c84f4f7d6847725f1cf1853ef8a2c9e115b7d58bef47dc
 packaging==26.3 --hash=sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c
 protobuf==7.36.2 --hash=sha256:89f23aa53c24553a2416fd4fd1ec06f74fa42b14b546d8883128813f775bbfd2 --hash=sha256:e11e1f0180583a2af89db6a2ecd9e8dc40aa6d2988ca175bfd0e6d12ea72d74e
-pyyaml==6.0.3 --hash=sha256:ba1cc08a7ccde2d2ec775841541641e4548226580ab850948cbfda66a1befcdc --hash=sha256:9149cad251584d5fb4981be1ecde53a1ca46c891a79788c0df828d2f166bda28
+pyyaml==6.0.3 --hash=sha256:c458b6d084f9b935061bc36216e8a69a7e293a2f1e68bf956dcd9e6cbcd143f5 --hash=sha256:501a031947e3a9025ed4405a168e6ef5ae3126c59f90ce0cd6f2bfc477be31b7
 tqdm==4.70.1 --hash=sha256:c293e525e6fef9c20e8728fd4612df02a0aa31bb5fe91ecd93e123b1b7bffa73
 typing_extensions==4.16.0 --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8

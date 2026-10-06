@@ -139,8 +139,9 @@ class IngestPackageTests(unittest.TestCase):
                 pins[name] = set(re.findall(r"--hash=sha256:([0-9a-f]{64})", line))
         self.assertIn("faster_whisper", pins)
         # These native dependencies need distinct amd64 and arm64 wheels on
-        # CPython 3.12. Catch missing pins and single-architecture lock updates;
-        # actual wheel compatibility/digests are verified with pip download.
+        # CPython 3.14 (the speech stage base). Catch missing pins and
+        # single-architecture lock updates; actual wheel compatibility/digests
+        # are verified with pip download.
         for name in (
             "ctranslate2",
             "av",
