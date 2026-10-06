@@ -607,8 +607,8 @@ function normalizeUnfinished(unfinished, blockedRecords) {
   return entries
 }
 
-// Assemble the complete report from the durable records. This is the only
-// place the per-source detail blocks live: sessions never have to carry them.
+// Assemble the authoritative private report from durable records. The orchestrator
+// links it after ingestion (or at rollover); bounded reads are available on request.
 export async function assembleReport({
   root,
   runId,
@@ -627,8 +627,9 @@ export async function assembleReport({
     unfinished === undefined ? run.unfinished : unfinished,
     blockedRecords,
   )
+  const state = completed ? 'completed' : run.state
   const text = renderReport({
-    run,
+    run: { ...run, state },
     records: run.effective,
     counts: run.counts,
     finalStatus: normalizedStatus,
@@ -640,7 +641,7 @@ export async function assembleReport({
   await writeFile(path.join(directory, REPORT_FILENAME), text, 'utf8')
   const update = runFileView({
     ...run,
-    state: completed ? 'completed' : run.state,
+    state,
     updated_at: nowIso(stamp),
     final_status: normalizedStatus,
     unfinished: normalizedUnfinished,
