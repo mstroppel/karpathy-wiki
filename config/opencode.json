@@ -31,6 +31,11 @@
       "system": "Orchestriere ausschließlich Einleseaufträge für das Wiki. Delegiere nicht erneut und lies Quellen nicht selbst ein. Lade einmal den Skill wiki-ingest-orchestrator, befolge ihn vollständig und führe den Auftrag selbst aus. Änderungen am Wiki führt ausschließlich der Subagent wiki-ingest aus.",
       "permissions": [
         {
+          "action": "read",
+          "resource": "/knowledge/incoming/ingest-journal/**",
+          "effect": "deny"
+        },
+        {
           "action": "edit",
           "resource": "*",
           "effect": "deny"

@@ -89,6 +89,12 @@ class SkillContractTests(unittest.TestCase):
             "report: true",
             "chunk_offset: 0",
             "chunk_bytes: 4096",
+            "Ausgabeoffset steigt ausschließlich nach der",
+            "jetzt den gesamten ersten Chunk",
+            "unveränderten Text in einem eigenen",
+            "niemals den zuletzt gelesenen Offset",
+            "Journal-Tool-Aufruf im selben aktiven Auftrag",
+            "Benutzerantwort fort",
             "report.next_offset",
             "report.offset",
             "report.total_characters",
@@ -148,6 +154,15 @@ class CommandAndAgentTests(unittest.TestCase):
         for rule in agent["permissions"]:
             effects.setdefault(rule["action"], []).append(rule["effect"])
         self.assertEqual(effects["edit"], ["deny"])
+        self.assertEqual(effects["read"], ["deny"])
+        self.assertIn(
+            {
+                "action": "read",
+                "resource": "/knowledge/incoming/ingest-journal/**",
+                "effect": "deny",
+            },
+            agent["permissions"],
+        )
         self.assertEqual(effects["shell"], ["deny"])
         self.assertEqual(effects["webfetch"], ["deny"])
         self.assertEqual(effects["websearch"], ["deny"])
