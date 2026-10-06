@@ -607,8 +607,8 @@ function normalizeUnfinished(unfinished, blockedRecords) {
   return entries
 }
 
-// Assemble the authoritative report from durable records. The orchestrator reads
-// it in bounded chunks for chat delivery only after ingestion (or at rollover).
+// Assemble the authoritative private report from durable records. The orchestrator
+// links it after ingestion (or at rollover); bounded reads are available on request.
 export async function assembleReport({
   root,
   runId,

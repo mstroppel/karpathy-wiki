@@ -92,11 +92,12 @@ budget. Every processed source leaves a durable result record in a private
 journal below `${DATA_ROOT}/incoming/ingest-journal`, and the complete per-source
 report is written there as a file: source path, commit hash, changed wiki
 pages, content summary, contradictions or open questions, and extraction
-limits. After ingestion, the main session displays the complete report, including
-every per-source detail block, the overall status, unfinished sources with their
-blockers, and the durable report path. Large reports are delivered in numbered
-parts in the same session rather than silently shortened. Blocked and paused
-runs also display their complete report so far; incomplete report delivery is
+limits. After ingestion, the main session links the complete private report and
+gives a short summary: overall status, unfinished sources with their blockers,
+record count, run ID, and durable report path. Details stay in the file rather
+than growing chat context; they are read only on request. Local link support
+depends on the client; the operator can also open the stated path. Blocked,
+paused, and zero-source runs use the same contract; report-creation failures are
 explicitly flagged separately from ingestion status. See
 [ingestion reports](docs/ingest-reports.md) for the budget model, resume
 behavior, and validation.

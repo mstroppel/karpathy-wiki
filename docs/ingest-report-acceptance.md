@@ -1,5 +1,10 @@
 # Main-session report acceptance evidence
 
+> Historical evidence for the previous inline-report contract. PR #163 now uses
+> linked private reports with compact summaries, as explicitly requested by the
+> user. The results below do not validate that new behavior; installation-based
+> acceptance is pending user testing.
+
 Opt-in execution on 2026-10-06 for PR #163, using **OpenCode 2.0.23**, Linux
 amd64, and **`openai/gpt-6-luna#high`**. The command used the repository's exact
 `ingest-new` prompt template with `wiki-ingest-orchestrator` as the primary agent

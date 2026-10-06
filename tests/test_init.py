@@ -234,12 +234,12 @@ class ConfigTests(unittest.TestCase):
             ROOT / "config" / "skills" / "wiki-ingest-orchestrator" / "SKILL.md"
         ).read_text()
         renderer = (ROOT / "config" / "tools" / "wiki_ingest_journal_core.mjs").read_text()
-        # Bulk runs display the authoritative report in full in the main session;
-        # a summary or file path alone is not complete report delivery.
+        # Bulk runs link the authoritative private file; single-source details
+        # and the durable renderer's evidence contract remain unchanged.
         self.assertIn("dauerhaften Berichtspfad", template)
-        self.assertIn("allen Detailblöcken in dieser Hauptsession", template)
-        self.assertIn("Ersetze Details nicht durch eine Sammelzusammenfassung", template)
-        self.assertIn("Gib den Bericht vollständig und ohne inhaltliche Kürzung", orchestrator)
+        self.assertIn("Verlinke den vollständigen privaten Bericht", template)
+        self.assertIn("kurzen Zusammenfassung", template)
+        self.assertIn("[Vollständiger Einlesebericht](<absolute_path>)", orchestrator)
         self.assertIn("Wurde keine Quelle bearbeitet", orchestrator)
         self.assertIn("Erfinde keine Details", orchestrator)
         for field in (

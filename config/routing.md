@@ -62,10 +62,11 @@ kontextbegrenzten Batches über `wiki-ingest` und hält die Ergebnisdatensätze 
 Einlese-Journal fest. Ketten von `wiki-ingest`-Teilergebnissen sind dafür nicht
 vorgesehen. Beende erst nach `new=0` und `outdated=0` oder nenne einen
 konkreten Blocker und alle offenen Quellen. Führe danach die Berichtsphase des
-Orchestrator-Skills aus: Gib den vollständigen privaten Bericht einschließlich
-aller Detailblöcke in der Hauptsession aus, bei Bedarf in nummerierten Teilen,
-und nenne zusätzlich seinen dauerhaften Pfad. Das gilt auch für blockierte und
-pausierte Läufe; kennzeichne eine unvollständige Berichtsausgabe ausdrücklich.
+Orchestrator-Skills aus: Verlinke den vollständigen privaten Bericht und gib eine
+kurze Zusammenfassung in der Hauptsession aus, mit Status, offenen Quellen und
+Blockern, Anzahl der Ergebnisdatensätze, Lauf-ID und dauerhaftem Berichtspfad.
+Das gilt auch für blockierte und pausierte Läufe; kennzeichne eine unvollständige
+Berichtserstellung ausdrücklich. Details werden nur auf Nachfrage gelesen.
 
 Ist die Absicht mehrdeutig, verwende den Abfragemodus. Behandle nicht
 eingelesene Dateien unter `/knowledge/sources` nicht als Wiki-Wissen. Verwende
