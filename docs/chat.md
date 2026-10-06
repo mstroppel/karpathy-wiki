@@ -5,6 +5,14 @@ backend; SilverBullet remains the read-only wiki browser. Both chat containers
 use the same verified OpenCode CLI version. OpenChamber's npm dependency tree is
 integrity-locked, installed without lifecycle downloads, and tracked by Dependabot.
 
+Two transitive dependencies (`simple-git` and `@simple-git/argv-parser`) have
+temporarily ignored Dependabot updates pending an upstream-compatible security
+fix. [Issue #168](https://github.com/mstroppel/karpathy-wiki/issues/168) records
+the accepted risk and removal criteria. Their security alerts remain open;
+this exception does not fix the vulnerabilities. Keep UI users trusted and
+Git authoring workflows unsupported: read-only mounts are not a Git API sandbox.
+Review the exception on the next chat-runtime update, or by 2026-11-06.
+
 ## Setup
 
 - Set separate strong `OPENCHAMBER_UI_PASSWORD` and `OPENCODE_PASSWORD` values.
