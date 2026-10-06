@@ -404,6 +404,96 @@ test('reads journal lines and the report back in bounded chunks', async () => {
   }
 })
 
+test('reconstructs a multi-chunk report with effective records and Unicode details', async () => {
+  const { root, journalRoot, run } = await runFixture()
+  try {
+    await writeRecord({
+      root: journalRoot,
+      runId: run.run_id,
+      record: record({ content: 'Ersetzte Aussage', commit: 'aaa1111' }),
+      now: NOW,
+    })
+    const effective = []
+    for (let index = 0; index < 18; index += 1) {
+      const item = record({
+        source_key: index === 0 ? 'notes.md' : `quelle-${index}.md`,
+        source_path: `/knowledge/sources/webdav/${index === 0 ? 'notes' : `quelle-${index}`}.md`,
+        content: `Aussage ${index}: Größe 3,5 m 🧪. ${'Prüftext äöü. '.repeat(45)}`,
+        contradictions: `Offene Frage ${index}`,
+        extraction_limits: `Grenze ${index}`,
+      })
+      effective.push(item)
+      await writeRecord({ root: journalRoot, runId: run.run_id, record: item, now: NOW })
+    }
+    const blocked = blockedRecord({
+      source_key: 'blockiert.md',
+      source_path: '/knowledge/sources/webdav/blockiert.md',
+    })
+    await writeRecord({ root: journalRoot, runId: run.run_id, record: blocked, now: NOW })
+    const finished = await finishRun({
+      root: journalRoot,
+      runId: run.run_id,
+      finalStatus: {
+        new: 1,
+        outdated: 0,
+        current: 18,
+        conflict: 0,
+        revoked: 3,
+        orphaned: 7,
+        invalid: 0,
+      },
+      unfinished: [],
+      now: NOW,
+    })
+    let offset = 0
+    let text = ''
+    let parts = 0
+    let totalCharacters
+    for (;;) {
+      const payload = await readChunk({
+        root: journalRoot,
+        runId: run.run_id,
+        report: true,
+        offset,
+        chunkBytes: CHUNK_BYTES_DEFAULT,
+      })
+      const chunk = payload.report
+      assert.equal(chunk.offset, offset)
+      totalCharacters ??= chunk.total_characters
+      assert.equal(chunk.total_characters, totalCharacters)
+      assert.ok(Buffer.byteLength(chunk.text, 'utf8') <= CHUNK_BYTES_DEFAULT)
+      assert.ok(Buffer.byteLength(JSON.stringify(payload), 'utf8') <= JOURNAL_OUTPUT_BUDGET_BYTES)
+      text += chunk.text
+      parts += 1
+      offset += Array.from(chunk.text).length
+      if (chunk.next_offset === null) break
+      assert.equal(chunk.next_offset, offset)
+    }
+    assert.ok(parts > 1)
+    assert.equal(offset, totalCharacters)
+    assert.equal(text, await readFile(finished.absolute_path, 'utf8'))
+    assert.equal(Buffer.byteLength(text, 'utf8'), finished.report.bytes)
+    assert.equal((text.match(/^## \d+\./gm) ?? []).length, finished.counts.records)
+    assert.equal(finished.counts.records, 19)
+    assert.equal(finished.state, 'completed')
+    assert.equal((await loadRun({ root: journalRoot, runId: run.run_id })).state, 'completed')
+    assert.match(text, /\*\*Lauf:\*\* .*abgeschlossen\)/)
+    assert.doesNotMatch(text, /\*\*Lauf:\*\* .*laufend\)/)
+    assert.doesNotMatch(text, /Ersetzte Aussage|aaa1111/)
+    for (const item of effective) {
+      for (const field of ['source_path', 'content', 'contradictions', 'extraction_limits']) {
+        assert.ok(text.includes(item[field]), `${item.source_key}: ${field}`)
+      }
+    }
+    assert.ok(text.includes(blocked.source_path))
+    assert.match(text, /blockiert: Quelle nicht lesbar/)
+    assert.match(text, /\*\*Inhalt:\*\* Nicht ermittelt/)
+    assert.match(text, /revoked=3, orphaned=7/)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('renders the report with every detail block and the final status', async () => {
   const { root, journalRoot, run } = await runFixture()
   try {
@@ -448,6 +538,11 @@ test('renders the report with every detail block and the final status', async ()
     assert.match(text, /blockiert: Quelle nicht lesbar/)
     assert.match(text, /Unvollständige Quellen:.*offen\.md/)
     assert.match(text, /- \/knowledge\/sources\/webdav\/offen\.md: Lauf pausiert/)
+    assert.equal(result.state, 'running', 'report delivery must not close a paused run')
+    assert.match(text, /\*\*Lauf:\*\* .*laufend\)/)
+    assert.equal((await loadRun({ root: journalRoot, runId: run.run_id })).state, 'running')
+    const first = await readChunk({ root: journalRoot, runId: run.run_id, report: true })
+    assert.ok(first.report.text.includes('# Einlesebericht'))
 
     await assert.rejects(
       finishRun({ root: journalRoot, runId: run.run_id, now: NOW }),
@@ -489,6 +584,36 @@ test('renders an empty report explicitly', async () => {
   })
   assert.match(text, /Keine Quelle bearbeitet\./)
   assert.match(text, /Gesamtstatus:\*\* nicht abgeschlossen/)
+})
+
+test('reads a completed zero-source report through the same delivery API', async () => {
+  const { root, journalRoot, run } = await runFixture()
+  try {
+    const result = await finishRun({
+      root: journalRoot,
+      runId: run.run_id,
+      finalStatus: {
+        new: 0,
+        outdated: 0,
+        current: 0,
+        conflict: 0,
+        revoked: 0,
+        orphaned: 0,
+        invalid: 0,
+      },
+      unfinished: [],
+      now: NOW,
+    })
+    const { report } = await readChunk({ root: journalRoot, runId: run.run_id, report: true })
+    assert.equal(report.next_offset, null)
+    assert.equal(result.counts.records, 0)
+    assert.equal(result.state, 'completed')
+    assert.match(report.text, /\*\*Lauf:\*\* .*abgeschlossen\)/)
+    assert.match(report.text, /Keine Quelle bearbeitet\./)
+    assert.equal(report.text, await readFile(result.absolute_path, 'utf8'))
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })
 
 test('estimates working context from measured bytes', async () => {
