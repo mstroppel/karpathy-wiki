@@ -36,6 +36,16 @@
           "effect": "deny"
         },
         {
+          "action": "grep",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "glob",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
           "action": "edit",
           "resource": "*",
           "effect": "deny"

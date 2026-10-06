@@ -255,9 +255,13 @@ before/after table above; `tests/test_wiki_ingest_orchestration.py` pins the
 orchestration and reporting contract in the skills, command, and permissions.
 
 An opt-in acceptance run with a real model is not part of CI, but passing
-real-model evidence is a merge requirement for the reporting changes in #152;
-the absence of that evidence is an unmet acceptance criterion, not a known
-limitation that model-free tests can waive. The documented
+real-model evidence is a merge requirement for delivery-contract changes such as
+the reporting changes in #152; the absence of that evidence is an unmet
+acceptance criterion, not a known limitation that model-free tests can waive.
+That evidence exists for the earlier inline contract
+([ingest-report-acceptance.md](ingest-report-acceptance.md)); the linked-report
+contract replaces it on explicit maintainer request, and its acceptance status
+is stated below as an open follow-up. The documented
 `tests/integration/run.sh` validation must also pass before merge. To produce
 measured evidence on a disposable installation: enable a source provider,
 publish synthetic non-sensitive fixtures at increasing counts, run `/ingest-new`
@@ -266,7 +270,8 @@ OpenCode session data (`opencode api` session messages, plus the provider's
 token usage) for the old and the new flow. Report measured tokens separately
 from the estimates above, name the model and runtime, and keep source content
 out of any published evidence. Installation-based acceptance of linked reporting
-is pending user testing. Verify on synthetic fixtures that the main session shows
+is pending user testing and stays an open follow-up rather than a waived
+requirement. Verify on synthetic fixtures that the main session shows
 the correct private link, path, status, blockers, record count, and run ID without
 reading or copying the report, including large, blocked, paused, and zero-source
 runs. Open the file and verify every effective source block and detail field.
