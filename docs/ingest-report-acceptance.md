@@ -69,9 +69,9 @@ models and inputs.
 
 Initial probes exposed premature termination after a part heading, read-ahead
 without delivery, and a continuation offset based on fetched rather than emitted
-text. The skill now explicitly alternates complete text delivery with the next
-tool call, treats intermediate parts as continuing work, tracks emitted offsets
-separately, and denies direct journal-file reads for the orchestrator.
+text. The then-current skill explicitly alternated complete text delivery with the next
+tool call, treated intermediate parts as continuing work, tracked emitted offsets
+separately, and denied direct journal-file reads for the orchestrator.
 
 A stress fixture with long runs of identical repeated sentences also suffered
 verbatim-copy omissions despite a completeness claim. The passing multipart case
@@ -80,7 +80,7 @@ that repetitive stress pattern. Model-generated report delivery remains subject
 to fidelity errors; the durable report file is authoritative. A timed-out probe
 was stopped and is not counted as passing evidence. Partial transport/output
 truncation was not injected: when its exact delivered prefix cannot be verified,
-the skill requires a labelled conservative replay offset and a repetition warning.
+the then-current skill required a labelled conservative replay offset and a repetition warning.
 
 Ordinary validation also passed: `scripts/lint.sh`, the documented Node suites
 (53 tests including chat bootstrap), `scripts/test-python.sh` (85% aggregate
