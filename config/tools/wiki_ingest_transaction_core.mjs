@@ -219,7 +219,7 @@ function receiptPath(preparationId) {
   return `preparations/${preparationId}.json`
 }
 
-async function loadPreparation({ root, preparationId }) {
+export async function loadPreparation({ root, preparationId }) {
   return JSON.parse((await bytesAt(root, receiptPath(preparationId))).toString('utf8'))
 }
 
@@ -253,7 +253,7 @@ async function writeTemporaryFile(root, relative, bytes, mode) {
   }
 }
 
-async function savePreparation(root, receipt, create = false) {
+export async function savePreparation(root, receipt, create = false) {
   await mkdir(root, { recursive: true })
   await confined(root, receiptPath(receipt.preparation_id), true)
   await mkdir(path.join(root, 'preparations'), { recursive: true })
@@ -270,12 +270,21 @@ async function savePreparation(root, receipt, create = false) {
     await confined(root, receiptPath(receipt.preparation_id), true)
     if (create) await link(temporaryPath, destination)
     else await rename(temporaryPath, destination)
+    const directory = await open(
+      path.dirname(destination),
+      constants.O_RDONLY | constants.O_DIRECTORY,
+    )
+    try {
+      await directory.sync()
+    } finally {
+      await directory.close()
+    }
   } finally {
     await rm(temporaryPath, { force: true })
   }
 }
 
-async function checkFresh(input, receipt) {
+export async function checkFresh(input, receipt) {
   if (receipt.rollback_started)
     throw new Error('Vorbereitung wird/wurde zurückgesetzt; neu vorbereiten')
   const source = await freshSource({
@@ -291,7 +300,8 @@ async function checkFresh(input, receipt) {
 }
 
 function splitDraft(text) {
-  if (typeof text !== 'string' || !text.trim()) throw new Error('draft fehlt oder ist leer')
+  if (typeof text !== 'string' || !text.trim())
+    throw new IngestInputError('invalid_draft', 'draft fehlt oder ist leer')
   const normalized = text.replaceAll('\r\n', '\n')
   if (!normalized.startsWith('---\n')) return { fields: {}, body: normalized }
   const fields = parseFrontmatterFields(normalized)
@@ -304,7 +314,10 @@ function validateFields(text, expected, optional = false) {
   for (const [name, value] of Object.entries(expected)) {
     if (optional && !Object.hasOwn(fields, name)) continue
     if (!Object.hasOwn(fields, name) || String(fields[name]) !== String(value)) {
-      throw new Error(`Frontmatter-Feld ${name} weicht vom frischen Status ab`)
+      throw new IngestInputError(
+        'invalid_source_fields',
+        `Frontmatter-Feld ${name} weicht vom frischen Status ab`,
+      )
     }
   }
 }
@@ -432,7 +445,8 @@ async function applyDraft(input) {
     validateFields(draft, source.expected, true)
     const proposed = splitDraft(draft)
     const old = current === null ? { fields: {} } : splitDraft(current.toString('utf8'))
-    if (!proposed.body.trim()) throw new Error('Expliziter Quellseiteninhalt fehlt')
+    if (!proposed.body.trim())
+      throw new IngestInputError('invalid_draft', 'Expliziter Quellseiteninhalt fehlt')
     const fields = { ...old.fields, ...proposed.fields, ...source.expected }
     text = `---\n${Object.entries(fields)
       .map(([name, value]) => `${name}: ${JSON.stringify(String(value))}`)
@@ -640,7 +654,7 @@ async function recoverPending(opts, receipt) {
   return revision === pending.after ? pending : undefined
 }
 
-async function checkRetainedBackups(wikiRoot, receipt) {
+export async function checkRetainedBackups(wikiRoot, receipt) {
   if (!receipt.backups.length) return
   const directory = await backupRoot(wikiRoot)
   for (const backup of receipt.backups) {
@@ -691,6 +705,34 @@ export async function assertCleanIngestWiki(wikiRoot) {
     throw new Error(
       'Wiki ist nicht sauber; zuerst bestätigtes Rücksetzen oder Wartung erforderlich',
     )
+}
+
+export async function pendingIngestPublications({ root, wikiRoot, runId }) {
+  let files
+  try {
+    files = await readdir(path.join(root, 'preparations'))
+  } catch (error) {
+    if (error.code === 'ENOENT') return []
+    throw error
+  }
+  const pending = []
+  for (const file of files.sort()) {
+    if (!/^prep-[0-9a-f]{32}\.json$/.test(file)) continue
+    const receipt = await loadPreparation({ root, preparationId: file.slice(0, -5) })
+    const pub = receipt.publication
+    if (
+      receipt.wiki_root === wikiRoot &&
+      pub?.run_id === runId &&
+      ['sealing', 'sealed', 'installing'].includes(pub.phase)
+    ) {
+      pending.push({
+        ...receipt.source,
+        preparation_id: receipt.preparation_id,
+        recovery_only: true,
+      })
+    }
+  }
+  return pending
 }
 
 export async function assertIngestRolledBack(input) {
@@ -782,6 +824,12 @@ export const rollbackIngest = (input) => withPreparationLock(input, rollbackDraf
 export const applyIngestDraft = (input) => withPreparationLock(input, applyDraft)
 export const validateIngest = (input) => withPreparationLock(input, validateDraft)
 
+// Publication owns a kernel-backed wiki-wide lock. These primitives are not
+// exposed as model tools and must only run inside that serialized boundary.
+export const applyPublicationDraft = applyDraft
+export const validatePublicationDraft = validateDraft
+export const rollbackPublicationDraft = rollbackDraft
+
 function checkRequiredPages(receipt, snapshot) {
   for (const page of REQUIRED_PAGES) {
     if (!Object.hasOwn(receipt.baseline, page) || !Object.hasOwn(receipt.owned, page))
@@ -823,9 +871,15 @@ function thematicText(current, { draft, edits, append }, page) {
       throw new Error('edit benötigt nichtleeres old_text und new_text')
     const offset = text.indexOf(edit.old_text)
     if (offset < 0)
-      throw new IngestInputError('anchor_missing', 'old_text muss genau einmal vorkommen; kein Treffer')
+      throw new IngestInputError(
+        'anchor_missing',
+        'old_text muss genau einmal vorkommen; kein Treffer',
+      )
     if (text.indexOf(edit.old_text, offset + 1) >= 0)
-      throw new IngestInputError('anchor_ambiguous', 'old_text muss genau einmal vorkommen; mehrere Treffer')
+      throw new IngestInputError(
+        'anchor_ambiguous',
+        'old_text muss genau einmal vorkommen; mehrere Treffer',
+      )
     text = text.slice(0, offset) + edit.new_text + text.slice(offset + edit.old_text.length)
   }
   return text

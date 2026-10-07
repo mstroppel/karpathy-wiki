@@ -730,11 +730,11 @@ test('plans bounded batches from a fresh status scan', async () => {
       runId: run.run_id,
       now: NOW,
     })
-    // 4000 fixed overhead + 4 * (2000 content + 4000 overhead) = 28000 > 20000:
-    // the budget, not the source count, decides how many sources fit.
-    assert.equal(first.batch.length, 2)
-    assert.equal(first.batch_estimate_tokens, 16000)
-    assert.equal(first.remaining, 2)
+    // Even a configured upper cap of four cannot accumulate multiple sources
+    // in one worker: each assignment starts a fresh per-source context.
+    assert.equal(first.batch.length, 1)
+    assert.equal(first.batch_estimate_tokens, 18000)
+    assert.equal(first.remaining, 3)
     assert.equal(first.batch[0].source_key, 'quelle-0.md')
     assert.equal(first.batch[0].adapter, 'webdav')
     assert.equal(first.batch[0].estimate.tokens, 6000)
@@ -764,10 +764,10 @@ test('plans bounded batches from a fresh status scan', async () => {
     })
     assert.deepEqual(
       second.batch.map((entry) => entry.source_key),
-      ['quelle-1.md', 'quelle-2.md'],
+      ['quelle-1.md'],
     )
-    assert.equal(second.batch_estimate_tokens, 16000)
-    assert.equal(second.remaining, 1)
+    assert.equal(second.batch_estimate_tokens, 18000)
+    assert.equal(second.remaining, 2)
 
     const after = await loadRun({ root: journalRoot, runId: run.run_id })
     assert.equal(after.budget.batches_dispatched, 2)

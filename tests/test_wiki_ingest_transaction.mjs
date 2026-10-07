@@ -35,14 +35,376 @@ test('format-only append is valid and missing versus ambiguous edits are disting
   const input = await f.prepared()
   await applyIngestDraft({ ...input, page: 'log.md', append: '\n' })
   await assert.rejects(
-    applyIngestDraft({ ...input, page: 'overview.md', edits: [{ old_text: 'absent', new_text: 'x' }] }),
+    applyIngestDraft({
+      ...input,
+      page: 'overview.md',
+      edits: [{ old_text: 'absent', new_text: 'x' }],
+    }),
     (error) => error.code === 'anchor_missing' && error.write_state === 'unchanged',
   )
   await applyIngestDraft({ ...input, page: 'overview.md', append: 'duplicate duplicate\n' })
   await assert.rejects(
-    applyIngestDraft({ ...input, page: 'overview.md', edits: [{ old_text: 'duplicate', new_text: 'x' }] }),
+    applyIngestDraft({
+      ...input,
+      page: 'overview.md',
+      edits: [{ old_text: 'duplicate', new_text: 'x' }],
+    }),
     (error) => error.code === 'anchor_ambiguous' && error.write_state === 'unchanged',
   )
+})
+
+test('private proposals preserve the live wiki and publish one commit with automatic index, log and journal', async (t) => {
+  const { ingestPublication } = await import('../config/tools/wiki_ingest_publication_core.mjs')
+  const f = await fixture(t, { existing: false })
+  const baseline = await f.git('rev-parse', 'HEAD')
+  const { run } = await startRun({ root: f.root })
+  const prepared = await ingestPublication({
+    ...f.opts,
+    runId: run.run_id,
+    operation: 'prepare',
+    adapter: 'webdav',
+    sourceKey: 'notes.md',
+    sourceRevision: SHA(SOURCE),
+    changedPages: [PAGE, 'overview.md', 'index.md', 'log.md'],
+  })
+  const input = { ...f.opts, preparationId: prepared.preparation_id }
+  await ingestPublication({ ...input, operation: 'read_source' })
+  await ingestPublication({
+    ...input,
+    operation: 'stage',
+    draft: '# Synthetic finding\nEvidence at source line 1.\n',
+  })
+  const section = await ingestPublication({ ...input, operation: 'inspect', page: 'overview.md' })
+  await ingestPublication({
+    ...input,
+    operation: 'stage',
+    page: 'overview.md',
+    reference: section.reference,
+    replacement: section.text + '\nSupported finding.\n',
+  })
+  assert.equal(await f.git('status', '--porcelain'), '')
+  assert.equal(await f.git('rev-parse', 'HEAD'), baseline)
+  const result = await ingestPublication({
+    ...input,
+    operation: 'publish',
+    runId: run.run_id,
+    title: 'Synthetic finding',
+    content: 'Supported finding; source line 1.',
+    contradictions: 'None.',
+    extractionLimits: 'Fully read line 1.',
+  })
+  assert.equal(result.status, 'ingested')
+  assert.equal(await f.git('rev-list', '--count', `${baseline}..HEAD`), '1')
+  assert.equal(await f.git('status', '--porcelain'), '')
+  assert.match(await readFile(path.join(f.wikiRoot, 'index.md'), 'utf8'), /sources\/webdav\/notes/)
+  assert.match(await readFile(path.join(f.wikiRoot, 'log.md'), 'utf8'), /notes.md/)
+  assert.equal((await loadRun({ root: f.root, runId: run.run_id })).counts.ingested, 1)
+  const repeated = await ingestPublication({ ...input, operation: 'publish' })
+  assert.equal(repeated.commit, result.commit)
+  assert.equal((await loadRun({ root: f.root, runId: run.run_id })).records.length, 1)
+})
+
+async function publicationFixture(t) {
+  const { ingestPublication } = await import('../config/tools/wiki_ingest_publication_core.mjs')
+  const f = await fixture(t, { existing: false })
+  const { run } = await startRun({ root: f.root })
+  const prepared = await ingestPublication({
+    ...f.opts,
+    runId: run.run_id,
+    operation: 'prepare',
+    adapter: 'webdav',
+    sourceKey: 'notes.md',
+    sourceRevision: SHA(SOURCE),
+    changedPages: [PAGE, 'overview.md', 'index.md', 'log.md'],
+  })
+  const call = (operation, args = {}) =>
+    ingestPublication({ ...f.opts, preparationId: prepared.preparation_id, operation, ...args })
+  await call('read_source')
+  await call('stage', { draft: '# Supported synthesis\nEvidence: source line 1.\n' })
+  await call('stage', { page: 'overview.md', reviewed: true })
+  const publish = () =>
+    call('publish', {
+      runId: run.run_id,
+      title: 'Synthetic synthesis',
+      content: 'Supported synthesis; source line 1.',
+      contradictions: 'None.',
+      extractionLimits: 'Fully read line 1.',
+    })
+  return { ...f, call, publish, runId: run.run_id }
+}
+
+test('stale section references and oversized records reject before any live changes and permit correction', async (t) => {
+  const f = await publicationFixture(t)
+  const section = await f.call('inspect', { page: 'overview.md' })
+  await f.call('stage', { page: 'overview.md', append: '\nAdditional finding.\n' })
+  await assert.rejects(
+    f.call('stage', { page: 'overview.md', reference: section.reference, replacement: 'bad' }),
+    (error) => error.ingest.code === 'stale_reference' && error.ingest.correctable,
+  )
+  await assert.rejects(
+    f.call('publish', {
+      runId: f.runId,
+      title: 'Synthetic synthesis',
+      content: 'x'.repeat(4001),
+      contradictions: 'None.',
+      extractionLimits: 'Read.',
+    }),
+  )
+  assert.equal(await f.git('status', '--porcelain'), '')
+  await f.publish()
+  const log = await readFile(path.join(f.wikiRoot, 'log.md'), 'utf8')
+  assert.equal(log.split('Quelle eingelesen:').length - 1, 1)
+})
+
+test('publication refuses foreign changes on any page before installing its first live page', async (t) => {
+  const f = await publicationFixture(t)
+  await writeFile(path.join(f.wikiRoot, 'overview.md'), 'Foreign work\n')
+  await assert.rejects(f.publish(), /sauber|Fremde/)
+  assert.equal(await readFile(path.join(f.wikiRoot, 'overview.md'), 'utf8'), 'Foreign work\n')
+  await assert.rejects(readFile(path.join(f.wikiRoot, PAGE)), { code: 'ENOENT' })
+})
+
+test('resume reconciles an interrupted HEAD/index transition without a second commit', async (t) => {
+  const f = await publicationFixture(t)
+  const originalRename = fs.rename
+  let injected = false
+  fs.rename = async (from, to) => {
+    if (!injected && from === path.join(f.wikiRoot, '.git', 'index.lock')) {
+      injected = true
+      throw new Error('Synthetic interruption after ref update')
+    }
+    return originalRename(from, to)
+  }
+  syncBuiltinESMExports()
+  try {
+    await assert.rejects(f.publish(), /Synthetic interruption/)
+  } finally {
+    fs.rename = originalRename
+    syncBuiltinESMExports()
+  }
+  const commit = await f.git('rev-parse', 'HEAD')
+  const result = await f.call('resume')
+  assert.equal(result.commit, commit)
+  assert.equal(await f.git('status', '--porcelain'), '')
+  assert.equal((await loadRun({ root: f.root, runId: f.runId })).records.length, 1)
+})
+
+test('resume completes an owned index lock interrupted before HEAD changes', async (t) => {
+  const f = await publicationFixture(t)
+  const baseline = await f.git('rev-parse', 'HEAD')
+  const originalOpen = fs.open
+  let injected = false
+  fs.open = async (...args) => {
+    const file = await originalOpen(...args)
+    if (args[0] === path.join(f.wikiRoot, '.git', 'index.lock') && !injected) {
+      const write = file.writeFile.bind(file)
+      file.writeFile = async (...input) => {
+        await write(...input)
+        injected = true
+        throw new Error('Synthetic interruption before ref update')
+      }
+    }
+    return file
+  }
+  syncBuiltinESMExports()
+  try {
+    await assert.rejects(f.publish(), /Synthetic interruption/)
+  } finally {
+    fs.open = originalOpen
+    syncBuiltinESMExports()
+  }
+  assert.equal(await f.git('rev-parse', 'HEAD'), baseline)
+  const result = await f.call('resume')
+  assert.equal(await f.git('rev-parse', 'HEAD'), result.commit)
+  assert.equal(await f.git('status', '--porcelain'), '')
+})
+
+for (const afterAppend of [false, true]) {
+  test(`resume reconciles journal interruption (after append=${afterAppend}) without duplicate commits or records`, async (t) => {
+    const f = await publicationFixture(t)
+    const rename = fs.rename
+    let injected = false
+    fs.rename = async (...args) => {
+      if (!injected && String(args[1]).endsWith('records.jsonl')) {
+        injected = true
+        if (afterAppend) await rename(...args)
+        throw new Error('Synthetic journal interruption')
+      }
+      return rename(...args)
+    }
+    syncBuiltinESMExports()
+    try {
+      await assert.rejects(f.publish(), /Synthetic journal/)
+    } finally {
+      fs.rename = rename
+      syncBuiltinESMExports()
+    }
+    const commit = await f.git('rev-parse', 'HEAD')
+    // A read-only Git status may refresh index stat-cache bytes without staging
+    // any content. Such a refresh is not foreign work and must not wedge resume.
+    assert.equal(await f.git('status', '--porcelain'), '')
+    const plan = await planNextBatch({
+      ...f.opts,
+      runId: f.runId,
+      wikiSourceRoot: path.join(f.wikiRoot, 'sources'),
+    })
+    assert.equal(plan.summary.new, 0)
+    assert.equal(plan.batch[0].recovery_only, true)
+    const result = await f.call('resume')
+    assert.equal(result.commit, commit)
+    assert.equal((await loadRun({ root: f.root, runId: f.runId })).records.length, 1)
+  })
+}
+
+test('lost stage acknowledgement does not repeat an append or require a copied text anchor', async (t) => {
+  const f = await publicationFixture(t)
+  const rename = fs.rename
+  let injected = false
+  fs.rename = async (from, to) => {
+    if (
+      !injected &&
+      String(to).startsWith(path.join(f.root, 'preparations')) &&
+      String(to).endsWith('.json')
+    ) {
+      const data = JSON.parse(await readFile(from, 'utf8'))
+      if (data.publication && Object.keys(data.publication.stage_requests).length === 3) {
+        injected = true
+        throw new Error('Synthetic lost stage acknowledgement')
+      }
+    }
+    return rename(from, to)
+  }
+  syncBuiltinESMExports()
+  try {
+    await assert.rejects(
+      f.call('stage', { page: 'overview.md', append: '\nOne finding.\n' }),
+      /Synthetic lost/,
+    )
+  } finally {
+    fs.rename = rename
+    syncBuiltinESMExports()
+  }
+  await f.call('stage', { page: 'overview.md', append: '\nOne finding.\n' })
+  await f.publish()
+  assert.equal(
+    (await readFile(path.join(f.wikiRoot, 'overview.md'), 'utf8')).split('One finding.').length - 1,
+    1,
+  )
+})
+
+test('a bounded section reference preserves a large overview with similar paragraphs and missing EOF newline', async (t) => {
+  const { ingestPublication } = await import('../config/tools/wiki_ingest_publication_core.mjs')
+  const f = await fixture(t, { existing: false })
+  const original =
+    Array.from(
+      { length: 2000 },
+      (_, index) => `Paragraph ${index}: similar historical observations.\n`,
+    ).join('') + 'Preserve this tail'
+  await writeFile(path.join(f.wikiRoot, 'overview.md'), original)
+  await f.git('add', '--', 'overview.md')
+  await f.git('commit', '-qm', 'large historical overview')
+  const prepared = await ingestPublication({
+    ...f.opts,
+    operation: 'prepare',
+    adapter: 'webdav',
+    sourceKey: 'notes.md',
+    sourceRevision: SHA(SOURCE),
+    changedPages: [PAGE, 'overview.md', 'index.md', 'log.md'],
+  })
+  const call = (operation, args = {}) =>
+    ingestPublication({ ...f.opts, preparationId: prepared.preparation_id, operation, ...args })
+  await call('read_source')
+  await call('stage', { draft: '# Synthesis\nSupported source line 1.\n' })
+  const section = await call('inspect', { page: 'overview.md', query: 'Paragraph 123:', limit: 1 })
+  assert.ok(Buffer.byteLength(section.text) < 4096)
+  await call('stage', {
+    page: 'overview.md',
+    reference: section.reference,
+    replacement: 'Paragraph 123: supported new finding.\n',
+  })
+  await call('publish', {
+    title: 'Synthesis',
+    content: 'Supported source line 1.',
+    contradictions: 'None.',
+    extractionLimits: 'Fully read.',
+  })
+  assert.equal(
+    await readFile(path.join(f.wikiRoot, 'overview.md'), 'utf8'),
+    original.replace(
+      'Paragraph 123: similar historical observations.\n',
+      'Paragraph 123: supported new finding.\n',
+    ),
+  )
+})
+
+test('source reading and cumulative retrieval budgets are enforced before publication', async (t) => {
+  const { ingestPublication } = await import('../config/tools/wiki_ingest_publication_core.mjs')
+  const f = await fixture(t, { existing: false })
+  const prepared = await ingestPublication({
+    ...f.opts,
+    budgetTokens: 13000,
+    operation: 'prepare',
+    adapter: 'webdav',
+    sourceKey: 'notes.md',
+    sourceRevision: SHA(SOURCE),
+    changedPages: [PAGE, 'overview.md', 'index.md', 'log.md'],
+  })
+  const call = (operation, args = {}) =>
+    ingestPublication({ ...f.opts, preparationId: prepared.preparation_id, operation, ...args })
+  await call('stage', { draft: '# Synthesis\nSource line 1.\n' })
+  await call('stage', { page: 'overview.md', reviewed: true })
+  await assert.rejects(
+    call('publish', {
+      title: 'Synthesis',
+      content: 'Finding.',
+      contradictions: 'None.',
+      extractionLimits: 'Read.',
+    }),
+    (error) => error.ingest.code === 'incomplete_source_read',
+  )
+  await call('read_source')
+  for (let count = 0; count < 30; count++) await call('inspect', { page: 'overview.md' })
+  await assert.rejects(
+    call('stage', { page: 'overview.md', append: 'x'.repeat(1900) }),
+    /Kontext-Arbeitsbudget/,
+  )
+  assert.equal(await f.git('status', '--porcelain'), '')
+})
+
+test('resume seals an already validated draft after index staging interruption', async (t) => {
+  const f = await publicationFixture(t)
+  const originalRename = fs.rename
+  let injected = false
+  fs.rename = async (from, to) => {
+    if (
+      !injected &&
+      String(to).startsWith(path.join(f.root, 'preparations')) &&
+      String(to).endsWith('.json')
+    ) {
+      const data = JSON.parse(await readFile(from, 'utf8'))
+      if (data.publication?.phase === 'sealed') {
+        injected = true
+        throw new Error('Synthetic interruption during sealing')
+      }
+    }
+    return originalRename(from, to)
+  }
+  syncBuiltinESMExports()
+  try {
+    await assert.rejects(f.publish(), /Synthetic interruption/)
+  } finally {
+    fs.rename = originalRename
+    syncBuiltinESMExports()
+  }
+  const plan = await planNextBatch({
+    ...f.opts,
+    runId: f.runId,
+    wikiSourceRoot: path.join(f.wikiRoot, 'sources'),
+  })
+  assert.equal(plan.batch[0].recovery_only, true)
+  const result = await f.call('resume')
+  assert.equal(await f.git('rev-parse', 'HEAD'), result.commit)
+  assert.equal((await loadRun({ root: f.root, runId: f.runId })).records.length, 1)
 })
 
 test('real Paperless renderer revisions survive prepare, apply, validate and journal verification', async (t) => {
