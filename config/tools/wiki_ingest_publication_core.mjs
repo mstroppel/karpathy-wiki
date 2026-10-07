@@ -13,6 +13,7 @@ import {
   confinedIngestPath,
   freshSource,
   loadPreparation,
+  PREPARATION_RE,
   prepareIngest,
   rollbackPublicationDraft,
   savePreparation,
@@ -773,6 +774,16 @@ async function closeSingleRun(opts, pub) {
 
 export async function ingestPublication(input) {
   const opts = { ...DEFAULTS, ...input }
+  // Missing/malformed identity is rejected before locks, receipts or wiki
+  // writes; it is an input correction, not an unknown publication outcome.
+  if (
+    opts.operation !== 'prepare' &&
+    (typeof opts.preparationId !== 'string' || !PREPARATION_RE.test(opts.preparationId))
+  )
+    throw new IngestInputError(
+      'invalid_preparation',
+      'Vollständige preparation_id aus prepare erforderlich',
+    )
   return withWikiLock(opts, async () => {
     try {
       if (opts.operation === 'prepare') return await prepare(opts)

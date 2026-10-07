@@ -451,6 +451,21 @@ test('prepare generates mandatory paths and later declaration publishes a new th
   assert.equal((await loadRun({ root: f.root, runId: prepared.run_id })).state, 'completed')
 })
 
+test('missing preparation identity is a safe pre-write input correction, never an unknown state', async () => {
+  const { ingestPublication } = await import('../config/tools/wiki_ingest_publication_core.mjs')
+  const { ingestFailure } = await import('../config/tools/wiki_ingest_errors.mjs')
+  for (const operation of ['inspect', 'stage', 'publish', 'resume']) {
+    await assert.rejects(ingestPublication({ operation }), (error) => {
+      const failure = ingestFailure(error)
+      return (
+        failure.code === 'invalid_preparation' &&
+        failure.write_state === 'unchanged' &&
+        failure.correctable
+      )
+    })
+  }
+})
+
 test('real Paperless renderer revisions survive prepare, apply, validate and journal verification', async (t) => {
   const f = await fixture(t, { existing: false })
   const { stdout } = await runFile(

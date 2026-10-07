@@ -228,6 +228,8 @@ def main() -> None:
             "über inspect-Abschnittsreferenz/replacement auf 12 Hz. Erhalte den ähnlich "
             "formulierten Abschnitt Calibration archive unverändert mit 10 Hz. "
             "Dies ist eine gezielte Korrektur, kein Auftrag zum Lesen der gesamten Übersicht."
+            " Übergib diese Zielvorgabe unverändert an den Worker für calibration.md; "
+            "die Korrektur gehört in denselben Quellen-Commit, nicht zu wiki-lint."
         )
         command = [
             "docker",
