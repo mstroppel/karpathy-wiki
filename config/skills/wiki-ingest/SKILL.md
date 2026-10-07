@@ -47,21 +47,21 @@ erzeugen. Bei Ablehnung stoppe für Wartung; keine Git-Reset-/Clean-Befehle.
    zum Staging oder Verwerfen. Schreibe die Quellenseite mit `operation: apply`,
    `preparation_id` und `draft` (vollständiges Markdown ohne kanonische
    Felder aus `canonical_fields`); das Tool übernimmt diese strukturiert und erhält
-    Zusatzfelder. Korrigiere auch eigene Quellseitenentwürfe nur über `apply`.
-    Bearbeite jede thematische Seite ebenfalls über `operation: apply` mit
-    `preparation_id` und `page` (deklarierter relativer Wiki-Pfad): Neue Seiten
-    erhalten einen vollständigen `draft`; bestehende Seiten gezielte `edits`
-    (`old_text`, `new_text`, exakter eindeutiger Treffer) oder `append` einschließlich
-    benötigter Zeilenumbrüche. Der übrige Inhalt bleibt unverändert auf Platte.
-    Prüfe `overview.md` und `index.md` je Quelle; wenn keine Änderung nötig ist,
-    bestätige sie mit `edits: []`. Ergänze `log.md` ausschließlich mit `append`.
-    Nur diese Tool-Schreibvorgänge zählen als eigene Änderungen.
-     Rufe alle Transaktionsoperationen strikt nacheinander auf, auch für verschiedene
-     Seiten: warte jeweils auf Erfolg. Bei jedem Fehler stoppe den Batch sofort,
-     sichere `preparation_id` im blockierten Datensatz und melde den Fehler an den
-     Orchestrator. Keine automatische Wiederholung oder nächste Quelle. Ein später
-     bestätigter Reparaturversuch kann denselben gespeicherten Schreibauftrag
-     wieder aufnehmen; verbliebene Lock-Dateien benötigen bestätigte Wartung.
+   Zusatzfelder. Korrigiere auch eigene Quellseitenentwürfe nur über `apply`.
+   Bearbeite jede thematische Seite ebenfalls über `operation: apply` mit
+   `preparation_id` und `page` (deklarierter relativer Wiki-Pfad): Neue Seiten
+   erhalten einen vollständigen `draft`; bestehende Seiten gezielte `edits`
+   (`old_text`, `new_text`, exakter eindeutiger Treffer) oder `append` einschließlich
+   benötigter Zeilenumbrüche. Der übrige Inhalt bleibt unverändert auf Platte.
+   Prüfe `overview.md` und `index.md` je Quelle; wenn keine Änderung nötig ist,
+   bestätige sie mit `edits: []`. Ergänze `log.md` ausschließlich mit `append`.
+   Nur diese Tool-Schreibvorgänge zählen als eigene Änderungen.
+   Rufe alle Transaktionsoperationen strikt nacheinander auf, auch für verschiedene
+   Seiten: warte jeweils auf Erfolg. Bei jedem Fehler stoppe den Batch sofort,
+   sichere `preparation_id` im blockierten Datensatz und melde den Fehler an den
+   Orchestrator. Keine automatische Wiederholung oder nächste Quelle. Ein später
+   bestätigter Reparaturversuch kann denselben gespeicherten Schreibauftrag
+   wieder aufnehmen; verbliebene Lock-Dateien benötigen bestätigte Wartung.
    Nenne den exakten Quellpfad und
    Fundstellen. Bei `paperless_url`: HTTPS-Feld erhalten und im Seitentext als
    klickbaren Originallink anzeigen. Integriere belegte Aussagen in betroffene
@@ -75,11 +75,11 @@ erzeugen. Bei Ablehnung stoppe für Wartung; keine Git-Reset-/Clean-Befehle.
    über `apply` bearbeitet sein; die Validierung lehnt einen Quellseiten-Commit
    ohne diese Schritte ab. Prüfe Diff, Links und
    Herkunftsnachweise. Rufe `operation: validate` mit `preparation_id` vor dem
-    Commit auf. Bei einem Validierungsfehler stoppe für die bestätigte
-    Reparatur. Erst nach erfolgreicher
-    Validierung committe genau einmal pro Quelle: Verwende für Commit und Journal
-    `changed_pages` aus der letzten erfolgreichen `validate`-Antwort, nicht die
-    geplante Pfadliste aus `prepare` (unveränderte Seiten können fehlen).
+   Commit auf. Bei einem Validierungsfehler stoppe für die bestätigte
+   Reparatur. Erst nach erfolgreicher
+   Validierung committe genau einmal pro Quelle: Verwende für Commit und Journal
+   `changed_pages` aus der letzten erfolgreichen `validate`-Antwort, nicht die
+   geplante Pfadliste aus `prepare` (unveränderte Seiten können fehlen).
    Melde Erfolg erst nach verifiziertem Commit; bereits committed Fehler gehören
    als Blocker an die bestätigte Wartung, nicht in einen Amend oder Reset.
 
