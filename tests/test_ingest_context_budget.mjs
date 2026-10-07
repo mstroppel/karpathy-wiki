@@ -1,8 +1,17 @@
 import assert from 'node:assert/strict'
+import { execFile } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
+import { promisify } from 'node:util'
+
+import {
+  applyIngestDraft,
+  prepareIngest,
+  validateIngest,
+} from '../config/tools/wiki_ingest_transaction_core.mjs'
 
 import {
   WORKER_FIXED_OVERHEAD_TOKENS,
@@ -17,7 +26,7 @@ import {
 // synthetic fixtures of known size, never a measured model context. The same
 // estimator drives the batch planner that bounds real worker sessions.
 
-const REVISION = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+const runFile = promisify(execFile)
 const NOW = new Date('2026-10-03T12:00:00.000Z')
 const BUDGET_TOKENS = 32000
 const SOURCE_CHARACTERS = 12 * 1024
@@ -30,6 +39,15 @@ async function fixture(count, characters = SOURCE_CHARACTERS) {
   await mkdir(journalRoot, { recursive: true })
   await mkdir(path.join(sourceRoot, 'webdav'), { recursive: true })
   await mkdir(wikiSourceRoot, { recursive: true })
+  const wikiRoot = path.dirname(wikiSourceRoot)
+  const git = async (...args) => (await runFile('git', args, { cwd: wikiRoot })).stdout.trim()
+  await git('init', '-q')
+  await git('config', 'user.name', 'Synthetic Fixture')
+  await git('config', 'user.email', 'fixture@example.invalid')
+  await writeFile(path.join(wikiRoot, 'overview.md'), '# Fixture\n')
+  await git('add', '--', 'overview.md')
+  await git('commit', '-qm', 'fixture baseline')
+  const revision = createHash('sha256').update('x'.repeat(characters)).digest('hex')
   const items = []
   for (let index = 0; index < count; index += 1) {
     const name = `quelle-${index}.md`
@@ -37,8 +55,8 @@ async function fixture(count, characters = SOURCE_CHARACTERS) {
       source_key: name,
       source_path: name,
       wiki_path: `webdav/${name}/index.md`,
-      source_revision: REVISION,
-      frontmatter: { source_revision: REVISION },
+      source_revision: revision,
+      frontmatter: { source_revision: revision },
       claim: { source_path: name },
     })
     await writeFile(path.join(sourceRoot, 'webdav', name), 'x'.repeat(characters), 'utf8')
@@ -56,7 +74,7 @@ async function fixture(count, characters = SOURCE_CHARACTERS) {
     }),
     'utf8',
   )
-  return { root, journalRoot, sourceRoot, wikiSourceRoot }
+  return { root, journalRoot, sourceRoot, wikiSourceRoot, wikiRoot, git }
 }
 
 // One session of the previous /ingest-new flow carried every source, its pages,
@@ -69,7 +87,10 @@ function singleSessionEstimate(count, characters = SOURCE_CHARACTERS) {
 }
 
 async function measure(count, characters = SOURCE_CHARACTERS) {
-  const { root, journalRoot, sourceRoot, wikiSourceRoot } = await fixture(count, characters)
+  const { root, journalRoot, sourceRoot, wikiSourceRoot, wikiRoot, git } = await fixture(
+    count,
+    characters,
+  )
   try {
     const { run } = await startRun({
       root: journalRoot,
@@ -97,17 +118,33 @@ async function measure(count, characters = SOURCE_CHARACTERS) {
       })
       for (const entry of plan.batch) {
         planned.add(entry.source_key)
-        // Simulate the worker: the page exists at the recorded revision and the
-        // verified result is journalled, so the next planning call sees the
-        // source as current.
-        await mkdir(path.dirname(entry.wiki_path), { recursive: true })
-        await writeFile(
-          entry.wiki_path,
-          `---\nsource_path: ${entry.source_key}\nsource_revision: ${REVISION}\n---\n`,
-          'utf8',
-        )
+        // Complete the deterministic worker transaction, so the journal and
+        // next planning call observe a real verified Git commit.
+        const changedPages = [path.relative(wikiRoot, entry.wiki_path)]
+        const prepared = await prepareIngest({
+          root: journalRoot,
+          sourceRoot,
+          wikiRoot,
+          adapter: entry.adapter,
+          sourceKey: entry.source_key,
+          sourceRevision: entry.source_revision,
+          changedPages,
+        })
+        const transaction = {
+          root: journalRoot,
+          sourceRoot,
+          wikiRoot,
+          preparationId: prepared.preparation_id,
+        }
+        await applyIngestDraft({ ...transaction, draft: '# Synthetic synthesis\n' })
+        await validateIngest(transaction)
+        await git('add', '--', ...changedPages)
+        await git('commit', '-qm', 'ingest synthetic source')
+        const commit = await git('rev-parse', 'HEAD')
         await writeRecord({
           root: journalRoot,
+          sourceRoot,
+          wikiRoot,
           runId: run.run_id,
           record: {
             adapter: entry.adapter,
@@ -116,8 +153,9 @@ async function measure(count, characters = SOURCE_CHARACTERS) {
             source_revision: entry.source_revision,
             wiki_path: entry.wiki_path,
             status: 'ingested',
-            commit: 'abc1234',
-            changed_pages: [`webdav/${entry.source_key}/index.md`],
+            preparation_id: prepared.preparation_id,
+            commit,
+            changed_pages: changedPages,
             content: 'Synthetische Feststellung.',
             contradictions: 'Keine festgestellt',
             extraction_limits: 'Keine festgestellt',

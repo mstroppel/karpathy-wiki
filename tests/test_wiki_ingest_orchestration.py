@@ -120,6 +120,21 @@ class SkillContractTests(unittest.TestCase):
         self.assertIn("nur eine Zeile", text)
         self.assertIn("gehören nicht in die Rückmeldung", text)
 
+    def test_worker_requires_deterministic_transaction_before_commit(self):
+        text = WORKER_SKILL.read_text(encoding="utf-8")
+        for phrase in (
+            "wiki_ingest_transaction",
+            "operation: prepare",
+            "preparation_id",
+            "operation: apply",
+            "operation: validate",
+            "vor dem",
+            "fremde Git-Änderungen",
+            "Amend oder Reset",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, text)
+
     def test_worker_requires_substantive_budgeted_report_details(self):
         text = WORKER_SKILL.read_text(encoding="utf-8")
         depth = text.split("### Inhaltliche Berichtstiefe\n", 1)[1].split(
@@ -164,7 +179,7 @@ class SkillContractTests(unittest.TestCase):
         text = REPORTS_DOC.read_text(encoding="utf-8")
         for phrase in (
             "authoritative writing and completeness",
-            "record schema and budgets are unchanged",
+            "detail-text fields and budgets are unchanged",
             "cannot judge their semantic completeness",
             "multi-topic",
             "damaged transcript",
@@ -223,15 +238,47 @@ class CommandAndAgentTests(unittest.TestCase):
         self.assertEqual(effects["grep"], ["deny"])
         self.assertEqual(effects["glob"], ["deny"])
         self.assertEqual(effects["shell"], ["deny"])
+        self.assertEqual(effects["wiki_ingest_transaction"], ["deny"])
         self.assertEqual(effects["webfetch"], ["deny"])
         self.assertEqual(effects["websearch"], ["deny"])
-        self.assertEqual(effects["subagent"], ["deny", "allow"])
+        self.assertEqual(effects["subagent"], ["deny", "allow", "allow"])
         allowed = [
             rule["resource"]
             for rule in agent["permissions"]
             if rule["action"] == "subagent" and rule["effect"] == "allow"
         ]
-        self.assertEqual(allowed, ["wiki-ingest"])
+        self.assertEqual(allowed, ["wiki-ingest", "wiki-lint"])
+
+    def test_recovery_is_confirmed_sequential_and_preserves_history(self):
+        text = ORCHESTRATOR_SKILL.read_text(encoding="utf-8")
+        recovery = text.split("## Bereinigungsphase\n", 1)[1].split("## Berichtsphase", 1)[0]
+        for phrase in (
+            "Pausiere alle Ingest-Worker",
+            "question",
+            "eindeutig bestätigt",
+            "genau einen `wiki-lint`",
+            "erneut",
+            "neuen Lauf",
+            "Audit",
+            "gescheiterter Reparatur",
+            "Fremde Änderungen",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, recovery)
+        lint = (ROOT / "config/skills/wiki-lint/SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("ausschließlich lesend Git-Status", text)
+        self.assertIn("Git-/Transaktionsblocker", text)
+        self.assertIn("finale Blocker keine Quelle", recovery)
+        self.assertIn("gezielter Git-Prüfung", lint)
+        for phrase in (
+            "staged Diff",
+            "historisch",
+            "kein Löschauftrag",
+            "separaten Korrekturcommit",
+            "Git-Status",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, lint)
 
     def test_journal_tool_is_allowed_and_private(self):
         rules = self.config["permissions"]
@@ -247,6 +294,16 @@ class CommandAndAgentTests(unittest.TestCase):
             if rule["action"] == "external_directory" and rule["effect"] == "allow"
         ]
         self.assertIn("/knowledge/incoming/ingest-journal/**", external)
+        transaction = [
+            rule["effect"] for rule in rules if rule["action"] == "wiki_ingest_transaction"
+        ]
+        self.assertEqual(transaction, ["deny"])
+        worker_transaction = [
+            rule["effect"]
+            for rule in self.config["agents"]["wiki-ingest"]["permissions"]
+            if rule["action"] == "wiki_ingest_transaction"
+        ]
+        self.assertEqual(worker_transaction, ["allow"])
         for name in ("wiki-analysis", "wiki-analysis-save"):
             with self.subTest(agent=name):
                 denies = [

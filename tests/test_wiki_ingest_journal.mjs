@@ -17,7 +17,7 @@ import {
   readChunk,
   renderReport,
   startRun,
-  writeRecord,
+  writeRecord as writeRecordCore,
 } from '../config/tools/wiki_ingest_journal_core.mjs'
 
 const REVISION = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
@@ -25,6 +25,15 @@ const OTHER_REVISION = 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffff
 const NOW = new Date('2026-10-03T12:00:00.000Z')
 const SUFFIX = 'abc123'
 const RUN_ID = 'run-20261003t120000z-abc123'
+
+// These tests isolate journal/report mechanics. Real Git/source verification
+// (including the journal append boundary) is covered by transaction fixtures.
+function writeRecord(input) {
+  return writeRecordCore({
+    ...input,
+    verify: async ({ record: item }) => ({ commit: item.commit, source_unmodified: true }),
+  })
+}
 
 async function fixture() {
   const root = await mkdtemp(path.join(os.tmpdir(), 'wiki-ingest-journal-'))
@@ -45,6 +54,7 @@ function record(overrides = {}) {
     source_revision: REVISION,
     wiki_path: '/knowledge/wiki/sources/webdav/notes.md',
     status: 'ingested',
+    preparation_id: `prep-${'a'.repeat(32)}`,
     commit: 'abc1234',
     changed_pages: ['sources/webdav/notes.md', 'overview.md'],
     content: 'Aussage mit Wert 3,5 m.',

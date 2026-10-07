@@ -102,6 +102,9 @@ paused, and zero-source runs use the same contract; report-creation failures are
 explicitly flagged separately from ingestion status. See
 [ingestion reports](docs/ingest-reports.md) for the budget model, resume
 behavior, and validation.
+Ingestion checks local Git changes before planning and validates source metadata
+and committed contents before recording success. Blocked runs can request a
+confirmed repair through the existing wiki maintenance agent, then resume safely.
 
 ## Analyses
 
@@ -192,7 +195,7 @@ npm ci
 scripts/install-shellcheck.sh  # add ~/.local/bin to PATH if needed; Linux x86_64
 scripts/lint.sh
 scripts/test-python.sh
-node --test tests/test_wiki_ingest_status.mjs tests/test_contract_fixtures.mjs tests/test_wiki_ingest_journal.mjs tests/test_ingest_context_budget.mjs tests/test_answer_intake.mjs
+node --test tests/test_wiki_ingest_status.mjs tests/test_contract_fixtures.mjs tests/test_wiki_ingest_journal.mjs tests/test_ingest_context_budget.mjs tests/test_wiki_ingest_transaction.mjs tests/test_answer_intake.mjs
 node --test tests/test_chat_bootstrap.mjs
 docker build --target opencode -t kw-opencode:integration -f opencode/Dockerfile .
 docker build --target openchamber -t kw-openchamber:integration -f opencode/Dockerfile .
