@@ -50,6 +50,7 @@ Earlier attempts failed rather than being accepted with partial ingestion:
 | Absolute source-page path supplied to prepare | Mandatory pages generated in code; invalid optional paths classified before preparation |
 | Redundant post-publication check reconstructed private receipt IDs incorrectly | Publisher owns commit/journal verification; nested draft receipt location documented |
 | Read-only call omitted preparation identity | Safe typed pre-access rejection allows one corrected input |
+| Model replacement dropped six historical lines inside a broad reference | Tool rejects multi-line context loss; target-line references instead of reconstructed read windows |
 
 The explicit calibration request must be forwarded to its source worker and
 included in that source commit, not separately delegated to maintenance.

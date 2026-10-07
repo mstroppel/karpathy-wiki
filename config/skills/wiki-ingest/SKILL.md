@@ -61,6 +61,11 @@ erzeugen. Bei Ablehnung stoppe für Wartung; keine Git-Reset-/Clean-Befehle.
    - Bestehende thematische Seite: `reference` aus `inspect` und `replacement`
      für genau diesen Abschnitt oder `append`; keinen `old_text` abschreiben.
      Außerhalb des referenzierten Abschnitts bleiben alle Bytes erhalten.
+     Für Korrekturen lies die konkrete Zielzeile mit `query` und `limit: 1`
+     erneut, auch wenn du zuvor mehr Kontext gelesen hast. Pro Referenz darf
+     höchstens eine bestehende nichtleere Zeile entfallen/geändert werden;
+     Kontextzeilen bleiben erhalten. Mehrere Zielzeilen separat referenzieren,
+     keine benachbarten historischen Absätze aus dem Gedächtnis ersetzen.
    - `overview.md` ohne nötige Änderung: nach gezielter Prüfung `reviewed: true`.
    Index und Log erzeugt Code; bearbeite sie nicht selbst. Ein bestätigter
    Entwurf ist noch kein veröffentlichtes Wiki und noch kein Erfolg.

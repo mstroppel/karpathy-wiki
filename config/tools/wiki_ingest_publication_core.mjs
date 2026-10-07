@@ -280,6 +280,22 @@ async function stage(opts, receipt) {
         'Seite seit inspect geändert; Abschnitt erneut lesen',
       )
     const old = text.slice(ref.start, ref.end)
+    // Reading context does not authorize replacing it from memory. Preserve
+    // every surrounding nonblank line; one targeted line may change per edit.
+    // Broader rewrites require separate narrow references, never inferred loss.
+    const replacementLines = opts.replacement.split('\n')
+    let cursor = 0
+    let removed = 0
+    for (const line of old.split('\n').filter((line) => line.trim())) {
+      const found = replacementLines.indexOf(line, cursor)
+      if (found < 0) removed += 1
+      else cursor = found + 1
+    }
+    if (removed > 1)
+      throw new IngestInputError(
+        'context_loss',
+        'replacement entfernt mehrere Kontextzeilen; Ziel mit inspect limit: 1 neu referenzieren oder alle übrigen Zeilen erhalten',
+      )
     // The reference selects a byte-exact range, not a model-reconstructed anchor.
     // Apply the complete server-built page as one unique replacement.
     request = {

@@ -466,6 +466,45 @@ test('missing preparation identity is a safe pre-write input correction, never a
   }
 })
 
+test('a contextual replacement cannot silently discard multiple historical lines', async (t) => {
+  const f = await publicationFixture(t)
+  await f.call('stage', {
+    page: 'overview.md',
+    append: '\nCurrent finding: old.\nHistorical context one.\nHistorical context two.\n',
+  })
+  const broad = await f.call('inspect', {
+    page: 'overview.md',
+    query: 'Current finding:',
+    limit: 3,
+  })
+  await assert.rejects(
+    f.call('stage', {
+      page: 'overview.md',
+      reference: broad.reference,
+      replacement: 'Current finding: new.\n',
+    }),
+    (error) =>
+      error.ingest.code === 'context_loss' &&
+      error.ingest.write_state === 'unchanged' &&
+      error.ingest.correctable,
+  )
+  const targeted = await f.call('inspect', {
+    page: 'overview.md',
+    query: 'Current finding:',
+    limit: 1,
+  })
+  await f.call('stage', {
+    page: 'overview.md',
+    reference: targeted.reference,
+    replacement: 'Current finding: new.\n',
+  })
+  await f.publish()
+  assert.match(
+    await readFile(path.join(f.wikiRoot, 'overview.md'), 'utf8'),
+    /Current finding: new\.\nHistorical context one\.\nHistorical context two\./,
+  )
+})
+
 test('real Paperless renderer revisions survive prepare, apply, validate and journal verification', async (t) => {
   const f = await fixture(t, { existing: false })
   const { stdout } = await runFile(
