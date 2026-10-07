@@ -358,6 +358,21 @@ def main() -> None:
         ]
         assert len(records) == 4 and all(record["status"] == "ingested" for record in records)
         assert len({record["commit"] for record in records}) == 4
+        calibration = next(record for record in records if record["source_key"] == "calibration.md")
+        calibration_view = run(
+            "git",
+            "-c",
+            f"safe.directory={wiki}",
+            "-C",
+            str(wiki),
+            "show",
+            f"{calibration['commit']}:overview.md",
+        ).decode()
+        calibration_section = calibration_view.split("## Calibration\n", 1)[1].split(
+            "## Calibration archive", 1
+        )[0]
+        assert re.search(r"\b12\s*Hz\b", calibration_section)
+        assert not re.search(r"\b10\s*Hz\b", calibration_section)
         assert (output / "incoming/ingest-journal/acceptance-rejected-reference").is_file()
         report = (runs[0].parent / "report.md").read_text()
         for record in records:

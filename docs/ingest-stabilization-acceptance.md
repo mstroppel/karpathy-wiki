@@ -39,9 +39,41 @@ If that directory is not writable, select a private external directory with
 `--evidence-root "$HOME/.local/state/karpathy-wiki-acceptance"`; do not change
 permissions on someone else's temporary directory.
 
-## Evidence status
+## Passing evidence — 2026-10-07
 
-Execution is in progress; no passing real-model result is claimed yet.
+OpenCode **2.0.24**, **`openai/gpt-6-luna#high`**, disposable Linux amd64
+container, final publication/worker contract from `c61ae37` (session-discovery
+instrumentation added subsequently). Full synthetic model/restart acceptance
+passed, including the interrupted first worker in context measurements:
+
+| Assertion | Result |
+| --- | --- |
+| Sources / source commits / journal records | 4 / 4 / 4 |
+| Container restarts / verified resumes | 1 / 1 |
+| Preparation calls | 4; no re-extraction |
+| Worker peak `input + cache.read` | 10,680 tokens, below 32,000 |
+| Orchestrator peak `input + cache.read` | 13,259 tokens |
+| Historical paragraphs / tail | All 2,000 and tail preserved |
+| Source bytes / Git status | Unchanged / clean |
+| Final `new` / `outdated` | 0 / 0; same run completed |
+| Injected reference rejection | `stale_reference`, unchanged, safely corrected |
+| Similar current/archive sections | Calibration source commit corrects to 12 Hz; archive remains 10 Hz |
+| Report delivery | Complete private report with every record field; parent links it with run ID |
+
+The subsequent follow-up source may legitimately update the current measurement
+to 15 Hz while documenting the unexplained change from 12 Hz. The strengthened
+calibration assertion therefore checks its source commit's overview, not the
+later overview snapshot; it also passed against the retained synthetic result.
+Only aggregates are published here. Raw exports, tool traces and fixture results
+remain private; no production data or credentials are included.
+
+One passing run is evidence for this fixture/model/runtime, not a guarantee of
+semantic completeness for every production source, provider-transport failure or
+client-local link behavior. The injected whole-container restart also interrupts
+the CLI/model/tool connection; transport-specific causes are not established.
+
+## Failed attempts and corrections
+
 Earlier attempts failed rather than being accepted with partial ingestion:
 
 | Observed blocker | Correction before rerun |
