@@ -11,6 +11,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import time
 import uuid
@@ -402,6 +403,41 @@ def main() -> None:
         if process is not None:
             process.terminate()
             process.wait(timeout=30)
+        if sys.exc_info()[0] is not None:
+            # Preserve synthetic child evidence on failure before deleting the
+            # container. Do not print export bodies or credential information.
+            failed_sessions: set[str] = set()
+            for trace in evidence.glob("*.jsonl"):
+                failed_sessions |= session_ids(trace.read_text())
+            attempted: set[str] = set()
+            while failed_sessions:
+                session = failed_sessions.pop()
+                if session in attempted:
+                    continue
+                attempted.add(session)
+                exported_result = subprocess.run(
+                    [
+                        "docker",
+                        "exec",
+                        "--user",
+                        "1000:100",
+                        "-w",
+                        "/knowledge/wiki",
+                        name,
+                        "opencode",
+                        "session",
+                        "export",
+                        "--standalone",
+                        session,
+                    ],
+                    capture_output=True,
+                )
+                if exported_result.returncode == 0:
+                    (evidence / f"{session}.json").write_bytes(exported_result.stdout)
+                    try:
+                        failed_sessions |= session_ids(json.loads(exported_result.stdout)) - attempted
+                    except ValueError:
+                        pass
         subprocess.run(["docker", "rm", "--force", name], check=False, capture_output=True)
 
 

@@ -96,8 +96,10 @@ erzeugen. Bei Ablehnung stoppe für Wartung; keine Git-Reset-/Clean-Befehle.
 
 Der Publisher schreibt den Erfolgsdatensatz automatisch nach verifiziertem
 Commit mit `status: ingested`, `source_unmodified: true` und `blocker: null`.
-Schreibe keinen zweiten Erfolgsdatensatz. Prüfe das Journal mit `operation: list`;
-halte die interpretativen Feststellungen bereits in den `publish`-Texten fest,
+Schreibe keinen zweiten Erfolgsdatensatz. `publish`/`resume` verifiziert Commit
+und Journal bereits; eine zusätzliche Worker-Nachprüfung ist nicht erforderlich.
+Übernimm die vollständige erfolgreiche Tool-Antwort, ohne IDs abzuschreiben oder
+erneut zu konstruieren. Halte die interpretativen Feststellungen in den `publish`-Texten fest,
 weil Git sie nicht rekonstruieren kann. Ungelöste Fehler protokollierst du über
 `wiki_ingest_journal` (`operation: record`, `status: blocked`).
 

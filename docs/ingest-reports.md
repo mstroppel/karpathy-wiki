@@ -168,8 +168,12 @@ incoming/ingest-journal/                   # private, 0700
 The content-free SQLite state store remains outside the model's mount. Draft
 clones contain wiki history and source-derived content; include them and receipts
 in private journal backups, and include retained `.git` evidence in wiki backups.
-They cost disk proportional to sources/history, not just receipt bytes. No
-automatic draft/backup cleanup, migration, path alias or data-layout move is added.
+They cost disk proportional to sources/history, not just receipt bytes.
+`publication.draft_id` belongs to the nested private
+`preparations/<prep-id>/journal/preparations/<draft-id>.json`, not the top-level
+preparations directory. A successful publisher response already verifies commit
+and journal; workers do not manually reconstruct internal IDs or repeat that check.
+No automatic draft/backup cleanup, migration, path alias or data-layout move is added.
 Cleanup is explicitly confirmed maintenance with writers stopped and backups
 verified. Tool, configuration and skills must be deployed together.
 
