@@ -13,6 +13,11 @@ auf. Lies `AGENTS.md` und vor Änderungen Git-Status und Historie sowie `index.m
 
 ## Jede Quelle
 
+Bei einem ausdrücklich bestätigten Rücksetzauftrag mit `preparation_id`: rufe
+nur `wiki_ingest_transaction` (`operation: rollback`, `confirmed: true`) auf,
+prüfe Git-Status und melde das Ergebnis. Keine Quelle einlesen und keinen Commit
+erzeugen. Bei Ablehnung stoppe für Wartung; keine Git-Reset-/Clean-Befehle.
+
 1. Ermittle mit `wiki_ingest_status` den Status. Bei `new` oder `outdated`
    verwende ausschließlich dessen `adapter`, `source_key`, `source_path`,
    `source_revision`, `wiki_path` und `frontmatter`. Bearbeite `current`-Quellen
@@ -51,9 +56,12 @@ auf. Lies `AGENTS.md` und vor Änderungen Git-Status und Historie sowie `index.m
     Prüfe `overview.md` und `index.md` je Quelle; wenn keine Änderung nötig ist,
     bestätige sie mit `edits: []`. Ergänze `log.md` ausschließlich mit `append`.
     Nur diese Tool-Schreibvorgänge zählen als eigene Änderungen.
-    Bei einem Receipt-Schreibfehler wiederhole `apply` mit derselben Vorbereitung;
-    das Tool prüft den gespeicherten Schreibauftrag, bevor es fortsetzt. Bei
-    fremden Änderungen oder verbliebenen Lock-Dateien stoppe für bestätigte Wartung.
+     Rufe alle Transaktionsoperationen strikt nacheinander auf, auch für verschiedene
+     Seiten: warte jeweils auf Erfolg. Bei jedem Fehler stoppe den Batch sofort,
+     sichere `preparation_id` im blockierten Datensatz und melde den Fehler an den
+     Orchestrator. Keine automatische Wiederholung oder nächste Quelle. Ein später
+     bestätigter Reparaturversuch kann denselben gespeicherten Schreibauftrag
+     wieder aufnehmen; verbliebene Lock-Dateien benötigen bestätigte Wartung.
    Nenne den exakten Quellpfad und
    Fundstellen. Bei `paperless_url`: HTTPS-Feld erhalten und im Seitentext als
    klickbaren Originallink anzeigen. Integriere belegte Aussagen in betroffene
@@ -67,8 +75,8 @@ auf. Lies `AGENTS.md` und vor Änderungen Git-Status und Historie sowie `index.m
    über `apply` bearbeitet sein; die Validierung lehnt einen Quellseiten-Commit
    ohne diese Schritte ab. Prüfe Diff, Links und
    Herkunftsnachweise. Rufe `operation: validate` mit `preparation_id` vor dem
-   Commit auf; korrigiere eigene uncommitted Fehler im selben Auftrag und
-   validiere erneut. Bei fremden Änderungen stoppe. Erst nach erfolgreicher
+    Commit auf. Bei einem Validierungsfehler stoppe für die bestätigte
+    Reparatur. Erst nach erfolgreicher
     Validierung committe genau einmal pro Quelle: Verwende für Commit und Journal
     `changed_pages` aus der letzten erfolgreichen `validate`-Antwort, nicht die
     geplante Pfadliste aus `prepare` (unveränderte Seiten können fehlen).
@@ -133,7 +141,8 @@ Fundstellen und dem Wiki-Pfad ihrer ausführlichen Auswertung. Fehlt eine solche
 Auswertung, melde diese Grenze ausdrücklich statt einen vollständigen Bericht
 zu behaupten. Berichtstiefe hebt weder Anonymisierung noch Quellenregeln auf.
 
-Ein Datensatz entsteht erst nach dem Commit und nie davor. Was nicht verifiziert
+Ein Erfolgsdatensatz entsteht erst nach dem Commit; ein blockierter Datensatz
+entsteht auch ohne Commit unmittelbar beim Fehler. Was nicht verifiziert
 ist, wird nicht beschönigt: Schreibe `status: blocked` mit konkretem `blocker`
 und nenne den Grund, statt einen halben Erfolg zu melden. Ein Datensatz
 überschreitet nie sein Byte-Budget; kürze Detailtexte bewusst und weise jede
@@ -176,12 +185,12 @@ Keine Details erfinden; Unbekanntes als „Nicht ermittelt“ angeben.
 - Bei `page.blocked` rufe große Einträge stückweise über `record_chunk_offset`
   ab und füge sie in Offset-Reihenfolge zusammen. Verwende keine Tool-Output-
   Datei als Ersatz.
-- Einzelne Quellenfehler (unlesbares Format, mehrdeutige Auswahl, fehlender
-  Commit) hältst du als `record` (`status: blocked`) mit konkretem Blocker fest
-  und fährst nur bei sauberem Git-Status mit der nächsten Quelle deines Auftrags
-  fort. Offene Entwürfe oder Git-/Transaktionsblocker beenden den Batch sofort;
-  melde übrige Quellen als noch nicht versucht, damit der Orchestrator zuerst
-  bestätigte Wartung veranlasst. Globale `invalid`-
+- Jeder Quellen-, Tool-, Git- oder Transaktionsfehler beendet den Batch sofort,
+  auch bei sauberem Git-Status. Halte ihn als `record` (`status: blocked`) mit
+  konkretem Blocker und vorhandener `preparation_id` fest. Scheitert auch das
+  Journal, melde beide Fehler direkt. Melde übrige Quellen als noch nicht versucht,
+  damit der Orchestrator zuerst bestätigte Reparatur oder Rücksetzen und Auslassen
+  veranlasst. Globale `invalid`-
   oder `conflict`-Befunde stoppen sofort; melde sie und bearbeite nichts mehr.
 - Übersteigt eine Quelle oder ihr Seitenumfang das Kontextbudget, lies sie in
   validierten Abschnitten (`read` mit `offset` und `limit`) und verarbeite sie

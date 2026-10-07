@@ -103,8 +103,10 @@ explicitly flagged separately from ingestion status. See
 [ingestion reports](docs/ingest-reports.md) for the budget model, resume
 behavior, and validation.
 Ingestion checks local Git changes before planning and validates source metadata
-and committed contents before recording success. Blocked runs can request a
-confirmed repair through the existing wiki maintenance agent, then resume safely.
+and committed contents before recording success. Blocked runs stop on the first
+error and offer confirmed repair or a scoped rollback of the failed source's
+uncommitted drafts before skipping it and continuing with other sources.
+Successful source commits remain intact.
 
 ## Analyses
 

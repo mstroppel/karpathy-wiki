@@ -1,6 +1,7 @@
 import {
   applyIngestDraft,
   prepareIngest,
+  rollbackIngest,
   validateIngest,
 } from '/etc/opencode/tools/wiki_ingest_transaction_core.mjs'
 
@@ -15,7 +16,12 @@ export default {
         input: {
           type: 'object',
           properties: {
-            operation: { type: 'string', enum: ['prepare', 'apply', 'validate'] },
+            operation: { type: 'string', enum: ['prepare', 'apply', 'validate', 'rollback'] },
+            confirmed: {
+              type: 'boolean',
+              description:
+                'Bei rollback: nur nach ausdrücklicher Zustimmung true; setzt ausschließlich eigene uncommitted Änderungen dieser Vorbereitung zurück, erhält Backups und Historie.',
+            },
             adapter: { type: 'string' },
             source_key: { type: 'string' },
             source_revision: { type: 'string', pattern: '^[0-9a-f]{64}$' },
@@ -74,6 +80,7 @@ export default {
             draft: args.draft,
             edits: args.edits,
             append: args.append,
+            confirmed: args.confirmed,
           }
           let result
           switch (args.operation) {
@@ -85,6 +92,9 @@ export default {
               break
             case 'validate':
               result = await validateIngest(input)
+              break
+            case 'rollback':
+              result = await rollbackIngest(input)
               break
             default:
               throw new Error('operation ist ungültig')

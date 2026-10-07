@@ -276,7 +276,7 @@ class ConfigTests(unittest.TestCase):
         # commit, and unverified results are recorded as blocked.
         self.assertIn("wiki_ingest_journal", skill)
         self.assertIn("status: blocked", skill)
-        self.assertIn("entsteht erst nach dem Commit und nie davor", skill)
+        self.assertIn("Erfolgsdatensatz entsteht erst nach dem Commit", skill)
 
     def test_skills_declare_matching_frontmatter(self):
         skills = ROOT / "config" / "skills"

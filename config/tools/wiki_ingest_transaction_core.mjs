@@ -135,7 +135,17 @@ async function freshSource({ sourceRoot, wikiRoot, adapter, sourceKey, sourceRev
   if (item.source_revision !== sourceRevision)
     throw new Error('source_revision weicht vom frischen Status ab')
   const sourcePath = `${adapter}/${item.source_path}`
-  if ((await fileHash(sourceRoot, sourcePath)) !== sourceRevision) {
+  // Paperless revisions hash document inputs/export settings, not the rendered
+  // Markdown (which itself contains source_revision). Pin byte integrity
+  // separately; never compare that self-referential file with its input hash.
+  const sourceSha256 = await fileHash(sourceRoot, sourcePath)
+  if (adapter === 'paperless') {
+    const fields = parseFrontmatterFields((await bytesAt(sourceRoot, sourcePath)).toString('utf8'))
+    for (const [name, value] of Object.entries({ ...item.frontmatter, ...item.claim })) {
+      if (String(fields[name]) !== String(value))
+        throw new Error(`Paperless-Quelldatei: ${name} weicht vom Manifest ab`)
+    }
+  } else if (sourceSha256 !== sourceRevision) {
     throw new Error('Quelldatei hat sich geändert: SHA-256 weicht vom Status ab')
   }
   const wikiSourceRoot = path.join(wikiRoot, 'sources')
@@ -170,7 +180,7 @@ async function freshSource({ sourceRoot, wikiRoot, adapter, sourceKey, sourceRev
     record.source_path !== path.join(sourceRoot, sourcePath) ||
     record.wiki_path !== path.join(wikiSourceRoot, item.wiki_path) ||
     !isDeepStrictEqual(record.frontmatter, item.frontmatter) ||
-    (await fileHash(sourceRoot, sourcePath)) !== sourceRevision
+    (await fileHash(sourceRoot, sourcePath)) !== sourceSha256
   ) {
     throw new Error('Quelle/Statusdatensatz hat sich während der Prüfung geändert')
   }
@@ -188,6 +198,7 @@ async function freshSource({ sourceRoot, wikiRoot, adapter, sourceKey, sourceRev
     source_key: sourceKey,
     source_path: record.source_path,
     source_revision: sourceRevision,
+    source_sha256: sourceSha256,
     wiki_path: record.wiki_path,
     page: `sources/${item.wiki_path}`,
     expected,
@@ -258,6 +269,8 @@ async function savePreparation(root, receipt, create = false) {
 }
 
 async function checkFresh(input, receipt) {
+  if (receipt.rollback_started)
+    throw new Error('Vorbereitung wird/wurde zurückgesetzt; neu vorbereiten')
   const source = await freshSource({
     ...input,
     adapter: receipt.source.adapter,
@@ -265,7 +278,7 @@ async function checkFresh(input, receipt) {
     sourceRevision: receipt.source.source_revision,
   })
   if (!isDeepStrictEqual(source, receipt.source)) {
-    throw new Error('Statusdatensatz hat sich seit prepare geändert')
+    throw new Error('Quelle/Statusdatensatz (SHA-256) hat sich seit prepare geändert')
   }
   return source
 }
@@ -632,7 +645,7 @@ async function checkRetainedBackups(wikiRoot, receipt) {
   }
 }
 
-async function withPreparationLock(input, operation) {
+async function lockedPreparation(input, operation) {
   const opts = options(input)
   const relative = `${receiptPath(opts.preparationId)}.lock`
   const destination = await confined(opts.root, relative, true)
@@ -649,6 +662,112 @@ async function withPreparationLock(input, operation) {
   }
 }
 
+// Models can emit several tool calls in one turn. Serialize those calls in this
+// process, retaining the exclusive disk lock against other processes/crashes.
+const preparationQueues = new Map()
+async function withPreparationLock(input, operation) {
+  const opts = options(input)
+  const key = path.join(opts.root, receiptPath(opts.preparationId))
+  const previous = preparationQueues.get(key) ?? Promise.resolve()
+  const task = previous.then(() => lockedPreparation(opts, operation))
+  preparationQueues.set(key, task)
+  try {
+    return await task
+  } finally {
+    if (preparationQueues.get(key) === task) preparationQueues.delete(key)
+  }
+}
+
+export async function assertCleanIngestWiki(wikiRoot) {
+  await cleanIndex(wikiRoot)
+  if ((await git(wikiRoot, ['status', '--porcelain=v1', '-z', '--untracked-files=all'])).length)
+    throw new Error(
+      'Wiki ist nicht sauber; zuerst bestätigtes Rücksetzen oder Wartung erforderlich',
+    )
+}
+
+export async function assertIngestRolledBack(input) {
+  const opts = options(input)
+  const receipt = await loadPreparation(opts)
+  if (receipt.wiki_root !== path.resolve(opts.wikiRoot) || !receipt.rolled_back)
+    throw new Error('Vorbereitung muss zuerst bestätigt zurückgesetzt werden')
+}
+
+// Only this preparation's uncommitted bytes can be reset. Keep displaced inodes
+// as private evidence and persist each step before moving anything. A restart
+// can resume the reset without needing the source/provider to be available.
+async function rollbackDraft(opts) {
+  if (opts.confirmed !== true) throw new Error('Rücksetzen benötigt ausdrückliche Bestätigung')
+  const { root, wikiRoot } = opts
+  const receipt = await loadPreparation(opts)
+  if (receipt.wiki_root !== path.resolve(wikiRoot)) throw new Error('Wiki-Wurzel weicht ab')
+  await cleanIndex(wikiRoot)
+  if ((await commitHash(wikiRoot)) !== receipt.base_commit)
+    throw new Error('HEAD hat sich geändert; committed Arbeit benötigt bestätigte Wartung')
+  if (receipt.rolled_back) return { preparation_id: receipt.preparation_id, rolled_back: true }
+  await recoverPending(opts, receipt)
+  await checkRetainedBackups(wikiRoot, receipt)
+  // Preflight all pages before the first reset; never partially discard work
+  // merely because a later declared page has an obvious foreign edit.
+  for (const [page, baseline] of Object.entries(receipt.baseline)) {
+    if (receipt.rollback_pending?.page === page) continue
+    const bytes = await bytesAt(wikiRoot, page, true)
+    if ((bytes === null ? null : hash(bytes)) !== (receipt.owned[page] ?? baseline))
+      throw new Error(`Fremde worktree Änderung an ${page}; kein Rücksetzen`)
+  }
+  receipt.rollback_started = true
+  receipt.validated = null
+  await savePreparation(root, receipt)
+  for (const [page, baseline] of Object.entries(receipt.baseline)) {
+    if (!receipt.rollback_pending && (receipt.owned[page] ?? baseline) === baseline) continue
+    if (!receipt.rollback_pending) {
+      receipt.rollback_pending = {
+        page,
+        before: receipt.owned[page],
+        backup: await createBackupSlot(wikiRoot),
+      }
+      await savePreparation(root, receipt)
+    }
+    const pending = receipt.rollback_pending
+    if (pending.page !== page) continue
+    const destination = await confined(wikiRoot, page, true)
+    const directory = await backupRoot(wikiRoot)
+    let displaced = await bytesAt(directory, pending.backup, true)
+    if (displaced === null) {
+      const current = await bytesAt(wikiRoot, page)
+      if (hash(current) !== pending.before) throw new Error('Fremde Änderung; kein Rücksetzen')
+      await rename(destination, path.join(directory, pending.backup))
+      displaced = await bytesAt(directory, pending.backup)
+    }
+    await checkBackup(wikiRoot, pending)
+    const original =
+      baseline === null
+        ? null
+        : await git(wikiRoot, ['cat-file', 'blob', `${receipt.base_commit}:${page}`])
+    if (original !== null && hash(original) !== baseline) throw new Error('Baseline stimmt nicht')
+    const current = await bytesAt(wikiRoot, page, true)
+    if (current === null && original !== null) {
+      const temporary = await writeTemporaryFile(wikiRoot, page, original, 0o644)
+      try {
+        await link(path.join(wikiRoot, temporary), destination)
+      } finally {
+        await rm(path.join(wikiRoot, temporary), { force: true })
+      }
+    } else if ((current === null ? null : hash(current)) !== baseline) {
+      throw new Error(`Fremde Änderung während Rücksetzen: ${page}; Backup erhalten`)
+    }
+    receipt.backups.push({ path: pending.backup, hash: hash(displaced) })
+    receipt.owned[page] = baseline
+    receipt.rollback_pending = null
+    await savePreparation(root, receipt)
+  }
+  await checkRetainedBackups(wikiRoot, receipt)
+  receipt.rolled_back = true
+  await savePreparation(root, receipt)
+  return { preparation_id: receipt.preparation_id, rolled_back: true }
+}
+
+export const rollbackIngest = (input) => withPreparationLock(input, rollbackDraft)
 export const applyIngestDraft = (input) => withPreparationLock(input, applyDraft)
 export const validateIngest = (input) => withPreparationLock(input, validateDraft)
 

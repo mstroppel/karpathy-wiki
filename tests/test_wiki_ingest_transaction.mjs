@@ -12,16 +12,259 @@ import { syncBuiltinESMExports } from 'node:module'
 import {
   applyIngestDraft,
   prepareIngest,
+  rollbackIngest,
   validateIngest,
   verifyIngestCommit,
 } from '../config/tools/wiki_ingest_transaction_core.mjs'
-import { loadRun, startRun, writeRecord } from '../config/tools/wiki_ingest_journal_core.mjs'
+import {
+  loadRun,
+  planNextBatch,
+  skipBlockedSource,
+  startRun,
+  writeRecord,
+} from '../config/tools/wiki_ingest_journal_core.mjs'
 import { parseFrontmatterFields } from '../config/tools/wiki_ingest_status_core.mjs'
 
 const runFile = promisify(execFile)
 const PAGE = 'sources/webdav/notes.md'
 const SHA = (text) => createHash('sha256').update(text).digest('hex')
 const SOURCE = 'Synthetic selected source.\n'
+
+test('real Paperless renderer revisions survive prepare, apply, validate and journal verification', async (t) => {
+  const f = await fixture(t, { existing: false })
+  const { stdout } = await runFile(
+    'python3',
+    [
+      '-c',
+      `
+import json
+from collections import Counter
+from karpathy_wiki_ingest_paperless.documents import source_hash, render_document
+doc = {"id": 42, "title": "Synthetic note", "content": "A synthetic observation.", "created": "2026-10-07"}
+revision = source_hash(doc, "synthetic-redaction-settings", None, [])
+text = render_document(42, doc["title"], doc["content"], "https://example.invalid", Counter(), doc["created"], None, [], 0, revision)
+print(json.dumps({"revision": revision, "text": text}))
+`,
+    ],
+    { env: { ...process.env, PYTHONPATH: path.resolve('ingest/paperless/src') } },
+  )
+  const { revision, text } = JSON.parse(stdout)
+  assert.notEqual(SHA(text), revision)
+  const page = 'sources/paperless/42.md'
+  const frontmatter = {
+    paperless_id: 42,
+    paperless_url: 'https://example.invalid/documents/42',
+    source_revision: revision,
+  }
+  await mkdir(path.join(f.sourceRoot, 'paperless'))
+  await writeFile(path.join(f.sourceRoot, 'paperless', '42.md'), text)
+  await writeFile(
+    path.join(f.sourceRoot, 'paperless', 'manifest.json'),
+    JSON.stringify({
+      ...f.manifest,
+      source: 'paperless',
+      wiki_root: 'paperless',
+      items: [
+        {
+          source_key: '42',
+          source_path: '42.md',
+          wiki_path: 'paperless/42.md',
+          source_revision: revision,
+          frontmatter,
+          claim: { paperless_id: '42' },
+        },
+      ],
+    }),
+  )
+  const prepared = await f.prepare({
+    adapter: 'paperless',
+    sourceKey: '42',
+    sourceRevision: revision,
+    changedPages: [page, 'overview.md', 'index.md', 'log.md'],
+  })
+  const input = { ...f.opts, preparationId: prepared.preparation_id }
+  await applyIngestDraft({ ...input, draft: '# Synthetic note\nA synthetic observation.\n' })
+  await f.complete(input)
+  await validateIngest(input)
+  // Tampering that leaves the provider revision/frontmatter intact still fails.
+  await writeFile(path.join(f.sourceRoot, 'paperless', '42.md'), text + 'Changed body.\n')
+  await assert.rejects(validateIngest(input), /SHA-256/)
+  await writeFile(path.join(f.sourceRoot, 'paperless', '42.md'), text)
+  await f.git('add', '--', page, 'log.md')
+  await f.git('commit', '-qm', 'ingest synthetic Paperless export')
+  const { run } = await startRun({ root: f.root })
+  const result = await writeRecord({
+    ...f.opts,
+    runId: run.run_id,
+    record: f.record(input, await f.git('rev-parse', 'HEAD'), {
+      adapter: 'paperless',
+      source_key: '42',
+      source_revision: revision,
+      source_path: path.join(f.sourceRoot, 'paperless', '42.md'),
+      wiki_path: path.join(f.wikiRoot, page),
+      changed_pages: [page, 'log.md'],
+    }),
+  })
+  assert.equal(result.counts.ingested, 1)
+  await writeFile(
+    path.join(f.sourceRoot, 'paperless', '42.md'),
+    text.replace('paperless_id: 42', 'paperless_id: 43'),
+  )
+  await assert.rejects(
+    f.prepare({ adapter: 'paperless', sourceKey: '42', sourceRevision: revision }),
+    /paperless_id/,
+  )
+})
+
+test('parallel page calls serialize and preserve both edits without lock errors', async (t) => {
+  const f = await fixture(t)
+  const input = await f.prepared()
+  await Promise.all([
+    applyIngestDraft({ ...input, draft: '# Supported synthesis\n' }),
+    applyIngestDraft({ ...input, page: 'overview.md', append: '\nFirst finding.\n' }),
+    applyIngestDraft({ ...input, page: 'overview.md', append: '\nSecond finding.\n' }),
+    applyIngestDraft({ ...input, page: 'index.md', edits: [] }),
+    applyIngestDraft({ ...input, page: 'log.md', append: '\n- Ingest.\n' }),
+  ])
+  assert.match(
+    await readFile(path.join(f.wikiRoot, 'overview.md'), 'utf8'),
+    /First finding\.\n\nSecond finding/,
+  )
+  assert.equal((await validateIngest(input)).validated, true)
+})
+
+test('queued calls stop when an earlier operation fails', async (t) => {
+  const f = await fixture(t)
+  const input = await f.prepared()
+  const results = await Promise.allSettled([
+    applyIngestDraft({
+      ...input,
+      page: 'overview.md',
+      edits: [{ old_text: 'absent', new_text: 'invalid' }],
+    }),
+    applyIngestDraft({ ...input, page: 'log.md', append: '\nMust not run.\n' }),
+  ])
+  assert.deepEqual(
+    results.map((result) => result.status),
+    ['rejected', 'rejected'],
+  )
+  assert.equal(await f.git('status', '--porcelain'), '')
+})
+
+for (const existing of [true, false]) {
+  test(`confirmed rollback restores the exact clean baseline (existing=${existing}) without a live provider`, async (t) => {
+    const f = await fixture(t, { existing })
+    const head = await f.git('rev-parse', 'HEAD')
+    const input = await f.applied()
+    await assert.rejects(rollbackIngest(input), /Bestätigung/)
+    await rm(f.sourceRoot, { recursive: true })
+    assert.equal((await rollbackIngest({ ...input, confirmed: true })).rolled_back, true)
+    assert.equal(await f.git('status', '--porcelain'), '')
+    assert.equal(await f.git('rev-parse', 'HEAD'), head)
+    assert.equal((await rollbackIngest({ ...input, confirmed: true })).rolled_back, true)
+    await assert.rejects(applyIngestDraft({ ...input, draft: '# Stale\n' }), /zurückgesetzt/)
+    assert.ok(
+      (await readdir(path.join(f.wikiRoot, '.git'))).some((name) =>
+        name.startsWith('ingest-backup-'),
+      ),
+    )
+  })
+}
+
+test('rollback refuses foreign edits, staged changes and committed work', async (t) => {
+  const f = await fixture(t)
+  const input = await f.applied()
+  const overview = path.join(f.wikiRoot, 'overview.md')
+  const owned = await readFile(overview, 'utf8')
+  await writeFile(overview, 'Foreign work\n')
+  await assert.rejects(rollbackIngest({ ...input, confirmed: true }), /Fremde/)
+  assert.match(await readFile(path.join(f.wikiRoot, PAGE), 'utf8'), /Newly read/)
+  await writeFile(overview, owned)
+  await f.git('add', '--', 'overview.md')
+  await assert.rejects(rollbackIngest({ ...input, confirmed: true }), /staged/)
+  await f.commit()
+  await assert.rejects(rollbackIngest({ ...input, confirmed: true }), /HEAD/)
+})
+
+test('failure stops planning until confirmed rollback and skip; next failure stops again', async (t) => {
+  const f = await fixture(t)
+  const other = 'Other synthetic source.\n'
+  f.manifest.items.push({
+    ...f.manifest.items[0],
+    source_key: 'other.md',
+    source_path: 'other.md',
+    wiki_path: 'webdav/other.md',
+    source_revision: SHA(other),
+    frontmatter: { source: 'webdav', source_path: 'other.md', source_revision: SHA(other) },
+    claim: { source: 'webdav', source_path: 'other.md' },
+  })
+  await writeFile(path.join(f.sourceRoot, 'webdav', 'manifest.json'), JSON.stringify(f.manifest))
+  await writeFile(path.join(f.sourceRoot, 'webdav', 'other.md'), other)
+  const input = await f.applied()
+  const { run } = await startRun({ root: f.root })
+  const args = { ...f.opts, runId: run.run_id, wikiSourceRoot: path.join(f.wikiRoot, 'sources') }
+  const blocked = f.record(input, null, {
+    status: 'blocked',
+    changed_pages: [],
+    blocker: 'Synthetic extraction failure',
+  })
+  await writeRecord({ ...args, record: blocked })
+  let plan = await planNextBatch(args)
+  assert.equal(plan.recovery_required, true)
+  assert.deepEqual(plan.batch, [])
+  await assert.rejects(skipBlockedSource({ ...args, recordIndex: 0 }), /Bestätigung/)
+  await assert.rejects(skipBlockedSource({ ...args, recordIndex: 0, confirmed: true }), /sauber/)
+  await rollbackIngest({ ...input, confirmed: true })
+  await skipBlockedSource({ ...args, recordIndex: 0, confirmed: true })
+  plan = await planNextBatch(args)
+  assert.equal(plan.blocked, false)
+  assert.deepEqual(
+    plan.batch.map((entry) => entry.source_key),
+    ['other.md'],
+  )
+  assert.equal((await loadRun(args)).counts.blocked, 1)
+  await writeRecord({ ...args, record: blocked })
+  assert.equal((await planNextBatch(args)).recovery_required, true)
+})
+
+for (const existing of [true, false]) {
+  test(`rollback resumes after interruption just after displacement (existing=${existing})`, async (t) => {
+    const f = await fixture(t, { existing })
+    const input = await f.applied()
+    const originalRename = fs.rename
+    const injected = t.mock.method(fs, 'rename', async (from, to) => {
+      await originalRename(from, to)
+      if (from === path.join(f.wikiRoot, PAGE)) throw new Error('Synthetic reset interruption')
+    })
+    syncBuiltinESMExports()
+    try {
+      await assert.rejects(rollbackIngest({ ...input, confirmed: true }), /reset interruption/)
+    } finally {
+      injected.mock.restore()
+      syncBuiltinESMExports()
+    }
+    await rollbackIngest({ ...input, confirmed: true })
+    assert.equal(await f.git('status', '--porcelain'), '')
+  })
+}
+
+test('rollback preserves an edit racing displacement and refuses to discard it', async (t) => {
+  const f = await fixture(t)
+  const input = await f.applied()
+  const originalRename = fs.rename
+  const injected = t.mock.method(fs, 'rename', async (from, to) => {
+    if (from === path.join(f.wikiRoot, PAGE)) await writeFile(from, '# Racing foreign work\n')
+    return originalRename(from, to)
+  })
+  syncBuiltinESMExports()
+  try {
+    await assert.rejects(rollbackIngest({ ...input, confirmed: true }), /Fremde/)
+  } finally {
+    injected.mock.restore()
+    syncBuiltinESMExports()
+  }
+  assert.equal(await readFile(path.join(f.wikiRoot, PAGE), 'utf8'), '# Racing foreign work\n')
+})
 
 async function fixture(t, { existing = true, revision = SHA('previous source') } = {}) {
   const base = await mkdtemp(path.join(os.tmpdir(), 'ingest-transaction-'))

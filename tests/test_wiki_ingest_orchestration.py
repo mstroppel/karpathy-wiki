@@ -50,7 +50,7 @@ WORKER_PHRASES = (
     "Ergebnisdatensatz",
     "wiki_ingest_journal",
     "status: blocked",
-    "entsteht erst nach dem Commit und nie davor",
+    "Erfolgsdatensatz entsteht erst nach dem Commit",
     "Inhalte fallen nie still weg",
     "Quelldatei unverändert bestätigen",
     "committe genau einmal pro Quelle",
@@ -142,7 +142,7 @@ class SkillContractTests(unittest.TestCase):
     def test_worker_requires_substantive_budgeted_report_details(self):
         text = WORKER_SKILL.read_text(encoding="utf-8")
         depth = text.split("### Inhaltliche Berichtstiefe\n", 1)[1].split(
-            "\nEin Datensatz entsteht", 1
+            "\nEin Erfolgsdatensatz entsteht", 1
         )[0]
         for phrase in (
             "jeden Ergebnisdatensatz",
@@ -179,8 +179,8 @@ class SkillContractTests(unittest.TestCase):
             "`edits: []`",
             "`log.md` ausschließlich mit `append`",
             "Alle drei Pflichtseiten müssen vor dem Commit",
-            "nur bei sauberem Git-Status",
-            "beenden den Batch sofort",
+            "auch bei sauberem Git-Status",
+            "beendet den Batch sofort",
             "noch nicht versucht",
             "mögliche Kürzung",
             "statt lange Sammelseiten aus dem Kontext zu rekonstruieren",
@@ -291,7 +291,8 @@ class CommandAndAgentTests(unittest.TestCase):
                 self.assertIn(phrase, recovery)
         lint = (ROOT / "config/skills/wiki-lint/SKILL.md").read_text(encoding="utf-8")
         self.assertIn("ausschließlich lesend Git-Status", text)
-        self.assertIn("Git-/Transaktionsblocker", text)
+        self.assertIn("skip_blocked", text)
+        self.assertIn("operation: rollback", text)
         self.assertIn("finale Blocker keine Quelle", recovery)
         self.assertIn("gezielter Git-Prüfung", lint)
         for phrase in (

@@ -4,6 +4,8 @@ import { appendFile, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/p
 import path from 'node:path'
 import {
   PREPARATION_RE,
+  assertCleanIngestWiki,
+  assertIngestRolledBack,
   confinedIngestPath,
   verifyIngestCommit,
 } from './wiki_ingest_transaction_core.mjs'
@@ -206,6 +208,7 @@ function runFileView(run) {
     final_status: run.final_status,
     unfinished: run.unfinished,
     report: run.report,
+    recovery: run.recovery,
   }
 }
 
@@ -735,6 +738,47 @@ async function fileSize(filePath) {
   }
 }
 
+// A skip is an explicit recovery decision, not a successful ingestion. It only
+// acknowledges this exact record: a later failure stops planning again.
+export async function skipBlockedSource({
+  root,
+  runId,
+  recordIndex,
+  confirmed,
+  wikiRoot = '/knowledge/wiki',
+  now = Date.now(),
+}) {
+  if (confirmed !== true) throw new Error('Auslassen benötigt ausdrückliche Bestätigung')
+  checkInteger(recordIndex, 'record_index', 0, Number.MAX_SAFE_INTEGER)
+  const run = await loadRun({ root, runId })
+  if (run.state !== 'running') throw new Error('Lauf ist bereits abgeschlossen')
+  const record = run.effective.find(
+    (entry) => entry.record_index === recordIndex && entry.status === 'blocked',
+  )
+  if (!record) throw new Error('Kein aktueller blockierter Datensatz an record_index')
+  await assertCleanIngestWiki(wikiRoot)
+  if (record.preparation_id) {
+    await assertIngestRolledBack({ root, wikiRoot, preparationId: record.preparation_id })
+  }
+  const skipped = [...new Set([...(run.recovery?.skipped_records ?? []), recordIndex])]
+  await writeRunFile(
+    root,
+    runFileView({
+      ...run,
+      updated_at: nowIso(now),
+      recovery: { skipped_records: skipped },
+    }),
+  )
+  return {
+    run_id: runId,
+    skipped_record: recordIndex,
+    status: 'blocked',
+    recovery_required: run.effective.some(
+      (entry) => entry.status === 'blocked' && !skipped.includes(entry.record_index),
+    ),
+  }
+}
+
 // Plan the next bounded batch: a fresh status scan every call, journal-aware
 // exclusions, and a volume budget instead of a bare source count. One call
 // returns one worker assignment; the batch counter drives run rollover.
@@ -780,6 +824,23 @@ export async function planNextBatch({
       blocked: true,
       reasons: [
         'globale invalid/conflict-Befunde liegen vor; vor Änderungen stoppen und Diagnosen melden',
+      ],
+    }
+  }
+
+  const unacknowledged = run.effective.filter(
+    (record) =>
+      record.status === 'blocked' && !run.recovery?.skipped_records.includes(record.record_index),
+  )
+  if (unacknowledged.length) {
+    return {
+      ...base,
+      batch: [],
+      remaining: base.pending_total,
+      blocked: true,
+      recovery_required: true,
+      reasons: [
+        'Quellenfehler: Reparatur oder bestätigtes Auslassen erforderlich; keine weiteren Batches',
       ],
     }
   }

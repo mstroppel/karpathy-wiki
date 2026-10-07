@@ -6,6 +6,7 @@ import {
   loadRun,
   planNextBatch,
   readChunk,
+  skipBlockedSource,
   startRun,
   writeRecord,
 } from '/etc/opencode/tools/wiki_ingest_journal_core.mjs'
@@ -49,6 +50,7 @@ export default {
                 'read',
                 'report',
                 'run_finish',
+                'skip_blocked',
               ],
               description: 'Vorgang',
             },
@@ -60,6 +62,11 @@ export default {
               type: 'boolean',
               description:
                 'Bei run_start einen offenen Lauf fortsetzen statt einen neuen zu starten (Standard: true)',
+            },
+            confirmed: {
+              type: 'boolean',
+              description:
+                'Bei skip_blocked: ausdrückliche Zustimmung zum Auslassen genau von record_index; erst nach Rücksetzen eigener Entwürfe und sauberem Git. Fehler bleibt im Bericht.',
             },
             budget_tokens: {
               type: 'integer',
@@ -214,6 +221,15 @@ export default {
                 runId: args.run_id,
                 budgetTokens: args.budget_tokens,
                 maxSourcesPerBatch: args.max_sources_per_batch,
+              })
+              break
+            }
+            case 'skip_blocked': {
+              result = await skipBlockedSource({
+                root,
+                runId: args.run_id,
+                recordIndex: args.record_index,
+                confirmed: args.confirmed,
               })
               break
             }
