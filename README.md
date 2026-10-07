@@ -88,7 +88,8 @@ OpenCode to import `/knowledge/sources/webdav`. Generated pages are written to
 
 `/ingest-new` processes all new and changed sources sequentially, with one
 commit per source, with one fresh worker session per source and a documented
-working-context budget. Workers propose changes in private drafts; code validates
+soft working-context target. Estimated overshoots warn rather than abort; the
+model's actual context limit still applies. Workers propose changes in private drafts; code validates
 and publishes complete transactions, generates index/log entries, and reconciles
 interrupted commit/journal boundaries without duplicate publication.
 Every processed source leaves a durable result record in a private

@@ -194,17 +194,25 @@ code-generated rather than copied through chat.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `WIKI_INGEST_BATCH_BUDGET_TOKENS` | `32000` | Estimated working budget and tool byte allowance |
+| `WIKI_INGEST_BATCH_BUDGET_TOKENS` | `32000` | Soft estimated working-context target, not an enforced model limit |
 | `WIKI_INGEST_BATCH_MAX_SOURCES` | `1` | Upper cap; the planner always assigns one fresh worker/source |
 | `WIKI_INGEST_RUN_MAX_BATCHES` | `12` | New assignments before rollover; `0` is unlimited |
 
 Each retrieval is at most 4 KiB and 80 lines. Cumulative retrieved/proposed text
-is limited to `max(0, budget_tokens - 12000) * 2` bytes, with at most 48
-retrieval/staging/declaration calls. These limits are deliberately conservative
-but are not a tokenizer or a hard provider-token guarantee. Measure peak
-`input + cache.read` for the target runtime/model; below-overhead budgets cannot
-extract material. A source over the working allowance is an explicit blocker,
-never a silent partial extraction. Raising the budget is an operator decision.
+is tracked, not capped. Tool responses expose `context_budget` with the configured
+`target_tokens`, estimated tokens (16,000 overhead plus cumulative read/proposal
+bytes divided by four, rounded up), byte counters, call count and `exceeded`.
+`warnings` flag exceeding the target or 48 retrieval/staging/declaration calls;
+neither condition rejects a read, draft or publication. Fresh single-source workers
+and targeted overview retrieval remain mandatory. Full source reading, source
+integrity, content preservation and verified publication remain enforced.
+
+These estimates are not a tokenizer or a provider-token guarantee. The actual
+model context window still applies: large sources may cost more, trigger compaction
+or encounter real model/transport failures. Measure peak `input + cache.read` for
+the target runtime/model. A warning never permits silent partial extraction.
+The retained receipt field `context_bytes_limit` describes the estimated byte
+target only; it is not used to reject work, including resumed preparations.
 
 Model-free single-source planning evidence (12 KiB fixtures, 32,000 budget):
 
