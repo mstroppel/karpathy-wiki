@@ -41,7 +41,14 @@ auf. Lies `AGENTS.md` und vor Änderungen Git-Status und Historie sowie `index.m
    zum Staging oder Verwerfen. Schreibe die Quellenseite mit `operation: apply`,
    `preparation_id` und `draft` (vollständiges Markdown ohne kanonische
    Felder aus `canonical_fields`); das Tool übernimmt diese strukturiert und erhält
-   Zusatzfelder. Korrigiere auch eigene Quellseitenentwürfe nur über `apply`.
+    Zusatzfelder. Korrigiere auch eigene Quellseitenentwürfe nur über `apply`.
+    Schreibe jede thematische Seite ebenfalls über `operation: apply` mit
+    `preparation_id`, `page` (deklarierter relativer Wiki-Pfad) und vollständigem
+    `draft`; verwende diesen Weg auch für Korrekturen an `overview.md`, `index.md`
+    und `log.md`. Nur diese Tool-Schreibvorgänge zählen als eigene Änderungen.
+    Bei einem Receipt-Schreibfehler wiederhole `apply` mit derselben Vorbereitung;
+    das Tool prüft den gespeicherten Schreibauftrag, bevor es fortsetzt. Bei
+    fremden Änderungen oder verbliebenen Lock-Dateien stoppe für bestätigte Wartung.
    Nenne den exakten Quellpfad und
    Fundstellen. Bei `paperless_url`: HTTPS-Feld erhalten und im Seitentext als
    klickbaren Originallink anzeigen. Integriere belegte Aussagen in betroffene

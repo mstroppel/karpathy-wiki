@@ -6,6 +6,8 @@ import path from 'node:path'
 import os from 'node:os'
 import test from 'node:test'
 import { promisify } from 'node:util'
+import fs from 'node:fs/promises'
+import { syncBuiltinESMExports } from 'node:module'
 
 import {
   applyIngestDraft,
@@ -84,7 +86,7 @@ async function fixture(t, { existing = true, revision = SHA('previous source') }
       ...input,
       draft: '---\nnew_extra: "retain too"\n---\n# Newly read source\nA supported synthesis.\n',
     })
-    await writeFile(path.join(wikiRoot, 'overview.md'), '# New overview\n')
+    await applyIngestDraft({ ...input, page: 'overview.md', draft: '# New overview\n' })
     return input
   }
   const validated = async () => {
@@ -230,7 +232,11 @@ test('an explicit reread may retain identical findings while refreshing metadata
   const input = await f.prepared()
   await assert.rejects(validateIngest(input), /apply/)
   await applyIngestDraft({ ...input, draft: '# Previous body\n' })
-  await writeFile(path.join(f.wikiRoot, 'overview.md'), '# Confirmed unchanged findings\n')
+  await applyIngestDraft({
+    ...input,
+    page: 'overview.md',
+    draft: '# Confirmed unchanged findings\n',
+  })
   await validateIngest(input)
   const commit = await f.commit()
   await verifyIngestCommit({ ...f.opts, record: f.record(input, commit) })
@@ -294,6 +300,64 @@ for (const existing of [true, false]) {
     await validateIngest(input)
   })
 }
+
+test('writes through an old descriptor remain in retained evidence after publication', async (t) => {
+  const f = await fixture(t)
+  const input = await f.prepared()
+  const writer = await open(path.join(f.wikiRoot, PAGE), 'r+')
+  try {
+    await applyIngestDraft({ ...input, draft: '# Own published draft\n' })
+    await writer.truncate(0)
+    await writer.writeFile('# Late descriptor edit\n')
+  } finally {
+    await writer.close()
+  }
+  assert.match(await readFile(path.join(f.wikiRoot, PAGE), 'utf8'), /Own published draft/)
+  const backups = (await readdir(path.join(f.wikiRoot, '.git'))).filter((name) =>
+    name.startsWith('ingest-backup-'),
+  )
+  assert.equal(backups.length, 1)
+  assert.equal(
+    await readFile(path.join(f.wikiRoot, '.git', backups[0], 'page'), 'utf8'),
+    '# Late descriptor edit\n',
+  )
+})
+
+test('a failed installation restores the verified prior page on retry', async (t) => {
+  const f = await fixture(t)
+  const input = await f.prepared()
+  const original = fs.link
+  const injected = t.mock.method(fs, 'link', async (from, to) => {
+    if (to === path.join(f.wikiRoot, PAGE)) throw new Error('Synthetic install failure')
+    return original(from, to)
+  })
+  syncBuiltinESMExports()
+  try {
+    await assert.rejects(
+      applyIngestDraft({ ...input, draft: '# Retry draft\n' }),
+      /install failure/,
+    )
+  } finally {
+    injected.mock.restore()
+    syncBuiltinESMExports()
+  }
+  await assert.rejects(readFile(path.join(f.wikiRoot, PAGE)), /ENOENT/)
+  await applyIngestDraft({ ...input, draft: '# Retry draft\n' })
+  await validateIngest(input)
+})
+
+test('apply and validate never proceed through an existing preparation lock', async (t) => {
+  const f = await fixture(t)
+  const input = await f.prepared()
+  const destination = path.join(f.wikiRoot, PAGE)
+  const before = await readFile(destination)
+  const lock = path.join(f.root, 'preparations', `${input.preparationId}.json.lock`)
+  await writeFile(lock, 'synthetic owner\n')
+  await assert.rejects(applyIngestDraft({ ...input, draft: '# Blocked\n' }), /EEXIST/)
+  await assert.rejects(validateIngest(input), /EEXIST/)
+  assert.deepEqual(await readFile(destination), before)
+  assert.equal(await readFile(lock, 'utf8'), 'synthetic owner\n')
+})
 
 test('foreign edits during temporary writing are preserved before replacement', async (t) => {
   const f = await fixture(t)
@@ -363,6 +427,117 @@ test('an interrupted receipt write preserves parseable evidence and allows valid
   await verifyIngestCommit({ ...f.opts, record: f.record(input, commit) })
 })
 
+test('validate rejects foreign edits to declared thematic pages without adopting them', async (t) => {
+  const f = await fixture(t)
+  const input = await f.prepared()
+  await applyIngestDraft({ ...input, draft: '# Source draft\n' })
+  await writeFile(path.join(f.wikiRoot, 'overview.md'), '# Foreign declared-page edit\n')
+  await assert.rejects(validateIngest(input), /Fremde worktree/)
+  await assert.rejects(
+    applyIngestDraft({ ...input, page: 'overview.md', draft: '# Own overview\n' }),
+    /Fremde worktree/,
+  )
+  assert.equal(
+    await readFile(path.join(f.wikiRoot, 'overview.md'), 'utf8'),
+    '# Foreign declared-page edit\n',
+  )
+})
+
+test('thematic apply supports new pages and corrections, but rejects undeclared paths', async (t) => {
+  const f = await fixture(t)
+  const prepared = await f.prepare({ changedPages: [PAGE, 'new.md'] })
+  const input = { ...f.opts, preparationId: prepared.preparation_id }
+  await applyIngestDraft({ ...input, draft: '# Source draft\n' })
+  await assert.rejects(
+    applyIngestDraft({ ...input, page: 'other.md', draft: '# Other\n' }),
+    /nicht deklariert/,
+  )
+  await applyIngestDraft({ ...input, page: 'new.md', draft: '# New theme\n' })
+  await applyIngestDraft({ ...input, page: 'new.md', draft: '# Corrected theme\n' })
+  assert.deepEqual((await validateIngest(input)).changed_pages, [PAGE, 'new.md'])
+})
+
+test('a mutation immediately before page displacement is retained and blocks publication', async (t) => {
+  const f = await fixture(t)
+  const input = await f.prepared()
+  const original = fs.rename
+  const injected = t.mock.method(fs, 'rename', async (from, to) => {
+    if (from === path.join(f.wikiRoot, PAGE)) await writeFile(from, '# Last-instant foreign edit\n')
+    return original(from, to)
+  })
+  syncBuiltinESMExports()
+  try {
+    await assert.rejects(applyIngestDraft({ ...input, draft: '# Own draft\n' }), /Backup erhalten/)
+  } finally {
+    injected.mock.restore()
+    syncBuiltinESMExports()
+  }
+  assert.equal(await readFile(path.join(f.wikiRoot, PAGE), 'utf8'), '# Last-instant foreign edit\n')
+  const receipt = JSON.parse(
+    await readFile(path.join(f.root, 'preparations', `${input.preparationId}.json`)),
+  )
+  assert.equal(
+    await readFile(path.join(f.wikiRoot, '.git', receipt.pending.backup), 'utf8'),
+    '# Last-instant foreign edit\n',
+  )
+  await assert.rejects(validateIngest(input), /Backup erhalten|invalid\/conflict/)
+})
+
+test('a destination created after displacement wins the exclusive installation', async (t) => {
+  const f = await fixture(t)
+  const input = await f.prepared()
+  const before = await readFile(path.join(f.wikiRoot, PAGE))
+  const original = fs.link
+  const injected = t.mock.method(fs, 'link', async (from, to) => {
+    if (to === path.join(f.wikiRoot, PAGE)) await writeFile(to, '# Concurrent new inode\n')
+    return original(from, to)
+  })
+  syncBuiltinESMExports()
+  try {
+    await assert.rejects(applyIngestDraft({ ...input, draft: '# Own draft\n' }), /EEXIST/)
+  } finally {
+    injected.mock.restore()
+    syncBuiltinESMExports()
+  }
+  assert.equal(await readFile(path.join(f.wikiRoot, PAGE), 'utf8'), '# Concurrent new inode\n')
+  const receipt = JSON.parse(
+    await readFile(path.join(f.root, 'preparations', `${input.preparationId}.json`)),
+  )
+  assert.deepEqual(await readFile(path.join(f.wikiRoot, '.git', receipt.pending.backup)), before)
+  await assert.rejects(
+    applyIngestDraft({ ...input, draft: '# Retry\n' }),
+    /Fremde worktree|invalid\/conflict/,
+  )
+})
+
+for (const existing of [true, false]) {
+  test(`apply recovers a failed final receipt write for ${existing ? 'existing' : 'new'} pages`, async (t) => {
+    const f = await fixture(t, { existing })
+    const input = await f.prepared()
+    const probe = await open(path.join(f.base, 'probe'), 'wx')
+    const prototype = Object.getPrototypeOf(probe)
+    await probe.close()
+    const original = prototype.write
+    const injected = t.mock.method(prototype, 'write', async function (buffer, ...args) {
+      if (buffer.toString().includes('"pending":null'))
+        throw new Error('Synthetic final receipt failure')
+      return original.call(this, buffer, ...args)
+    })
+    await assert.rejects(
+      applyIngestDraft({ ...input, draft: '# Retryable draft\n' }),
+      /final receipt failure/,
+    )
+    injected.mock.restore()
+    await applyIngestDraft({ ...input, draft: '# Retryable draft\n' })
+    const result = await validateIngest(input)
+    const commit = await f.commit()
+    await verifyIngestCommit({
+      ...f.opts,
+      record: f.record(input, commit, { changed_pages: result.changed_pages }),
+    })
+  })
+}
+
 test('current-source reread can commit only the log/overview and still verify its source page', async (t) => {
   const f = await fixture(t, { revision: SHA(SOURCE) })
   let input = await f.applied()
@@ -371,7 +546,7 @@ test('current-source reread can commit only the log/overview and still verify it
   input = await f.prepared()
   const page = await readFile(path.join(f.wikiRoot, PAGE), 'utf8')
   await applyIngestDraft({ ...input, draft: page })
-  await writeFile(path.join(f.wikiRoot, 'overview.md'), '# Explicit reread confirmed\n')
+  await applyIngestDraft({ ...input, page: 'overview.md', draft: '# Explicit reread confirmed\n' })
   const result = await validateIngest(input)
   assert.deepEqual(result.changed_pages, ['overview.md'])
   const commit = await f.commit()

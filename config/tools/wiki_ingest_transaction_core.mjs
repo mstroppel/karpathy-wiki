@@ -345,6 +345,8 @@ export async function prepareIngest(input) {
     base_commit: await commitHash(wikiRoot),
     baseline,
     applied: null,
+    owned: {},
+    pending: null,
     validated: null,
   }
   await savePreparation(root, receipt, true)
@@ -363,7 +365,7 @@ export async function prepareIngest(input) {
 // No generic metadata repair: apply requires an explicit complete draft.
 // Identical findings after a requested reread are legitimate; byte changes do
 // not prove semantic extraction. Supplied wrong identity/revision is rejected.
-export async function applyIngestDraft(input) {
+async function applyDraft(input) {
   const opts = options(input)
   const { root, wikiRoot, preparationId, draft } = opts
   const receipt = await loadPreparation(opts)
@@ -372,28 +374,35 @@ export async function applyIngestDraft(input) {
   await cleanIndex(wikiRoot)
   if ((await commitHash(wikiRoot)) !== receipt.base_commit)
     throw new Error('HEAD hat sich geändert')
-  const current = await bytesAt(wikiRoot, source.page, true)
-  const expectedCurrent = receipt.applied ?? receipt.baseline[source.page]
+  await recoverPending(opts, receipt)
+  const page = opts.page ?? source.page
+  if (!Object.hasOwn(receipt.baseline, page)) throw new Error('Seite ist nicht deklariert')
+  const current = await bytesAt(wikiRoot, page, true)
+  const expectedCurrent = receipt.owned[page] ?? receipt.baseline[page]
   if ((current === null ? null : hash(current)) !== expectedCurrent) {
-    throw new Error('Fremde worktree Änderung an Quellseite; kein Überschreiben')
+    throw new Error(`Fremde worktree Änderung an ${page}; kein Überschreiben`)
   }
-  validateFields(draft, source.expected, true)
-  const proposed = splitDraft(draft)
-  const old = current === null ? { fields: {}, body: '' } : splitDraft(current.toString('utf8'))
-  if (!proposed.body.trim()) throw new Error('Expliziter Quellseiteninhalt fehlt')
-  const fields = { ...old.fields, ...proposed.fields, ...source.expected }
-  const text = `---\n${Object.entries(fields)
-    .map(([name, value]) => `${name}: ${JSON.stringify(String(value))}`)
-    .join('\n')}\n---\n${proposed.body}`
-  validateFields(text, source.expected)
-  const destination = await confined(wikiRoot, source.page, true)
+  if (typeof draft !== 'string' || !draft.trim()) throw new Error('draft fehlt oder ist leer')
+  let text = draft
+  if (page === source.page) {
+    validateFields(draft, source.expected, true)
+    const proposed = splitDraft(draft)
+    const old = current === null ? { fields: {} } : splitDraft(current.toString('utf8'))
+    if (!proposed.body.trim()) throw new Error('Expliziter Quellseiteninhalt fehlt')
+    const fields = { ...old.fields, ...proposed.fields, ...source.expected }
+    text = `---\n${Object.entries(fields)
+      .map(([name, value]) => `${name}: ${JSON.stringify(String(value))}`)
+      .join('\n')}\n---\n${proposed.body}`
+    validateFields(text, source.expected)
+  }
+  const destination = await confined(wikiRoot, page, true)
   await mkdir(path.dirname(destination), { recursive: true })
-  await confined(wikiRoot, source.page, true)
-  const temporary = await writeTemporaryFile(wikiRoot, source.page, Buffer.from(text), 0o644)
+  await confined(wikiRoot, page, true)
+  const temporary = await writeTemporaryFile(wikiRoot, page, Buffer.from(text), 0o644)
   const temporaryPath = path.join(wikiRoot, temporary)
   try {
     await confined(wikiRoot, temporary)
-    await confined(wikiRoot, source.page, true)
+    await confined(wikiRoot, page, true)
     if (current !== null) {
       const file = await open(destination, constants.O_RDONLY | constants.O_NOFOLLOW)
       try {
@@ -405,21 +414,27 @@ export async function applyIngestDraft(input) {
       } finally {
         await file.close()
       }
-      await rename(temporaryPath, destination)
-    } else {
-      // link is exclusive at the destination, unlike rename: a concurrently
-      // created foreign page must never be replaced by a "new" draft.
-      await link(temporaryPath, destination)
     }
+    // Persist intent before changing the page. Never rename over a live page:
+    // move its inode into retained private evidence, then install exclusively.
+    // A writer racing the move is preserved in the backup; a writer creating
+    // the destination in the gap wins, and link fails without overwriting it.
+    const backup = current === null ? null : await createBackupSlot(wikiRoot)
+    receipt.pending = { page, before: expectedCurrent, after: hash(Buffer.from(text)), backup }
+    receipt.validated = null
+    await savePreparation(root, receipt)
+    if (backup !== null) {
+      await rename(destination, path.join(wikiRoot, '.git', backup))
+      await checkBackup(wikiRoot, receipt.pending)
+    }
+    await link(temporaryPath, destination)
   } finally {
     await rm(temporaryPath, { force: true })
   }
-  receipt.applied = hash(Buffer.from(text))
-  receipt.validated = null
-  await savePreparation(root, receipt)
+  await recoverPending(opts, receipt)
   return {
     preparation_id: preparationId,
-    wiki_path: source.wiki_path,
+    wiki_path: path.join(wikiRoot, page),
     source_revision: source.source_revision,
   }
 }
@@ -427,7 +442,7 @@ export async function applyIngestDraft(input) {
 // Snapshot exactly what the external, explicit-path Git commit must contain.
 // Index remains untouched. Revalidate after changes; any later difference in
 // committed bytes is rejected by the journal writer.
-export async function validateIngest(input) {
+async function validateDraft(input) {
   const opts = options(input)
   const { root, wikiRoot, preparationId } = opts
   const receipt = await loadPreparation(opts)
@@ -436,6 +451,7 @@ export async function validateIngest(input) {
   await cleanIndex(wikiRoot)
   if ((await commitHash(wikiRoot)) !== receipt.base_commit)
     throw new Error('HEAD hat sich geändert')
+  await recoverPending(opts, receipt)
   if (!receipt.applied) throw new Error('apply mit explizitem Draft fehlt')
   const dirty = (await git(wikiRoot, ['status', '--porcelain=v1', '-z', '--untracked-files=all']))
     .toString()
@@ -452,10 +468,15 @@ export async function validateIngest(input) {
   for (const [page, baseline] of Object.entries(receipt.baseline)) {
     const bytes = await bytesAt(wikiRoot, page, true)
     if (bytes === null) {
-      if (baseline !== null) throw new Error('Löschen bestehender Wiki-Seiten ist nicht zulässig')
+      if ((receipt.owned[page] ?? baseline) !== null)
+        throw new Error('Löschen bestehender Wiki-Seiten ist nicht zulässig')
       continue
     }
     const revision = hash(bytes)
+    if (revision !== (receipt.owned[page] ?? baseline)) {
+      if (page === source.page) validateFields(bytes.toString('utf8'), source.expected)
+      throw new Error(`Fremde worktree Änderung an deklarierter Seite: ${page}`)
+    }
     if (page === source.page) {
       validateFields(bytes.toString('utf8'), source.expected)
       if (revision !== receipt.applied)
@@ -468,6 +489,90 @@ export async function validateIngest(input) {
   await savePreparation(root, receipt)
   return { preparation_id: preparationId, validated: true, changed_pages: Object.keys(snapshot) }
 }
+
+// Backups retain the displaced inode, not just a byte snapshot: even writes
+// through a previously opened descriptor remain available for maintenance.
+// They are never automatically deleted and are outside Git's content tree.
+async function backupRoot(wikiRoot) {
+  const directory = path.join(wikiRoot, '.git')
+  if ((await realpath(directory)) !== directory || !(await lstat(directory)).isDirectory())
+    throw new Error('Git-Verzeichnis ist kein sicherer Backup-Pfad')
+  return directory
+}
+
+async function createBackupSlot(wikiRoot) {
+  const directory = await backupRoot(wikiRoot)
+  const name = `ingest-backup-${randomBytes(16).toString('hex')}`
+  await mkdir(path.join(directory, name), { mode: 0o700 })
+  return `${name}/page`
+}
+
+async function checkBackup(wikiRoot, pending) {
+  if (pending.backup === null) return
+  const directory = await backupRoot(wikiRoot)
+  const bytes = await bytesAt(directory, pending.backup, true)
+  if (bytes !== null && hash(bytes) !== pending.before) {
+    // Restore only into an absent destination, never over a concurrent writer.
+    const destination = await confined(wikiRoot, pending.page, true)
+    await link(path.join(directory, pending.backup), destination).catch((error) => {
+      if (error.code !== 'EEXIST') throw error
+    })
+    throw new Error(`Fremde worktree Änderung; Backup erhalten: .git/${pending.backup}`)
+  }
+}
+
+async function recoverPending(opts, receipt) {
+  if (!receipt.pending) return
+  const pending = receipt.pending
+  await checkBackup(opts.wikiRoot, pending)
+  let current = await bytesAt(opts.wikiRoot, pending.page, true)
+  if (current === null && pending.backup !== null) {
+    const directory = await backupRoot(opts.wikiRoot)
+    const backup = await bytesAt(directory, pending.backup, true)
+    if (backup !== null) {
+      const temporary = await writeTemporaryFile(opts.wikiRoot, pending.page, backup, 0o644)
+      try {
+        await link(
+          path.join(opts.wikiRoot, temporary),
+          await confined(opts.wikiRoot, pending.page, true),
+        )
+      } finally {
+        await rm(path.join(opts.wikiRoot, temporary), { force: true })
+      }
+      current = backup
+    }
+  }
+  const revision = current === null ? null : hash(current)
+  if (revision === pending.after) {
+    receipt.owned[pending.page] = pending.after
+    if (pending.page === receipt.source.page) receipt.applied = pending.after
+  } else if (revision !== pending.before) {
+    throw new Error('Fremde worktree Änderung während apply; kein automatisches Reparieren')
+  }
+  receipt.pending = null
+  receipt.validated = null
+  await savePreparation(opts.root, receipt)
+}
+
+async function withPreparationLock(input, operation) {
+  const opts = options(input)
+  const relative = `${receiptPath(opts.preparationId)}.lock`
+  const destination = await confined(opts.root, relative, true)
+  const lock = await open(
+    destination,
+    constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW,
+    0o600,
+  )
+  try {
+    return await operation(opts)
+  } finally {
+    await lock.close()
+    await rm(destination)
+  }
+}
+
+export const applyIngestDraft = (input) => withPreparationLock(input, applyDraft)
+export const validateIngest = (input) => withPreparationLock(input, validateDraft)
 
 // Required before appending status=ingested. Verify source SHA, fresh identity,
 // the actual commit parent, complete changed-path set, and each committed blob.

@@ -11,7 +11,7 @@ export default {
       tools.add({
         name: 'wiki_ingest_transaction',
         description:
-          'Ein ausgewählter Quelleinleseauftrag: prepare(adapter, source_key, source_revision, changed_pages) vor Änderungen im sauberen Wiki; apply(preparation_id, draft) schreibt den neuen Quellseiteninhalt mit frischem Frontmatter; validate(preparation_id) prüft alle deklarierten Änderungen vor dem expliziten Git-Commit. Quellen bleiben unverändert. Journal status=ingested erfordert preparation_id und prüft den tatsächlichen Commit.',
+          'Ein ausgewählter Quelleinleseauftrag: prepare(adapter, source_key, source_revision, changed_pages) vor Änderungen im sauberen Wiki; apply(preparation_id, page?, draft) schreibt jede deklarierte Seite, die Quellseite mit frischem Frontmatter. Ohne page wird die Quellseite geschrieben; thematische Seiten benötigen den relativen page-Pfad. validate(preparation_id) akzeptiert nur unveränderte oder über apply geschriebene Inhalte vor dem expliziten Git-Commit. Quellen bleiben unverändert. Journal status=ingested erfordert preparation_id und prüft den tatsächlichen Commit.',
         input: {
           type: 'object',
           properties: {
@@ -28,6 +28,11 @@ export default {
                 'Bei prepare: alle vorgesehenen relativen Wiki-Markdown-Pfade einschließlich der Quellseite; nur saubere oder noch nicht vorhandene Ziele',
             },
             preparation_id: { type: 'string', pattern: '^prep-[0-9a-f]{32}$' },
+            page: {
+              type: 'string',
+              description:
+                'Bei apply: deklarierter relativer Wiki-Pfad; Standard ist die Quellseite.',
+            },
             draft: {
               type: 'string',
               description:
@@ -45,6 +50,7 @@ export default {
             sourceRevision: args.source_revision,
             changedPages: args.changed_pages,
             preparationId: args.preparation_id,
+            page: args.page,
             draft: args.draft,
           }
           let result

@@ -36,7 +36,10 @@ checkout and a fresh source status. The worker declares all relative wiki paths
 before writes and retains the returned `preparation_id`. `apply` accepts the
 complete source-page draft, derives canonical frontmatter from the fresh status,
 and preserves extra fields; supplied conflicting identity or revision is rejected.
-`validate` checks the declared changes and provenance before the worker commits.
+For thematic pages, `apply` takes a declared relative `page` and its complete
+`draft`; all worker writes, including overview/index/log corrections, use this API.
+`validate` accepts only baseline bytes or hashes owned by successful `apply`
+operations, rejecting foreign edits even on declared paths before the worker commits.
 Only those validated contents may be committed. An `ingested` journal record must
 include `preparation_id`; the journal checks the actual commit tree, changed paths,
 and source hash rather than trusting the worker's success claim. This validates
@@ -45,10 +48,23 @@ An explicit reread may leave findings unchanged; byte differences are not eviden
 of reading. Reapplying a corrected draft requires the previous applied bytes still
 to match and invalidates prior validation. Validate again before committing.
 Pages and preparation receipts are written to exclusive sibling temporary files
-and installed only after complete writes. A caught write failure leaves the
-previous page/receipt intact. Abrupt process termination can leave a temporary
-file or interrupt the page/receipt handoff; treat that as a blocker for confirmed
-maintenance, never as permission to erase unmatched work. Omitted extra
+and installed only after complete writes. Page publication first persists intent,
+moves an existing destination into retained private `.git/ingest-backup-<random-id>/page`
+evidence, checks the displaced bytes, then exclusively links the new draft into
+the absent destination. There is a short absent-page interval, but no overwrite:
+a concurrent destination creator wins; racing edits to the displaced inode remain
+in its backup, including writes through old descriptors. A detected mismatch blocks
+publication and restores the displaced inode only if the destination is absent.
+Backups are never automatically deleted; see [data layout](data-layout.md).
+A final receipt-write failure is retryable using the saved pending hashes: `apply`
+or `validate` can finish the handoff only if the page and retained evidence match.
+If interrupted before installation, retry restores a copy of the verified previous
+page into an absent destination, preserving the backup. This is not a lock against
+arbitrary external editors or a host sandbox; external writers must be stopped
+before confirmed cleanup. Apply/validate calls for one preparation are mutually
+exclusive. Abrupt process termination can leave a temporary file or lock;
+treat those as blockers for confirmed maintenance, never permission to erase
+unmatched work. Omitted extra
 frontmatter fields remain preserved; `apply` does not remove them.
 
 Own uncommitted mistakes can be corrected and validated again in the same source
