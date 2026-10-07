@@ -435,7 +435,9 @@ def main() -> None:
                 if exported_result.returncode == 0:
                     (evidence / f"{session}.json").write_bytes(exported_result.stdout)
                     try:
-                        failed_sessions |= session_ids(json.loads(exported_result.stdout)) - attempted
+                        failed_sessions |= (
+                            session_ids(json.loads(exported_result.stdout)) - attempted
+                        )
                     except ValueError:
                         pass
         subprocess.run(["docker", "rm", "--force", name], check=False, capture_output=True)
