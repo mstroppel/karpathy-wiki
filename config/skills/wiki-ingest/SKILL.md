@@ -46,8 +46,10 @@ erzeugen. Bei Ablehnung stoppe für Wartung; keine Git-Reset-/Clean-Befehle.
    und `offset`/`limit`. Nutze vollständige betroffene Abschnitte, nicht gekürzte
    Rekonstruktionen langer Sammelseiten. Weitere thematische Seiten meldest du
    vor ihrer Bearbeitung mit `operation: declare`, `changed_pages` an.
-   Ein erschöpftes Lese-/Arbeitsbudget ist ein konkreter Blocker, keine Erlaubnis
-   zu stiller Kürzung oder behaupteter vollständiger Extraktion.
+   `context_budget` schätzt den Verbrauch; `warnings` bei überschrittenem Ziel
+   oder mehr als 48 Arbeitsaufrufen sind Hinweise, keine Blocker. Arbeite gezielt
+   und vollständig weiter. Nur echte Modell-/Toolfehler stoppen den Auftrag;
+   kürze Inhalte nie still und behaupte keine ungeprüfte vollständige Extraktion.
    Für große Übersichten: lies zunächst höchstens den Einstieg, suche dann mit
    `query` nach konkreten Themen der Quelle. Folge `next_offset` bei Wiki-Seiten
    nicht fortlaufend bis EOF; es bezeichnet nur weiteren verfügbaren Kontext.

@@ -127,7 +127,7 @@ async function prepare(opts) {
     read_bytes: 0,
     proposal_bytes: 0,
     budget_tokens: budgetTokens,
-    context_bytes_limit: Math.max(0, budgetTokens - 12000) * 2,
+    context_bytes_limit: Math.max(0, budgetTokens - 16000) * 4,
   }
   try {
     await savePreparation(opts.root, receipt)
@@ -140,15 +140,42 @@ async function prepare(opts) {
     ])
     throw error
   }
-  return { ...result, run_id: runId, isolation: 'private-draft', read_bytes: READ_BYTES }
+  return {
+    ...result,
+    run_id: runId,
+    isolation: 'private-draft',
+    read_bytes: READ_BYTES,
+    ...contextBudget(receipt),
+  }
+}
+
+function contextBudget(receipt) {
+  const pub = receipt.publication
+  const estimatedTokens = 16000 + Math.ceil((pub.read_bytes + pub.proposal_bytes) / 4)
+  const warnings = []
+  if (estimatedTokens > pub.budget_tokens)
+    warnings.push(
+      'Geschätztes Kontextziel überschritten; vollständig und gezielt weiterarbeiten. Dies ist keine gemessene Modellgrenze.',
+    )
+  if (pub.tool_calls > 48)
+    warnings.push(
+      'Mehr als 48 Arbeitsaufrufe; gezieltes Lesen und Bearbeiten beibehalten. Kein automatischer Abbruch.',
+    )
+  return {
+    context_budget: {
+      target_tokens: pub.budget_tokens,
+      estimated_tokens: estimatedTokens,
+      read_bytes: pub.read_bytes,
+      proposal_bytes: pub.proposal_bytes,
+      tool_calls: pub.tool_calls ?? 0,
+      exceeded: estimatedTokens > pub.budget_tokens,
+    },
+    warnings,
+  }
 }
 
 function spend(receipt, bytes, kind) {
   const pub = receipt.publication
-  if (pub.read_bytes + pub.proposal_bytes + bytes > pub.context_bytes_limit)
-    throw new Error(
-      'Kontext-Arbeitsbudget ausgeschöpft; keine weitere Extraktion behaupten, Quelle als Blocker melden',
-    )
   pub[kind] += bytes
 }
 
@@ -853,15 +880,14 @@ export async function ingestPublication(input) {
         if (receipt.rolled_back || receipt.rollback_started)
           throw new Error('Vorbereitung ist zurückgesetzt')
         receipt.publication.tool_calls = (receipt.publication.tool_calls ?? 0) + 1
-        if (receipt.publication.tool_calls > 48)
-          throw new Error('Kontext-Arbeitsbudget: Toolaufruf-Limit erreicht')
         await savePreparation(opts.root, receipt)
       }
+      const withBudget = (result) => ({ ...result, ...contextBudget(receipt) })
       switch (opts.operation) {
         case 'declare':
-          return await declare(opts, receipt)
+          return withBudget(await declare(opts, receipt))
         case 'state':
-          return {
+          return withBudget({
             preparation_id: receipt.preparation_id,
             phase: receipt.publication.phase,
             commit: receipt.publication.commit ?? null,
@@ -870,13 +896,13 @@ export async function ingestPublication(input) {
             proposal_bytes: receipt.publication.proposal_bytes,
             context_bytes_limit: receipt.publication.context_bytes_limit,
             stage_pending: receipt.publication.stage_pending ?? null,
-          }
+          })
         case 'read_source':
-          return await inspect(opts, receipt, true)
+          return withBudget(await inspect(opts, receipt, true))
         case 'inspect':
-          return await inspect(opts, receipt)
+          return withBudget(await inspect(opts, receipt))
         case 'stage':
-          return await stage(opts, receipt)
+          return withBudget(await stage(opts, receipt))
         case 'publish':
         case 'resume':
           return await publish(opts, receipt)

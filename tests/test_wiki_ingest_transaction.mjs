@@ -403,7 +403,7 @@ test('a bounded section reference preserves a large overview with similar paragr
   )
 })
 
-test('source reading and cumulative retrieval budgets are enforced before publication', async (t) => {
+test('context targets warn without blocking reads, proposals or publication; complete source reading remains required', async (t) => {
   const { ingestPublication } = await import('../config/tools/wiki_ingest_publication_core.mjs')
   const f = await fixture(t, { existing: false })
   const prepared = await ingestPublication({
@@ -429,11 +429,67 @@ test('source reading and cumulative retrieval budgets are enforced before public
     (error) => error.ingest.code === 'incomplete_source_read',
   )
   await call('read_source')
-  for (let count = 0; count < 30; count++) await call('inspect', { page: 'overview.md' })
-  await assert.rejects(
-    call('stage', { page: 'overview.md', append: 'x'.repeat(1900) }),
-    /Kontext-Arbeitsbudget/,
-  )
+  for (let count = 0; count < 50; count++) await call('inspect', { page: 'overview.md' })
+  const staged = await call('stage', { page: 'overview.md', append: 'x'.repeat(1900) })
+  assert.equal(staged.context_budget.exceeded, true)
+  assert.ok(staged.context_budget.tool_calls > 48)
+  assert.equal(staged.warnings.length, 2)
+  const state = await call('state')
+  assert.deepEqual(state.context_budget, staged.context_budget)
+  assert.equal(await f.git('status', '--porcelain'), '')
+  const result = await call('publish', {
+    title: 'Synthesis',
+    content: 'Finding.',
+    contradictions: 'None.',
+    extractionLimits: 'Fully read.',
+  })
+  assert.equal(result.status, 'ingested')
+  assert.equal(await f.git('status', '--porcelain'), '')
+})
+
+test('a large multilingual source can exceed the default target and publish without changing source bytes', async (t) => {
+  const { ingestPublication } = await import('../config/tools/wiki_ingest_publication_core.mjs')
+  const f = await fixture(t)
+  const source =
+    'Synthetic observation. Synthetische Beobachtung. Синтетичне спостереження.\n'.repeat(800)
+  const sourceFile = path.join(f.sourceRoot, 'webdav', 'notes.md')
+  await writeFile(sourceFile, source)
+  f.manifest.items[0].source_revision = SHA(source)
+  f.manifest.items[0].frontmatter.source_revision = SHA(source)
+  await writeFile(path.join(f.sourceRoot, 'webdav', 'manifest.json'), JSON.stringify(f.manifest))
+  const prepared = await ingestPublication({
+    ...f.opts,
+    operation: 'prepare',
+    adapter: 'webdav',
+    sourceKey: 'notes.md',
+    sourceRevision: SHA(source),
+  })
+  assert.equal(prepared.context_budget.exceeded, false)
+  const call = (operation, args = {}) =>
+    ingestPublication({ ...f.opts, preparationId: prepared.preparation_id, operation, ...args })
+  let offset = 1
+  let read
+  do {
+    read = await call('read_source', { offset, limit: 80 })
+    offset = read.next_offset
+  } while (offset !== null)
+  assert.equal(read.bytes_read, Buffer.byteLength(source))
+  assert.equal(read.context_budget.exceeded, true)
+  assert.equal(read.warnings.length, 1)
+  const context = await call('inspect')
+  assert.equal(context.found, true)
+  await call('stage', {
+    draft: '# Synthetic observations\nRepeated multilingual observation; source lines 1–800.\n',
+  })
+  await call('stage', { page: 'overview.md', reviewed: true })
+  const result = await call('publish', {
+    title: 'Multilingual observations',
+    content: 'Repeated observation; source lines 1–800.',
+    contradictions: 'None.',
+    extractionLimits: 'Fully read; repetition condensed.',
+  })
+  assert.equal(result.status, 'ingested')
+  assert.equal(await readFile(sourceFile, 'utf8'), source)
   assert.equal(await f.git('status', '--porcelain'), '')
 })
 
