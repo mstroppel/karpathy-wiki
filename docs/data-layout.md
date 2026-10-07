@@ -120,8 +120,18 @@ Receipts also track transaction-owned page hashes, retained-backup hashes, pendi
 publication intent and resumable rollback progress (`rollback_started`,
 `rollback_pending`, `rolled_back`). Run metadata records confirmed skipped failure
 indices; the original blocked result records remain in the journal and report.
-`preparations/<preparation-id>.json.lock` excludes concurrent apply/validate/rollback calls across processes;
-a lock left by abrupt termination requires confirmed maintenance, not automatic removal.
+Each preparation now also owns `preparations/<preparation-id>/wiki/`, an isolated
+Git clone containing wiki history and proposed changes, and `/journal/`, its
+draft transaction evidence. Receipts retain section references, reading/proposal
+budgets, publication phase, intended commit/report payload and owned index-lock
+identity. Include the entire preparation directory in private backups; clones
+cost disk proportional to history and processed sources. They are not served.
+The model-facing publisher uses a stable `wiki/.git/wiki-ingest-publication.lock`
+inode with a kernel lock released on process exit, rather than stale-file removal.
+Run audit writes similarly use `runs/<run-id>/records.lock`; complete audit,
+run and report files replace private files atomically. An unverifiable
+`wiki/.git/index.lock` requires confirmed maintenance; only a proven owned lock
+can be completed during resume. There is no automatic clone/backup cleanup.
 Wiki pages displaced during publication or confirmed rollback retain their original inode at
 `wiki/.git/ingest-backup-<random-id>/page`, inside an exclusive `0700` directory.
 These private recovery files are outside Git's content tree and public wiki pages;
