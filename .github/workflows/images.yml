@@ -51,13 +51,7 @@ jobs:
             *) printf 'target=stable\n' >> "$GITHUB_OUTPUT" ;;
           esac
       - name: Build and publish images
-        uses: docker/bake-action@v7
         env:
           IMAGE_VERSION: ${{ steps.version.outputs.version }}
-        with:
-          source: .
-          files: docker-bake.hcl
-          targets: ${{ steps.version.outputs.target }}
-          push: true
-          set: |
-            *.platform=linux/amd64,linux/arm64
+          BAKE_TARGET: ${{ steps.version.outputs.target }}
+        run: sh scripts/publish-images.sh "$BAKE_TARGET"
