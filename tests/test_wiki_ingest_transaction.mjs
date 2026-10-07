@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, open, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import os from 'node:os'
 import test from 'node:test'
@@ -261,6 +261,108 @@ test('revalidates a corrected draft before accepting its commit', async (t) => {
   await verifyIngestCommit({ ...f.opts, record: f.record(input, commit) })
 })
 
+for (const existing of [true, false]) {
+  test(`interrupted draft write preserves ${existing ? 'existing' : 'absent'} page and allows retry`, async (t) => {
+    const f = await fixture(t, { existing })
+    const input = await f.prepared()
+    const destination = path.join(f.wikiRoot, PAGE)
+    const before = existing ? await readFile(destination) : null
+    const receiptPath = path.join(f.root, 'preparations', `${input.preparationId}.json`)
+    const receipt = await readFile(receiptPath)
+    const probe = await open(path.join(f.base, 'probe'), 'wx')
+    const prototype = Object.getPrototypeOf(probe)
+    await probe.close()
+    const originalWrite = prototype.write
+    const injected = t.mock.method(
+      prototype,
+      'write',
+      async function (buffer, offset, length, position) {
+        await originalWrite.call(this, buffer, offset, Math.min(16, length), position)
+        throw new Error('Synthetic interrupted write')
+      },
+    )
+    await assert.rejects(
+      applyIngestDraft({ ...input, draft: '# Fresh synthetic draft\n' }),
+      /Synthetic interrupted write/,
+    )
+    injected.mock.restore()
+    if (existing) assert.deepEqual(await readFile(destination), before)
+    else await assert.rejects(readFile(destination), /ENOENT/)
+    assert.deepEqual(await readFile(receiptPath), receipt)
+    assert.deepEqual(await readdir(path.dirname(destination)), existing ? ['notes.md'] : [])
+    await applyIngestDraft({ ...input, draft: '# Fresh synthetic draft\n' })
+    await validateIngest(input)
+  })
+}
+
+test('foreign edits during temporary writing are preserved before replacement', async (t) => {
+  const f = await fixture(t)
+  const input = await f.prepared()
+  const probe = await open(path.join(f.base, 'probe'), 'wx')
+  const prototype = Object.getPrototypeOf(probe)
+  await probe.close()
+  const originalWrite = prototype.write
+  const injected = t.mock.method(prototype, 'write', async function (...args) {
+    const result = await originalWrite.apply(this, args)
+    await writeFile(path.join(f.wikiRoot, PAGE), '# Foreign edits during writing\n')
+    return result
+  })
+  await assert.rejects(
+    applyIngestDraft({ ...input, draft: '# Fresh synthetic draft\n' }),
+    /worktree/,
+  )
+  injected.mock.restore()
+  assert.equal(
+    await readFile(path.join(f.wikiRoot, PAGE), 'utf8'),
+    '# Foreign edits during writing\n',
+  )
+  assert.deepEqual(await readdir(path.join(f.wikiRoot, 'sources', 'webdav')), ['notes.md'])
+})
+
+test('a foreign page created during a new draft write is never replaced', async (t) => {
+  const f = await fixture(t, { existing: false })
+  const input = await f.prepared()
+  const probe = await open(path.join(f.base, 'probe'), 'wx')
+  const prototype = Object.getPrototypeOf(probe)
+  await probe.close()
+  const originalWrite = prototype.write
+  const injected = t.mock.method(prototype, 'write', async function (...args) {
+    const result = await originalWrite.apply(this, args)
+    await writeFile(path.join(f.wikiRoot, PAGE), '# Concurrent foreign page\n')
+    return result
+  })
+  await assert.rejects(applyIngestDraft({ ...input, draft: '# New synthetic draft\n' }), /EEXIST/)
+  injected.mock.restore()
+  assert.equal(await readFile(path.join(f.wikiRoot, PAGE), 'utf8'), '# Concurrent foreign page\n')
+  assert.deepEqual(await readdir(path.join(f.wikiRoot, 'sources', 'webdav')), ['notes.md'])
+})
+
+test('an interrupted receipt write preserves parseable evidence and allows validation retry', async (t) => {
+  const f = await fixture(t)
+  const input = await f.applied()
+  const receiptPath = path.join(f.root, 'preparations', `${input.preparationId}.json`)
+  const before = await readFile(receiptPath)
+  const probe = await open(path.join(f.base, 'probe'), 'wx')
+  const prototype = Object.getPrototypeOf(probe)
+  await probe.close()
+  const originalWrite = prototype.write
+  const injected = t.mock.method(
+    prototype,
+    'write',
+    async function (buffer, offset, length, position) {
+      await originalWrite.call(this, buffer, offset, Math.min(16, length), position)
+      throw new Error('Synthetic interrupted receipt write')
+    },
+  )
+  await assert.rejects(validateIngest(input), /Synthetic interrupted receipt write/)
+  injected.mock.restore()
+  assert.deepEqual(await readFile(receiptPath), before)
+  assert.deepEqual(await readdir(path.dirname(receiptPath)), [`${input.preparationId}.json`])
+  await validateIngest(input)
+  const commit = await f.commit()
+  await verifyIngestCommit({ ...f.opts, record: f.record(input, commit) })
+})
+
 test('current-source reread can commit only the log/overview and still verify its source page', async (t) => {
   const f = await fixture(t, { revision: SHA(SOURCE) })
   let input = await f.applied()
@@ -275,7 +377,7 @@ test('current-source reread can commit only the log/overview and still verify it
   const commit = await f.commit()
   await verifyIngestCommit({
     ...f.opts,
-    record: f.record(input, commit, { changed_pages: ['overview.md'] }),
+    record: f.record(input, commit, { changed_pages: result.changed_pages }),
   })
 })
 

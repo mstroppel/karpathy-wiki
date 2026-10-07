@@ -112,6 +112,10 @@ wiki publication.
 Bulk wiki ingestion records its per-source results in
 `incoming/ingest-journal/runs/<run-id>/`: append-only result records, the run
 state with its working-context budget, and the assembled per-source report.
+`incoming/ingest-journal/preparations/<preparation-id>.json` holds private
+transaction receipts (`0600`): selected source identity, baseline commit and
+file hashes, and the exact validated changed-page hashes. Include these receipts
+in journal backups so pending commits remain verifiable.
 These records hold source-derived summaries of processed sources, so they live
 in the private `incoming/` area alongside the answer drafts instead of the
 content-free state store. The directory is private to OpenCode and its operator

@@ -54,7 +54,9 @@ auf. Lies `AGENTS.md` und vor Änderungen Git-Status und Historie sowie `index.m
    Herkunftsnachweise. Rufe `operation: validate` mit `preparation_id` vor dem
    Commit auf; korrigiere eigene uncommitted Fehler im selben Auftrag und
    validiere erneut. Bei fremden Änderungen stoppe. Erst nach erfolgreicher
-   Validierung committe genau einmal pro Quelle, nur die geprüften Pfade.
+    Validierung committe genau einmal pro Quelle: Verwende für Commit und Journal
+    `changed_pages` aus der letzten erfolgreichen `validate`-Antwort, nicht die
+    geplante Pfadliste aus `prepare` (unveränderte Seiten können fehlen).
    Melde Erfolg erst nach verifiziertem Commit; bereits committed Fehler gehören
    als Blocker an die bestätigte Wartung, nicht in einen Amend oder Reset.
 

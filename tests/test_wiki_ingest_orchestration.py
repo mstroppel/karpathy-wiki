@@ -128,6 +128,7 @@ class SkillContractTests(unittest.TestCase):
             "preparation_id",
             "operation: apply",
             "operation: validate",
+            "`changed_pages` aus der letzten erfolgreichen `validate`-Antwort",
             "vor dem",
             "fremde Git-Änderungen",
             "Amend oder Reset",

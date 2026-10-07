@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
 import { constants } from 'node:fs'
-import { lstat, mkdir, open, readdir, realpath } from 'node:fs/promises'
+import { link, lstat, mkdir, open, readdir, realpath, rename, rm } from 'node:fs/promises'
 import path from 'node:path'
 import { isDeepStrictEqual, promisify } from 'node:util'
 
@@ -204,23 +204,55 @@ async function loadPreparation({ root, preparationId }) {
   return JSON.parse((await bytesAt(root, receiptPath(preparationId))).toString('utf8'))
 }
 
+// Publish only complete bytes, never truncate a live page or receipt in place.
+// The sibling file keeps installation on the same filesystem; caught failures
+// remove only this operation's exclusive temporary file.
+async function writeTemporaryFile(root, relative, bytes, mode) {
+  const temporary = `${relative}.${randomBytes(16).toString('hex')}.tmp`
+  const destination = await confined(root, temporary, true)
+  const file = await open(
+    destination,
+    constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+    mode,
+  )
+  try {
+    try {
+      let offset = 0
+      while (offset < bytes.length) {
+        const { bytesWritten } = await file.write(bytes, offset, bytes.length - offset, offset)
+        if (bytesWritten === 0) throw new Error('Datei konnte nicht vollständig geschrieben werden')
+        offset += bytesWritten
+      }
+      await file.sync()
+    } finally {
+      await file.close()
+    }
+    return temporary
+  } catch (error) {
+    await rm(destination, { force: true })
+    throw error
+  }
+}
+
 async function savePreparation(root, receipt, create = false) {
   await mkdir(root, { recursive: true })
   await confined(root, receiptPath(receipt.preparation_id), true)
   await mkdir(path.join(root, 'preparations'), { recursive: true })
   const destination = await confined(root, receiptPath(receipt.preparation_id), true)
-  const file = await open(
-    destination,
-    constants.O_WRONLY |
-      constants.O_CREAT |
-      constants.O_NOFOLLOW |
-      (create ? constants.O_EXCL : constants.O_TRUNC),
+  const temporary = await writeTemporaryFile(
+    root,
+    receiptPath(receipt.preparation_id),
+    Buffer.from(`${JSON.stringify(receipt)}\n`),
     0o600,
   )
+  const temporaryPath = path.join(root, temporary)
   try {
-    await file.writeFile(`${JSON.stringify(receipt)}\n`)
+    await confined(root, temporary)
+    await confined(root, receiptPath(receipt.preparation_id), true)
+    if (create) await link(temporaryPath, destination)
+    else await rename(temporaryPath, destination)
   } finally {
-    await file.close()
+    await rm(temporaryPath, { force: true })
   }
 }
 
@@ -357,30 +389,30 @@ export async function applyIngestDraft(input) {
   const destination = await confined(wikiRoot, source.page, true)
   await mkdir(path.dirname(destination), { recursive: true })
   await confined(wikiRoot, source.page, true)
-  const file = await open(
-    destination,
-    current === null
-      ? constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW
-      : constants.O_RDWR | constants.O_NOFOLLOW,
-    0o644,
-  )
+  const temporary = await writeTemporaryFile(wikiRoot, source.page, Buffer.from(text), 0o644)
+  const temporaryPath = path.join(wikiRoot, temporary)
   try {
-    if ((await file.stat()).nlink !== 1) throw new Error('Hardlink ist kein sicherer Schreibpfad')
+    await confined(wikiRoot, temporary)
+    await confined(wikiRoot, source.page, true)
     if (current !== null) {
-      if (hash(await file.readFile()) !== expectedCurrent) {
-        throw new Error('Fremde worktree Änderung; kein Überschreiben')
+      const file = await open(destination, constants.O_RDONLY | constants.O_NOFOLLOW)
+      try {
+        if ((await file.stat()).nlink !== 1)
+          throw new Error('Hardlink ist kein sicherer Schreibpfad')
+        if (hash(await file.readFile()) !== expectedCurrent) {
+          throw new Error('Fremde worktree Änderung; kein Überschreiben')
+        }
+      } finally {
+        await file.close()
       }
-      await file.truncate(0)
-    }
-    const bytes = Buffer.from(text)
-    let offset = 0
-    while (offset < bytes.length) {
-      const { bytesWritten } = await file.write(bytes, offset, bytes.length - offset, offset)
-      if (bytesWritten === 0) throw new Error('Draft konnte nicht vollständig geschrieben werden')
-      offset += bytesWritten
+      await rename(temporaryPath, destination)
+    } else {
+      // link is exclusive at the destination, unlike rename: a concurrently
+      // created foreign page must never be replaced by a "new" draft.
+      await link(temporaryPath, destination)
     }
   } finally {
-    await file.close()
+    await rm(temporaryPath, { force: true })
   }
   receipt.applied = hash(Buffer.from(text))
   receipt.validated = null

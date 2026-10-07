@@ -44,6 +44,12 @@ provenance and file contents, not semantic completeness of model extraction.
 An explicit reread may leave findings unchanged; byte differences are not evidence
 of reading. Reapplying a corrected draft requires the previous applied bytes still
 to match and invalidates prior validation. Validate again before committing.
+Pages and preparation receipts are written to exclusive sibling temporary files
+and installed only after complete writes. A caught write failure leaves the
+previous page/receipt intact. Abrupt process termination can leave a temporary
+file or interrupt the page/receipt handoff; treat that as a blocker for confirmed
+maintenance, never as permission to erase unmatched work. Omitted extra
+frontmatter fields remain preserved; `apply` does not remove them.
 
 Own uncommitted mistakes can be corrected and validated again in the same source
 transaction. Foreign work is preserved and blocks ingestion. Already committed
