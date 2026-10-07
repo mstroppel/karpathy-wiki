@@ -189,35 +189,33 @@ test('resume reconciles an interrupted HEAD/index transition without a second co
   assert.equal((await loadRun({ root: f.root, runId: f.runId })).records.length, 1)
 })
 
-test('resume completes an owned index lock interrupted before HEAD changes', async (t) => {
-  const f = await publicationFixture(t)
-  const baseline = await f.git('rev-parse', 'HEAD')
-  const originalOpen = fs.open
-  let injected = false
-  fs.open = async (...args) => {
-    const file = await originalOpen(...args)
-    if (args[0] === path.join(f.wikiRoot, '.git', 'index.lock') && !injected) {
-      const write = file.writeFile.bind(file)
-      file.writeFile = async (...input) => {
-        await write(...input)
+for (const afterLink of [false, true]) {
+  test(`resume completes a persisted index candidate interrupted at lock linking (after=${afterLink})`, async (t) => {
+    const f = await publicationFixture(t)
+    const baseline = await f.git('rev-parse', 'HEAD')
+    const originalLink = fs.link
+    let injected = false
+    fs.link = async (...args) => {
+      if (args[1] === path.join(f.wikiRoot, '.git', 'index.lock') && !injected) {
         injected = true
+        if (afterLink) await originalLink(...args)
         throw new Error('Synthetic interruption before ref update')
       }
+      return originalLink(...args)
     }
-    return file
-  }
-  syncBuiltinESMExports()
-  try {
-    await assert.rejects(f.publish(), /Synthetic interruption/)
-  } finally {
-    fs.open = originalOpen
     syncBuiltinESMExports()
-  }
-  assert.equal(await f.git('rev-parse', 'HEAD'), baseline)
-  const result = await f.call('resume')
-  assert.equal(await f.git('rev-parse', 'HEAD'), result.commit)
-  assert.equal(await f.git('status', '--porcelain'), '')
-})
+    try {
+      await assert.rejects(f.publish(), /Synthetic interruption/)
+    } finally {
+      fs.link = originalLink
+      syncBuiltinESMExports()
+    }
+    assert.equal(await f.git('rev-parse', 'HEAD'), baseline)
+    const result = await f.call('resume')
+    assert.equal(await f.git('rev-parse', 'HEAD'), result.commit)
+    assert.equal(await f.git('status', '--porcelain'), '')
+  })
+}
 
 for (const afterAppend of [false, true]) {
   test(`resume reconciles journal interruption (after append=${afterAppend}) without duplicate commits or records`, async (t) => {

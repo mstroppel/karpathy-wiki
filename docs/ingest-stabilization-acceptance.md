@@ -8,7 +8,9 @@ python3 tests/acceptance/ingest_stabilization.py --model 'openai/gpt-6-luna#high
 ```
 
 This is opt-in, incurs provider usage and requires a configured provider.
-It uses the repository's exact `/ingest-new` prompt, agents, tools and skills.
+It uses the repository's `/ingest-new` prompt, agents, tools and skills, with an
+explicit additional synthetic acceptance request to correct the current
+measurement while preserving the similarly worded historical section.
 No production sources, wiki, journals or session database are mounted. The
 selected provider credential is exported only into process memory, imported
 through a pipe and never printed or persisted in evidence. The disposable
@@ -16,7 +18,9 @@ container and its credential database are removed on success or failure.
 
 The fixture contains four short non-sensitive sources (multiple measurements,
 a changed statement, a damaged transcript and a test note), 2,000 unrelated
-historical overview paragraphs and a log lacking an EOF newline. A fault injected
+historical overview paragraphs, similar current/archive measurement sections
+and a log lacking an EOF newline. A disposable-only pre-write reference rejection
+requires the model to reread the targeted section and correct once. A fault injected
 only into the disposable journal pauses the first publication after its commit
 but before its result record. The harness restarts the whole container, reruns
 `/ingest-new`, and requires adoption of the same run and verified resume, not
@@ -25,7 +29,9 @@ re-extraction or a duplicate commit.
 Assertions cover exactly four source commits/records, unchanged source bytes,
 preserved historical paragraphs/tail, clean Git, final `new=0`/`outdated=0`, every
 report detail field, a parent report link/run ID, no worker shell/edit calls,
-four preparations and a resume, plus measured worker peak context at or below
+four preparations and a resume, preservation of the archive measurement and
+correction of the current measurement, an exercised pre-write rejection,
+plus measured worker peak context at or below
 32,000 input-plus-cache tokens. Evidence is written to a newly created private
 directory below `/tmp/opencode`; only its aggregate `summary.json` should be
 published. Session/trace files remain private even though fixtures are synthetic.

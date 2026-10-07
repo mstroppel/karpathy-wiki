@@ -37,7 +37,7 @@ export default {
               maxItems: 100,
               items: { type: 'string' },
               description:
-                'prepare: Quellseite, overview.md, index.md, log.md und weitere thematische Seiten.',
+                'prepare: optionale zusätzliche relative thematische Pfade; Quellseite, overview.md, index.md, log.md erzeugt Code. Niemals absolute wiki_path-Werte verwenden.',
             },
             preparation_id: { type: 'string', pattern: '^prep-[0-9a-f]{32}$' },
             page: {

@@ -119,7 +119,7 @@ async function cleanIndex(wikiRoot) {
   }
 }
 
-async function freshSource({ sourceRoot, wikiRoot, adapter, sourceKey, sourceRevision }) {
+export async function freshSource({ sourceRoot, wikiRoot, adapter, sourceKey, sourceRevision }) {
   if (typeof adapter !== 'string' || !/^[a-z0-9_-]+$/.test(adapter)) {
     throw new Error('adapter ist ungültig')
   }

@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process'
-import { createHash } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { constants } from 'node:fs'
-import { lstat, mkdir, open, readFile, realpath, rename, rm } from 'node:fs/promises'
+import { link, lstat, mkdir, open, readFile, realpath, rename, rm } from 'node:fs/promises'
 import path from 'node:path'
 import { promisify } from 'node:util'
 
@@ -11,6 +11,7 @@ import {
   checkFresh,
   checkRetainedBackups,
   confinedIngestPath,
+  freshSource,
   loadPreparation,
   prepareIngest,
   rollbackPublicationDraft,
@@ -25,7 +26,7 @@ import {
   startRun,
   writeRecord,
 } from './wiki_ingest_journal_core.mjs'
-import { scanIngestStatus } from './wiki_ingest_status_core.mjs'
+import { checkRelativePath, scanIngestStatus } from './wiki_ingest_status_core.mjs'
 import { IngestInputError, ingestFailure } from './wiki_ingest_errors.mjs'
 import { withIngestLock } from './wiki_ingest_storage.mjs'
 
@@ -66,6 +67,25 @@ function draftOptions(opts, receipt) {
 }
 
 async function prepare(opts) {
+  const source = await freshSource(opts)
+  try {
+    if (
+      opts.changedPages !== undefined &&
+      (!Array.isArray(opts.changedPages) || opts.changedPages.length > 100)
+    )
+      throw new Error('changed_pages muss eine Liste relativer Wiki-Pfade sein')
+    opts.changedPages = [
+      ...new Set([
+        source.page,
+        'overview.md',
+        'index.md',
+        'log.md',
+        ...(opts.changedPages ?? []).map((page) => checkRelativePath(page, 'changed_pages')),
+      ]),
+    ]
+  } catch (error) {
+    throw new IngestInputError('invalid_pages', error.message)
+  }
   const runId = opts.runId ?? (await startRun({ root: opts.root, resume: false })).run.run_id
   const run = await loadRun({ root: opts.root, runId })
   if (run.state !== 'running')
@@ -647,35 +667,43 @@ async function publish(opts, receipt) {
     receipt.publication = pub
     await savePreparation(opts.root, receipt)
     const lockFile = path.join(opts.wikiRoot, '.git', 'index.lock')
-    let lock
-    try {
-      lock = await open(
-        lockFile,
+    if (!pub.index_lock) {
+      // Fully prepare and persist inode evidence before occupying index.lock.
+      // A crash before the receipt leaves only an inert random candidate; after
+      // the receipt, linking is repeatable and ownership is already provable.
+      const candidate = `ingest-index-${randomBytes(16).toString('hex')}`
+      const handle = await open(
+        path.join(opts.wikiRoot, '.git', candidate),
         constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW,
         0o600,
       )
+      try {
+        await handle.writeFile(indexBytes)
+        await handle.sync()
+        const info = await handle.stat()
+        pub.index_lock = { dev: info.dev, ino: info.ino, candidate }
+      } finally {
+        await handle.close()
+      }
+      receipt.publication = pub
+      await savePreparation(opts.root, receipt)
+    }
+    const candidate = path.join(opts.wikiRoot, '.git', pub.index_lock.candidate)
+    const candidateInfo = await lstat(candidate)
+    if (
+      !candidateInfo.isFile() ||
+      candidateInfo.dev !== pub.index_lock.dev ||
+      candidateInfo.ino !== pub.index_lock.ino ||
+      SHA(await readFile(candidate)) !== pub.index_after
+    )
+      throw new Error('Indexkandidat ist verändert; kein Überschreiben')
+    try {
+      await link(candidate, lockFile)
     } catch (error) {
       if (error.code !== 'EEXIST') throw error
       const info = await lstat(lockFile)
-      if (
-        !pub.index_lock ||
-        info.dev !== pub.index_lock.dev ||
-        info.ino !== pub.index_lock.ino ||
-        !info.isFile()
-      )
+      if (!info.isFile() || info.dev !== pub.index_lock.dev || info.ino !== pub.index_lock.ino)
         throw new Error('Fremder Index-Lock; bestätigte Wartung erforderlich', { cause: error })
-      lock = await open(lockFile, constants.O_WRONLY | constants.O_NOFOLLOW)
-    }
-    try {
-      const info = await lock.stat()
-      pub.index_lock = { dev: info.dev, ino: info.ino }
-      receipt.publication = pub
-      await savePreparation(opts.root, receipt)
-      await lock.truncate(0)
-      await lock.writeFile(indexBytes)
-      await lock.sync()
-    } finally {
-      await lock.close()
     }
     if (SHA(await readFile(indexFile)) !== pub.index_before)
       throw new Error('Fremde Indexänderung; keine Veröffentlichung')

@@ -33,7 +33,10 @@ def fixtures(base: Path) -> tuple[str, dict[str, str]]:
         f"Historical paragraph {index}: unrelated synthetic library information.\n"
         for index in range(2000)
     )
-    (wiki / "overview.md").write_text("# Overview\n" + history + "Preserve this tail")
+    (wiki / "overview.md").write_text(
+        "# Overview\n## Calibration\nAktuelle Messung: 10 Hz.\n"
+        "## Calibration archive\nHistorische Messung: 10 Hz.\n" + history + "Preserve this tail"
+    )
     (wiki / "index.md").write_text("# Index\n")
     (wiki / "log.md").write_text("# Log without final newline")
     (wiki / "AGENTS.md").write_text(
@@ -189,7 +192,42 @@ def main() -> None:
             "docker", "cp", str(patched), name + ":/etc/opencode/tools/wiki_ingest_journal_core.mjs"
         )
         config = json.loads((ROOT / "config/opencode.json").read_text())
+        publication_source = (ROOT / "config/tools/wiki_ingest_publication_core.mjs").read_text()
+        publication_source = publication_source.replace(
+            "import { withIngestLock }", "import { withIngestLock, writeIngestFile }"
+        )
+        stage_boundary = publication_source.index(
+            "  const pendingRequest = receipt.publication.stage_pending"
+        )
+        rejection = (
+            "  if (opts.reference !== undefined) {\n"
+            "    const marker = path.join(opts.root, 'acceptance-rejected-reference')\n"
+            "    const seen = await readFile(marker).then(() => true).catch(() => false)\n"
+            "    if (!seen) {\n"
+            "      await writeIngestFile(marker, 'synthetic pre-write rejection\\n')\n"
+            "      throw new IngestInputError('stale_reference', "
+            "'Synthetic reference rejection; reread before one correction')\n"
+            "    }\n"
+            "  }\n"
+        )
+        patched_publication = evidence / "fault-publication.mjs"
+        patched_publication.write_text(
+            publication_source[:stage_boundary] + rejection + publication_source[stage_boundary:]
+        )
+        run(
+            "docker",
+            "cp",
+            str(patched_publication),
+            name + ":/etc/opencode/tools/wiki_ingest_publication_core.mjs",
+        )
         prompt = config["commands"]["ingest-new"]["template"]
+        prompt += (
+            "\nZusätzlicher synthetischer Abnahmeauftrag: Korrigiere anhand calibration.md "
+            "die aktuelle Messung im vorhandenen Abschnitt Calibration von overview.md "
+            "über inspect-Abschnittsreferenz/replacement auf 12 Hz. Erhalte den ähnlich "
+            "formulierten Abschnitt Calibration archive unverändert mit 10 Hz. "
+            "Dies ist eine gezielte Korrektur, kein Auftrag zum Lesen der gesamten Übersicht."
+        )
         command = [
             "docker",
             "exec",
@@ -265,6 +303,8 @@ def main() -> None:
         for paragraph in history.splitlines():
             assert paragraph in overview, "Historical overview content lost"
         assert "Preserve this tail" in overview
+        assert "Historische Messung: 10 Hz." in overview
+        assert "Aktuelle Messung: 10 Hz." not in overview
         for source, digest in digests.items():
             assert (
                 hashlib.sha256((output / "sources/webdav" / source).read_bytes()).hexdigest()
@@ -280,6 +320,7 @@ def main() -> None:
         ]
         assert len(records) == 4 and all(record["status"] == "ingested" for record in records)
         assert len({record["commit"] for record in records}) == 4
+        assert (output / "incoming/ingest-journal/acceptance-rejected-reference").is_file()
         report = (runs[0].parent / "report.md").read_text()
         for record in records:
             for field in (

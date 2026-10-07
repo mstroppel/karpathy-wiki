@@ -75,7 +75,8 @@ architecture in #113 are **not** part of this change.
 
 The publisher persists its intended commit and complete report payload before
 installation. A compare-and-swap updates HEAD only from the recorded base; an
-owned Git index-lock inode and before/after hashes make the HEAD/index boundary
+fully written index candidate with persisted inode evidence is exclusively linked
+to the Git index lock; before/after hashes make the HEAD/index boundary
 recoverable. No model-managed staging, commit, amend or reset occurs. Journal
 success verifies the actual commit, parent, changed paths, page bytes, retained
 evidence and unchanged source. Audit appends, run metadata and reports publish

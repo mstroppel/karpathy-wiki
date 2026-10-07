@@ -33,8 +33,10 @@ erzeugen. Bei Ablehnung stoppe für Wartung; keine Git-Reset-/Clean-Befehle.
    rufe ausschließlich `operation: resume` auf und gleiche den Erfolg mit dem
    Journal ab. Keine neue Extraktion oder Vorbereitung derselben Quelle.
 2. Rufe `operation: prepare` mit Identität, vorhandener `run_id`, geplantem
-   `budget_tokens` und `changed_pages` auf: Quellseite, `overview.md`, `index.md`,
-   `log.md` und bekannte thematische Seiten. Merke die zurückgegebenen
+   `budget_tokens` auf. Code deklariert Quellseite, `overview.md`, `index.md`,
+   `log.md` automatisch. `changed_pages` ist nur für zusätzliche bekannte
+   thematische Seiten nötig und enthält ausschließlich relative Wiki-Pfade,
+   niemals den absoluten `wiki_path` aus dem Status. Merke die zurückgegebenen
    `preparation_id` und `run_id`. Das Tool prüft frischen Status, Quellenbytes,
    `invalid`/`conflict` und sauberes Git und erstellt einen privaten Entwurf.
    Fremde Änderungen sind ein Blocker, kein Staging-/Löschauftrag.
