@@ -405,6 +405,52 @@ test('resume seals an already validated draft after index staging interruption',
   assert.equal((await loadRun({ root: f.root, runId: f.runId })).records.length, 1)
 })
 
+test('prepare generates mandatory paths and later declaration publishes a new thematic page', async (t) => {
+  const { ingestPublication } = await import('../config/tools/wiki_ingest_publication_core.mjs')
+  const f = await fixture(t, { existing: false })
+  await assert.rejects(
+    ingestPublication({
+      ...f.opts,
+      operation: 'prepare',
+      adapter: 'webdav',
+      sourceKey: 'notes.md',
+      sourceRevision: SHA(SOURCE),
+      changedPages: ['/absolute/wiki.md'],
+    }),
+    (error) =>
+      error.ingest.code === 'invalid_pages' &&
+      error.ingest.correctable &&
+      error.ingest.preparation_id === null,
+  )
+  const prepared = await ingestPublication({
+    ...f.opts,
+    operation: 'prepare',
+    adapter: 'webdav',
+    sourceKey: 'notes.md',
+    sourceRevision: SHA(SOURCE),
+  })
+  assert.deepEqual(
+    new Set(prepared.changed_pages),
+    new Set([PAGE, 'overview.md', 'index.md', 'log.md']),
+  )
+  const call = (operation, args = {}) =>
+    ingestPublication({ ...f.opts, preparationId: prepared.preparation_id, operation, ...args })
+  await call('declare', { changedPages: ['topics/findings.md'] })
+  await call('read_source')
+  await call('stage', { draft: '# Finding\nSource line 1.\n' })
+  await call('stage', { page: 'topics/findings.md', draft: '# Finding\nSource line 1.\n' })
+  await call('stage', { page: 'overview.md', reviewed: true })
+  const result = await call('publish', {
+    title: 'Finding',
+    content: 'Source line 1 finding.',
+    contradictions: 'None.',
+    extractionLimits: 'Fully read.',
+  })
+  assert.ok(result.changed_pages.includes('topics/findings.md'))
+  assert.equal(await f.git('status', '--porcelain'), '')
+  assert.equal((await loadRun({ root: f.root, runId: prepared.run_id })).state, 'completed')
+})
+
 test('real Paperless renderer revisions survive prepare, apply, validate and journal verification', async (t) => {
   const f = await fixture(t, { existing: false })
   const { stdout } = await runFile(
