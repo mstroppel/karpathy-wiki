@@ -201,6 +201,11 @@ export function parseManifest(sourceName, value) {
     const wiki_path = checkRelativePath(item.wiki_path, `${source_key}: wiki_path`)
     if (typeof item.source_revision !== 'string' || !REVISION_RE.test(item.source_revision))
       throw new Error(`${source_key}: source_revision ist ungültig`)
+    if (
+      Object.hasOwn(item, 'source_sha256') &&
+      (typeof item.source_sha256 !== 'string' || !REVISION_RE.test(item.source_sha256))
+    )
+      throw new Error(`${source_key}: source_sha256 ist ungültig`)
     const frontmatter = item.frontmatter
     if (!frontmatter || typeof frontmatter !== 'object' || Array.isArray(frontmatter))
       throw new Error(`${source_key}: frontmatter fehlt`)
@@ -217,6 +222,7 @@ export function parseManifest(sourceName, value) {
       source_path,
       wiki_path,
       source_revision: item.source_revision,
+      ...(Object.hasOwn(item, 'source_sha256') ? { source_sha256: item.source_sha256 } : {}),
       frontmatter,
       claim,
     }

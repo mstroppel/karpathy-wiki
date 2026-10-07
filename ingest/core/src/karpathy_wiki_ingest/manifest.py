@@ -39,9 +39,13 @@ class ManifestItem:
     source_revision: str
     frontmatter: dict[str, Any]
     claim: dict[str, str]
+    source_sha256: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        item = asdict(self)
+        if self.source_sha256 is None:
+            del item["source_sha256"]
+        return item
 
 
 def check_relative_path(value: Any, label: str = "path") -> str:
@@ -112,6 +116,10 @@ def validate_manifest(value: Any, expected_source: str | None = None) -> dict[st
         revision = item.get("source_revision")
         if not isinstance(revision, str) or not REVISION_RE.fullmatch(revision):
             raise ManifestError(f"{source_key}: source_revision is invalid")
+        if "source_sha256" in item:
+            digest = item["source_sha256"]
+            if not isinstance(digest, str) or not REVISION_RE.fullmatch(digest):
+                raise ManifestError(f"{source_key}: source_sha256 is invalid")
         frontmatter = item.get("frontmatter")
         if not isinstance(frontmatter, dict):
             raise ManifestError(f"{source_key}: frontmatter must be an object")

@@ -16,7 +16,7 @@ summary and its durable file path. Details remain outside model context.
   ├── wiki_ingest_status   summary + diagnostics
   ├── wiki-lint (read-only Git preflight / confirmed repair, sequential)
   └── wiki-ingest (one child session per batch, strictly sequential)
-        ├── wiki_ingest_transaction  prepare / apply / validate
+        ├── wiki_ingest_transaction  prepare / apply / validate / confirmed rollback
         ├── one focused commit per source
         └── wiki_ingest_journal  record (after each verified commit)
 ```
@@ -25,11 +25,22 @@ The orchestrator never reads sources and never writes the wiki; ingestion change
 come from a `wiki-ingest` worker, exactly one commit per source. Confirmed repairs
 go to `wiki-lint`, sequentially, with separate correction commits. Each call to
 `next_batch` performs a fresh status scan, so a run never works from stale list
-positions. Sources already recorded for the run are excluded, interrupted runs
+positions. Successfully recorded or explicitly skipped sources are excluded, interrupted runs
 resume with their records intact, and a source whose recorded commit did not
 take effect is retried instead of being silently skipped.
 
 ## Ingest validation and repair
+
+Provider revisions and file integrity are distinct. Paperless hashes its document
+inputs and export settings, then embeds that revision in the rendered Markdown;
+it cannot equal the SHA-256 of that same Markdown. The Paperless publisher records
+the rendered file's `source_sha256` in its manifest and verifies those bytes before
+reusing a published generation. Prepare requires that publisher digest, checks
+identity/revision against the manifest and pins `source_sha256` in the private
+receipt. Missing or mismatched publisher digests fail closed; they are never
+inferred by accepting the current bytes. All subsequent steps recheck both. Other current providers
+use byte-hash revisions, which are also verified against the file. Changed bytes,
+identity, revision or publication path invalidate the preparation.
 
 `wiki_ingest_transaction` prepares one selected source against a clean Git
 checkout and a fresh source status. The worker declares all relative wiki paths
@@ -79,13 +90,14 @@ call, another `append` is a new append; this is not general request deduplicatio
 If interrupted before installation, retry restores a copy of the verified previous
 page into an absent destination, preserving the backup. This is not a lock against
 arbitrary external editors or a host sandbox; external writers must be stopped
-before confirmed cleanup. Apply/validate calls for one preparation are mutually
-exclusive. Abrupt process termination can leave a temporary file or lock;
+before confirmed cleanup. Calls for one preparation are serialized within the
+server process; queued calls stop if their predecessor fails. The exclusive disk
+lock still rejects another process. Abrupt process termination can leave a temporary file or lock;
 treat those as blockers for confirmed maintenance, never permission to erase
 unmatched work. Omitted extra
 frontmatter fields remain preserved; `apply` does not remove them.
 
-Own uncommitted mistakes can be corrected and validated again in the same source
+After confirmed repair, own uncommitted mistakes can be corrected and validated again in the same source
 transaction. Foreign work is preserved and blocks ingestion. Already committed
 mistakes require a confirmed, separate `wiki-lint` correction commit; maintenance
 does not count as successful ingestion and never rewrites history. The orchestrator
@@ -93,12 +105,33 @@ can dispatch that maintenance directly without asking the user to switch agents.
 Each run first asks `wiki-lint` for a targeted, read-only Git preflight; open Git
 changes trigger confirmation before batch planning, rather than repeated worker
 failures. Workers still check clean state at preparation to catch intervening work.
-If the run already contains final blocked records, finish it and deliver its report
+For repaired sources, if the run already contains final blocked records, finish it and deliver its report
 before starting a fresh continuation run; otherwise those records would exclude
 repaired-but-still-pending sources from planning. Closed runs and reports remain audit.
-Workers stop a batch immediately when failed work leaves open drafts or another
-Git/transaction blocker; remaining sources are not attempted or given speculative
-blocked records. The orchestrator handles confirmed maintenance before replanning.
+Workers stop on the first source, tool, Git or transaction error, even with a clean
+worktree; remaining sources are not attempted or given speculative blocked records.
+The planner returns an empty batch and `recovery_required: true` for any
+unacknowledged blocked record, including records adopted from an interrupted run.
+The orchestrator offers concrete repair, rollback-and-skip, or abort through
+`question` before dispatching more ingestion work.
+
+For an isolated failure, confirmed `rollback` restores only the failed
+preparation's owned, uncommitted pages to their baseline, including removing its
+new pages. It checks HEAD, index, ownership and retained evidence, requires no live
+provider, preserves displaced files privately, and can resume an interrupted reset.
+It never resets commits or discards foreign changes. Existing successful source
+commits remain intact. Changed HEAD, foreign edits or stale locks require maintenance.
+After rollback and a clean Git check, `skip_blocked` with `record_index` and
+`confirmed: true` acknowledges exactly that failure for this run and excludes its
+source identity (adapter and key) even if the provider republishes a new revision.
+The rolled-back receipt must match the failed source's identity, revision and paths.
+Without a
+preparation (e.g. prepare failed), only the clean Git check is needed. The blocked
+record remains in counts and the report; skipped sources are not reported as
+ingested. Any later failure stops planning again. A later run retries pending
+sources normally. Systematic provider failures should be repaired instead of
+skipping each affected source; wiki maintenance must never fabricate a revision
+or edit provider files to bypass an integrity check.
 
 ## Report
 

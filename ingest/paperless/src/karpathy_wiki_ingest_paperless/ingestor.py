@@ -178,6 +178,12 @@ class Ingestor:
                 return False
             if not (generation / relative).is_file():
                 return False
+            try:
+                digest = hashlib.sha256((generation / relative).read_bytes()).hexdigest()
+            except OSError:
+                return False
+            if item.get("source_sha256") != digest:
+                return False
         return len(items) == len(source_document_ids(generation))
 
     @staticmethod
@@ -549,7 +555,9 @@ class Ingestor:
         LOG.info("Sync complete: %s changed, %s failed", changed, failed)
         return changed, failed
 
-    def manifest_item(self, document_id: int, digest: str, generation: str) -> ManifestItem:
+    def manifest_item(
+        self, document_id: int, digest: str, generation: str, source_sha256: str
+    ) -> ManifestItem:
         relative = f"{document_directory(document_id)}/document-{document_id}.md"
         wiki_relative = f"{document_directory(document_id)}/paperless-{document_id}.md"
         return ManifestItem(
@@ -557,6 +565,7 @@ class Ingestor:
             source_path=f"{GENERATIONS}/{generation}/{relative}",
             wiki_path=wiki_relative,
             source_revision=digest,
+            source_sha256=source_sha256,
             frontmatter={
                 "paperless_id": document_id,
                 "paperless_url": f"{self.settings.public_url}/documents/{document_id}",
@@ -578,7 +587,6 @@ class Ingestor:
         digest = source_hash(document, self.anonymizer.fingerprint, document_type, tag_names)
         if expected_revision is not None and digest != expected_revision:
             raise ValueError("Paperless document changed after job acceptance")
-        item = self.manifest_item(document_id, digest, generation)
         target = source_document_path(staging, document_id)
         old = source_document_path(previous, document_id) if previous is not None else None
         content = document.get("content") or ""
@@ -613,6 +621,9 @@ class Ingestor:
             safe_tags,
             removed_person_tags,
             digest,
+        )
+        item = self.manifest_item(
+            document_id, digest, generation, hashlib.sha256(output.encode("utf-8")).hexdigest()
         )
         try:
             unchanged = (

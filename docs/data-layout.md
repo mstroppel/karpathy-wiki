@@ -113,13 +113,16 @@ Bulk wiki ingestion records its per-source results in
 `incoming/ingest-journal/runs/<run-id>/`: append-only result records, the run
 state with its working-context budget, and the assembled per-source report.
 `incoming/ingest-journal/preparations/<preparation-id>.json` holds private
-transaction receipts (`0600`): selected source identity, baseline commit and
-file hashes, and the exact validated changed-page hashes. Include these receipts
+transaction receipts (`0600`): selected source identity, a separate source-byte
+SHA-256, baseline commit and file hashes, and the exact validated changed-page hashes. Include these receipts
 in journal backups so pending commits remain verifiable.
-Receipts also track transaction-owned page hashes, retained-backup hashes and pending publication intent.
-`preparations/<preparation-id>.json.lock` excludes concurrent apply/validate calls;
+Receipts also track transaction-owned page hashes, retained-backup hashes, pending
+publication intent and resumable rollback progress (`rollback_started`,
+`rollback_pending`, `rolled_back`). Run metadata records confirmed skipped failure
+indices; the original blocked result records remain in the journal and report.
+`preparations/<preparation-id>.json.lock` excludes concurrent apply/validate/rollback calls across processes;
 a lock left by abrupt termination requires confirmed maintenance, not automatic removal.
-Existing wiki pages displaced during publication retain their original inode at
+Wiki pages displaced during publication or confirmed rollback retain their original inode at
 `wiki/.git/ingest-backup-<random-id>/page`, inside an exclusive `0700` directory.
 These private recovery files are outside Git's content tree and public wiki pages;
 include `.git` in wiki backups. They are never automatically removed, since an

@@ -6,6 +6,7 @@ import {
   loadRun,
   planNextBatch,
   readChunk,
+  skipBlockedSource,
   startRun,
   writeRecord,
 } from '/etc/opencode/tools/wiki_ingest_journal_core.mjs'
@@ -49,6 +50,7 @@ export default {
                 'read',
                 'report',
                 'run_finish',
+                'skip_blocked',
               ],
               description: 'Vorgang',
             },
@@ -60,6 +62,11 @@ export default {
               type: 'boolean',
               description:
                 'Bei run_start einen offenen Lauf fortsetzen statt einen neuen zu starten (Standard: true)',
+            },
+            confirmed: {
+              type: 'boolean',
+              description:
+                'Bei skip_blocked: ausdrückliche Zustimmung zu record_index; nach Rücksetzen eigener Entwürfe und sauberem Git bleibt dessen Quellenidentität für den ganzen Lauf ausgelassen, auch bei neuer Revision. Fehler bleibt im Bericht.',
             },
             budget_tokens: {
               type: 'integer',
@@ -117,7 +124,8 @@ export default {
             record_index: {
               type: 'integer',
               minimum: 0,
-              description: 'Position der Datensatzzeile für operation read',
+              description:
+                'Position der Datensatzzeile für read oder des bestätigten Fehlers für skip_blocked',
             },
             report: {
               type: 'boolean',
@@ -203,6 +211,7 @@ export default {
                 final_status: run.final_status,
                 unfinished: run.unfinished,
                 report: run.report,
+                recovery: run.recovery ?? { skipped_records: [] },
               }
               break
             }
@@ -214,6 +223,15 @@ export default {
                 runId: args.run_id,
                 budgetTokens: args.budget_tokens,
                 maxSourcesPerBatch: args.max_sources_per_batch,
+              })
+              break
+            }
+            case 'skip_blocked': {
+              result = await skipBlockedSource({
+                root,
+                runId: args.run_id,
+                recordIndex: args.record_index,
+                confirmed: args.confirmed,
               })
               break
             }

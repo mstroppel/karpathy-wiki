@@ -703,7 +703,7 @@ test('plans bounded batches from a fresh status scan', async () => {
   }
 })
 
-test('excludes blocked records and retries stale ingested records', async () => {
+test('blocked records stop the run instead of silently skipping to stale ingested records', async () => {
   const { root, journalRoot, sourceRoot, wikiSourceRoot } = await fixture()
   try {
     const items = [
@@ -742,14 +742,12 @@ test('excludes blocked records and retries stale ingested records', async () => 
       runId: run.run_id,
       now: NOW,
     })
-    assert.deepEqual(
-      plan.batch.map((entry) => entry.source_key),
-      ['b.md'],
-      'the blocked record is excluded, the stale ingested record is retried',
-    )
-    assert.ok(
-      plan.warnings.some((warning) => warning.includes('veralteter Datensatz')),
-      'the stale record is reported',
+    assert.deepEqual(plan.batch, [])
+    assert.equal(plan.recovery_required, true)
+    assert.equal(plan.blocked, true)
+    assert.equal(
+      (await loadRun({ root: journalRoot, runId: run.run_id })).budget.batches_dispatched,
+      0,
     )
   } finally {
     await rm(root, { recursive: true, force: true })
@@ -806,7 +804,7 @@ test('runs an oversized source alone with an explicit warning', async () => {
   }
 })
 
-test('rolls over at the configured batch limit and finishes when nothing is left', async () => {
+test('rolls over at the batch limit but does not call unacknowledged failures done', async () => {
   const { root, journalRoot, sourceRoot, wikiSourceRoot } = await fixture()
   try {
     await writeManifest(sourceRoot, 'webdav', [
@@ -881,8 +879,9 @@ test('rolls over at the configured batch limit and finishes when nothing is left
       now: NOW,
     })
     assert.deepEqual(done.batch, [])
-    assert.equal(done.remaining, 0)
-    assert.equal(done.done, true)
+    assert.equal(done.remaining, 2)
+    assert.equal(done.recovery_required, true)
+    assert.notEqual(done.done, true)
   } finally {
     await rm(root, { recursive: true, force: true })
   }
