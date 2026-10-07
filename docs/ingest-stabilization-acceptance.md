@@ -51,9 +51,14 @@ Earlier attempts failed rather than being accepted with partial ingestion:
 | Redundant post-publication check reconstructed private receipt IDs incorrectly | Publisher owns commit/journal verification; nested draft receipt location documented |
 | Read-only call omitted preparation identity | Safe typed pre-access rejection allows one corrected input |
 | Model replacement dropped six historical lines inside a broad reference | Tool rejects multi-line context loss; target-line references instead of reconstructed read windows |
+| Complete source/content checks passed, but interrupted child was absent from parent transcript | Capture all synthetic stored session IDs, including interrupted workers, before token/count assertions |
 
 The explicit calibration request must be forwarded to its source worker and
 included in that source commit, not separately delegated to maintenance.
+Session discovery takes an in-memory SQLite backup inside the disposable
+container and reads only session IDs. Databases/credentials are not copied to
+evidence. Every discovered session is exported privately so peak context also
+includes the worker interrupted before its parent received the child result.
 Deterministic regression coverage includes input correction, similar/stale
 section references, large-page preservation, owned index-lock recovery before
 and after HEAD transition, lost stage acknowledgement and journal interruptions

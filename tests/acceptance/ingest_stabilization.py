@@ -101,6 +101,41 @@ def session_ids(value: object) -> set[str]:
     return set(re.findall(r"ses_[A-Za-z0-9]+", json.dumps(value)))
 
 
+def stored_sessions(container: str) -> set[str]:
+    # A killed subagent call may never publish its child ID into the parent's
+    # transcript. Discover IDs from the disposable runtime's session tables,
+    # without exporting databases (which also hold credentials) or other rows.
+    script = """
+import json, pathlib, sqlite3
+ids = set()
+for file in pathlib.Path('/home/opencode/.local/share/opencode').rglob('*'):
+    if not file.is_file() or file.suffix not in ('.db', '.sqlite', '.sqlite3'):
+        continue
+    source = sqlite3.connect('file:' + str(file) + '?mode=ro', uri=True)
+    db = sqlite3.connect(':memory:')
+    try:
+        source.backup(db)
+    finally:
+        source.close()
+    try:
+        tables = db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        for (table,) in tables:
+            if 'session' not in table.lower():
+                continue
+            quoted = '"' + table.replace('"', '""') + '"'
+            columns = {row[1] for row in db.execute('PRAGMA table_info(' + quoted + ')')}
+            if 'id' in columns:
+                rows = db.execute('SELECT id FROM ' + quoted + ' WHERE id LIKE ?', ('ses_%',))
+                ids.update(row[0] for row in rows)
+    finally:
+        db.close()
+print(json.dumps(sorted(ids)))
+"""
+    return set(
+        json.loads(run("docker", "exec", "--user", "1000:100", container, "python3", "-c", script))
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", default="openai/gpt-6-luna#high")
@@ -334,7 +369,7 @@ def main() -> None:
                 "commit",
             ):
                 assert record[field] in report
-        pending = set()
+        pending = stored_sessions(name)
         for trace in evidence.glob("*.jsonl"):
             pending |= session_ids(trace.read_text())
         exported = {}
@@ -358,6 +393,7 @@ def main() -> None:
             )
             value = json.loads(raw)
             exported[session] = value
+            (evidence / f"{session}.json").write_bytes(raw)
             pending |= session_ids(value) - exported.keys()
         peaks: dict[str, int] = {}
         prepares = resumes = 0
@@ -408,7 +444,10 @@ def main() -> None:
         if sys.exc_info()[0] is not None:
             # Preserve synthetic child evidence on failure before deleting the
             # container. Do not print export bodies or credential information.
-            failed_sessions: set[str] = set()
+            try:
+                failed_sessions = stored_sessions(name)
+            except (subprocess.CalledProcessError, ValueError):
+                failed_sessions = set()
             for trace in evidence.glob("*.jsonl"):
                 failed_sessions |= session_ids(trace.read_text())
             attempted: set[str] = set()
