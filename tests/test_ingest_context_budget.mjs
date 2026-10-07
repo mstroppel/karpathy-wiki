@@ -45,7 +45,9 @@ async function fixture(count, characters = SOURCE_CHARACTERS) {
   await git('config', 'user.name', 'Synthetic Fixture')
   await git('config', 'user.email', 'fixture@example.invalid')
   await writeFile(path.join(wikiRoot, 'overview.md'), '# Fixture\n')
-  await git('add', '--', 'overview.md')
+  await writeFile(path.join(wikiRoot, 'index.md'), '# Index\n')
+  await writeFile(path.join(wikiRoot, 'log.md'), '# Log\n')
+  await git('add', '--', 'overview.md', 'index.md', 'log.md')
   await git('commit', '-qm', 'fixture baseline')
   const revision = createHash('sha256').update('x'.repeat(characters)).digest('hex')
   const items = []
@@ -120,7 +122,12 @@ async function measure(count, characters = SOURCE_CHARACTERS) {
         planned.add(entry.source_key)
         // Complete the deterministic worker transaction, so the journal and
         // next planning call observe a real verified Git commit.
-        const changedPages = [path.relative(wikiRoot, entry.wiki_path)]
+        const declaredPages = [
+          path.relative(wikiRoot, entry.wiki_path),
+          'overview.md',
+          'index.md',
+          'log.md',
+        ]
         const prepared = await prepareIngest({
           root: journalRoot,
           sourceRoot,
@@ -128,7 +135,7 @@ async function measure(count, characters = SOURCE_CHARACTERS) {
           adapter: entry.adapter,
           sourceKey: entry.source_key,
           sourceRevision: entry.source_revision,
-          changedPages,
+          changedPages: declaredPages,
         })
         const transaction = {
           root: journalRoot,
@@ -137,7 +144,14 @@ async function measure(count, characters = SOURCE_CHARACTERS) {
           preparationId: prepared.preparation_id,
         }
         await applyIngestDraft({ ...transaction, draft: '# Synthetic synthesis\n' })
-        await validateIngest(transaction)
+        await applyIngestDraft({ ...transaction, page: 'overview.md', edits: [] })
+        await applyIngestDraft({ ...transaction, page: 'index.md', edits: [] })
+        await applyIngestDraft({
+          ...transaction,
+          page: 'log.md',
+          append: `\n- Ingest ${entry.source_key}.\n`,
+        })
+        const { changed_pages: changedPages } = await validateIngest(transaction)
         await git('add', '--', ...changedPages)
         await git('commit', '-qm', 'ingest synthetic source')
         const commit = await git('rev-parse', 'HEAD')

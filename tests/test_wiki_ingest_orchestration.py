@@ -171,6 +171,26 @@ class SkillContractTests(unittest.TestCase):
                 self.assertIn(phrase, depth)
         self.assertIn("gemäß „Inhaltliche\n  Berichtstiefe“", text)
 
+    def test_worker_preserves_shared_pages_and_stops_dirty_batches(self):
+        text = WORKER_SKILL.read_text(encoding="utf-8")
+        for phrase in (
+            "bestehende Seiten gezielte `edits`",
+            "`old_text`, `new_text`, exakter eindeutiger Treffer",
+            "`edits: []`",
+            "`log.md` ausschließlich mit `append`",
+            "Alle drei Pflichtseiten müssen vor dem Commit",
+            "nur bei sauberem Git-Status",
+            "beenden den Batch sofort",
+            "noch nicht versucht",
+            "mögliche Kürzung",
+            "statt lange Sammelseiten aus dem Kontext zu rekonstruieren",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, text)
+        orchestrator = ORCHESTRATOR_SKILL.read_text(encoding="utf-8")
+        self.assertIn("nicht als blockiert", orchestrator)
+        self.assertIn("unvollständigen Commit bereits `current`", orchestrator)
+
     def test_orchestrator_delegates_depth_and_distinguishes_report_links(self):
         text = ORCHESTRATOR_SKILL.read_text(encoding="utf-8")
         handoff = text.split("4. Starte genau einen Subagenten", 1)[1].split("5. Glaube", 1)[0]
