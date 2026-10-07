@@ -905,7 +905,7 @@ export async function ingestPublication(input) {
           return withBudget(await stage(opts, receipt))
         case 'publish':
         case 'resume':
-          return await publish(opts, receipt)
+          return withBudget(await publish(opts, receipt))
         default:
           throw new IngestInputError('invalid_operation', 'Unbekannte Publikationsoperation')
       }

@@ -436,6 +436,10 @@ test('context targets warn without blocking reads, proposals or publication; com
   assert.equal(staged.warnings.length, 2)
   const state = await call('state')
   assert.deepEqual(state.context_budget, staged.context_budget)
+  const repeatedStage = await call('stage', { page: 'overview.md', append: 'x'.repeat(1900) })
+  assert.equal(repeatedStage.context_budget.proposal_bytes, staged.context_budget.proposal_bytes)
+  assert.equal(repeatedStage.context_budget.tool_calls, staged.context_budget.tool_calls + 1)
+  assert.equal(repeatedStage.warnings.length, 2)
   assert.equal(await f.git('status', '--porcelain'), '')
   const result = await call('publish', {
     title: 'Synthesis',
@@ -444,6 +448,12 @@ test('context targets warn without blocking reads, proposals or publication; com
     extractionLimits: 'Fully read.',
   })
   assert.equal(result.status, 'ingested')
+  assert.equal(result.context_budget.exceeded, true)
+  assert.equal(result.warnings.length, 2)
+  const resumed = await call('resume')
+  assert.equal(resumed.commit, result.commit)
+  assert.deepEqual(resumed.context_budget, result.context_budget)
+  assert.deepEqual(resumed.warnings, result.warnings)
   assert.equal(await f.git('status', '--porcelain'), '')
 })
 
