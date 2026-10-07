@@ -157,7 +157,7 @@ class InitTests(unittest.TestCase):
 class ConfigTests(unittest.TestCase):
     def test_config_is_json_and_restricts_sources(self):
         config = json.loads((ROOT / "config" / "opencode.json").read_text())
-        self.assertNotIn("$schema", config)
+        self.assertEqual(config["$schema"], "https://opencode.ai/config.json")
         self.assertEqual(config["update"], "disable")
         self.assertEqual(config["skills"], ["/etc/opencode/skills"])
         self.assertNotIn("permission", config)
@@ -186,7 +186,9 @@ class ConfigTests(unittest.TestCase):
                 for rule in config["agents"][agent]["permissions"]
                 if rule["action"] == "shell"
             }
-            self.assertEqual(shell_rules, {"*": "allow"}, agent)
+            self.assertEqual(
+                shell_rules, {"*": "deny" if agent == "wiki-ingest" else "allow"}, agent
+            )
         analysis_rules = config["agents"]["wiki-analysis"]["permissions"]
         self.assertIn({"action": "shell", "resource": "*", "effect": "deny"}, analysis_rules)
         self.assertIn({"action": "edit", "resource": "*", "effect": "deny"}, analysis_rules)
@@ -266,12 +268,12 @@ class ConfigTests(unittest.TestCase):
         self.assertIn("Wiki-Pfade aus dem tatsächlichen Quellen-Commit", skill)
         self.assertIn("Kein Commit", skill)
         self.assertIn("Nicht ermittelt", skill)
-        self.assertIn("nur, wenn der Benutzer ausdrücklich genau diese Quelle", skill)
-        self.assertIn("ein normaler Auftrag für alle neuen/geänderten Quellen", skill)
+        self.assertIn("nur bei ausdrücklich angeforderter", skill)
+        self.assertIn("normale Sammelaufträge schließen es aus", skill)
         self.assertIn("include_current: true", skill)
-        self.assertIn("suche nach dem exakten `source_path`", skill)
+        self.assertIn("suche den exakten Pfad", skill)
         self.assertIn("Quellpfad und Quellschlüssel sind nicht", skill)
-        self.assertIn("statt eine Duplikatseite für", skill)
+        self.assertIn("keine Duplikatseite", skill)
         # Evidence is durable per source, written only after the verified
         # commit, and unverified results are recorded as blocked.
         self.assertIn("wiki_ingest_journal", skill)

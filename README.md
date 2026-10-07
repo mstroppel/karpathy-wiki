@@ -87,8 +87,11 @@ OpenCode to import `/knowledge/sources/webdav`. Generated pages are written to
 ## Ingestion reports
 
 `/ingest-new` processes all new and changed sources sequentially, with one
-commit per source, in batches planned against a documented working-context
-budget. Every processed source leaves a durable result record in a private
+commit per source, with one fresh worker session per source and a documented
+working-context budget. Workers propose changes in private drafts; code validates
+and publishes complete transactions, generates index/log entries, and reconciles
+interrupted commit/journal boundaries without duplicate publication.
+Every processed source leaves a durable result record in a private
 journal below `${DATA_ROOT}/incoming/ingest-journal`, and the complete per-source
 report is written there as a file: source path, commit hash, changed wiki
 pages, concrete thematic findings with evidence locations and changes from the
@@ -106,7 +109,8 @@ Ingestion checks local Git changes before planning and validates source metadata
 and committed contents before recording success. Blocked runs stop on the first
 error and offer confirmed repair or a scoped rollback of the failed source's
 uncommitted drafts before skipping it and continuing with other sources.
-Successful source commits remain intact.
+Successful source commits remain intact. See [stabilization acceptance](docs/ingest-stabilization-acceptance.md)
+for the opt-in synthetic real-model/restart test; no production data is mounted.
 
 ## Analyses
 

@@ -1,9 +1,5 @@
-import {
-  applyIngestDraft,
-  prepareIngest,
-  rollbackIngest,
-  validateIngest,
-} from '/etc/opencode/tools/wiki_ingest_transaction_core.mjs'
+import { ingestPublication } from '/etc/opencode/tools/wiki_ingest_publication_core.mjs'
+import { ingestFailure } from '/etc/opencode/tools/wiki_ingest_errors.mjs'
 
 export default {
   id: 'karpathy-wiki.ingest-transaction',
@@ -12,57 +8,88 @@ export default {
       tools.add({
         name: 'wiki_ingest_transaction',
         description:
-          'Ein ausgewählter Quelleinleseauftrag: prepare vor Änderungen im sauberen Wiki, changed_pages enthält Quellseite, overview.md, index.md und log.md. apply schreibt die Quellseite oder neue thematische Seiten mit draft; bestehende thematische Seiten ausschließlich mit exakten edits oder append. edits: [] bestätigt eine unveränderte Seite. log.md ist nur ergänzbar. validate erfordert apply für alle Pflichtseiten und einen neuen Logeintrag vor dem expliziten Git-Commit. Quellen bleiben unverändert. Journal status=ingested prüft den tatsächlichen Commit.',
+          'Eine Quelle in einem privaten Entwurf bearbeiten: prepare, read_source (vollständig paginiert), inspect (gezielte Wiki-Abschnitte mit Referenz), stage (Quellseiten-draft, neue Seite, append oder Referenz+replacement; reviewed bestätigt unveränderte Übersicht), publish (prüft alle Seiten, erzeugt Index/Log, genau einen Commit und Journal). Keine eigenen Git-/Wiki-Schreibaufrufe. state prüft unterbrochene Arbeit; resume gleicht gespeicherte Publikation ohne doppelte Commits ab. rollback nur bestätigt. Bei error nur correctable Eingaben einmal korrigieren; unbekannte Zustände zuerst prüfen.',
         input: {
           type: 'object',
           properties: {
-            operation: { type: 'string', enum: ['prepare', 'apply', 'validate', 'rollback'] },
-            confirmed: {
-              type: 'boolean',
-              description:
-                'Bei rollback: nur nach ausdrücklicher Zustimmung true; setzt ausschließlich eigene uncommitted Änderungen dieser Vorbereitung zurück, erhält Backups und Historie.',
+            operation: {
+              type: 'string',
+              enum: [
+                'prepare',
+                'read_source',
+                'inspect',
+                'stage',
+                'publish',
+                'state',
+                'resume',
+                'rollback',
+                'declare',
+              ],
             },
             adapter: { type: 'string' },
             source_key: { type: 'string' },
             source_revision: { type: 'string', pattern: '^[0-9a-f]{64}$' },
+            run_id: { type: 'string' },
+            budget_tokens: { type: 'integer', minimum: 1000, maximum: 1000000 },
             changed_pages: {
               type: 'array',
               minItems: 1,
               maxItems: 100,
               items: { type: 'string' },
               description:
-                'Bei prepare: alle vorgesehenen relativen Wiki-Markdown-Pfade einschließlich Quellseite, overview.md, index.md und log.md; nur saubere oder noch nicht vorhandene Ziele',
+                'prepare: optionale zusätzliche relative thematische Pfade; Quellseite, overview.md, index.md, log.md erzeugt Code. Niemals absolute wiki_path-Werte verwenden.',
             },
             preparation_id: { type: 'string', pattern: '^prep-[0-9a-f]{32}$' },
             page: {
               type: 'string',
               description:
-                'Bei apply: deklarierter relativer Wiki-Pfad; Standard ist die Quellseite.',
+                'Relativer deklarierter Wiki-Pfad; Standard Quellseite. Index/Log sind codegeneriert.',
+            },
+            offset: { type: 'integer', minimum: 1 },
+            limit: { type: 'integer', minimum: 1, maximum: 80 },
+            query: {
+              type: 'string',
+              description:
+                'inspect: wörtliche Suche ab offset; Antwort ist ein begrenzter Abschnitt, nicht die gesamte Seite.',
             },
             draft: {
               type: 'string',
               description:
-                'Bei apply: vollständiger Quellseiteninhalt oder neue thematische Seite. Bestehende thematische Seiten benötigen edits oder append. Auf der Quellseite Felder aus prepare.canonical_fields weglassen; Frontmatter mit Zusatzfeldern ist optional. Falsche Identität/Revision wird abgelehnt; bestehende Zusatzfelder bleiben erhalten.',
+                'stage: vollständige Quellseite ohne kanonische Metadaten oder neue thematische Seite.',
             },
-            edits: {
-              type: 'array',
-              maxItems: 100,
+            reference: {
+              type: 'string',
+              pattern: '^[0-9a-f]{64}$',
               description:
-                'Bei apply für bestehende thematische Seiten: sequenzielle exakte Ersetzungen; old_text muss jeweils genau einmal vorkommen. [] bestätigt nach Prüfung unveränderten Inhalt. Nicht für log.md.',
-              items: {
-                type: 'object',
-                properties: {
-                  old_text: { type: 'string', minLength: 1 },
-                  new_text: { type: 'string' },
-                },
-                required: ['old_text', 'new_text'],
-                additionalProperties: false,
-              },
+                'stage: unveränderte Referenz aus inspect; kein abgeschriebener old_text.',
+            },
+            replacement: {
+              type: 'string',
+              description:
+                'stage: Ersatz ausschließlich für den referenzierten Abschnitt; übrige Seite bleibt erhalten.',
             },
             append: {
               type: 'string',
               description:
-                'Bei apply: Text einschließlich benötigter Zeilenumbrüche exakt an bestehende thematische Seite anhängen; für log.md verpflichtend. Genau eines von draft, edits oder append.',
+                'stage: an eine bestehende thematische Seite anhängen, mit benötigten Zeilenumbrüchen.',
+            },
+            reviewed: {
+              type: 'boolean',
+              description:
+                'stage: unveränderte thematische Seite nach gezielter Prüfung bestätigen.',
+            },
+            title: {
+              type: 'string',
+              maxLength: 200,
+              description:
+                'publish: einfacher einzeiliger Katalogtitel; Code erzeugt Index und Log.',
+            },
+            content: { type: 'string', maxLength: 4000 },
+            contradictions: { type: 'string', maxLength: 4000 },
+            extraction_limits: { type: 'string', maxLength: 4000 },
+            confirmed: {
+              type: 'boolean',
+              description: 'rollback: nur nach ausdrücklicher Zustimmung true.',
             },
           },
           required: ['operation'],
@@ -70,36 +97,25 @@ export default {
         },
         options: { codemode: false },
         execute: async (args) => {
-          const input = {
-            adapter: args.adapter,
-            sourceKey: args.source_key,
-            sourceRevision: args.source_revision,
-            changedPages: args.changed_pages,
-            preparationId: args.preparation_id,
-            page: args.page,
-            draft: args.draft,
-            edits: args.edits,
-            append: args.append,
-            confirmed: args.confirmed,
+          try {
+            const result = await ingestPublication({
+              ...args,
+              sourceKey: args.source_key,
+              sourceRevision: args.source_revision,
+              preparationId: args.preparation_id,
+              changedPages: args.changed_pages,
+              runId: args.run_id,
+              budgetTokens: args.budget_tokens,
+              extractionLimits: args.extraction_limits,
+            })
+            return { content: JSON.stringify(result) }
+          } catch (error) {
+            return {
+              content: JSON.stringify({
+                error: error.ingest ?? ingestFailure(error, args.preparation_id),
+              }),
+            }
           }
-          let result
-          switch (args.operation) {
-            case 'prepare':
-              result = await prepareIngest(input)
-              break
-            case 'apply':
-              result = await applyIngestDraft(input)
-              break
-            case 'validate':
-              result = await validateIngest(input)
-              break
-            case 'rollback':
-              result = await rollbackIngest(input)
-              break
-            default:
-              throw new Error('operation ist ungültig')
-          }
-          return { content: JSON.stringify(result) }
         },
       })
     })

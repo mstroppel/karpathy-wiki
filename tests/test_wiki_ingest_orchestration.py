@@ -53,7 +53,7 @@ WORKER_PHRASES = (
     "Erfolgsdatensatz entsteht erst nach dem Commit",
     "Inhalte fallen nie still weg",
     "Quelldatei unverändert bestätigen",
-    "committe genau einmal pro Quelle",
+    "genau einen Commit je Quelle",
 )
 
 # The report file remains authoritative; chat links it without reading its details.
@@ -144,14 +144,15 @@ class SkillContractTests(unittest.TestCase):
             "wiki_ingest_transaction",
             "operation: prepare",
             "preparation_id",
-            "operation: apply",
-            "operation: validate",
-            "jede thematische Seite",
-            "`page` (deklarierter relativer Wiki-Pfad)",
-            "Nur diese Tool-Schreibvorgänge zählen als eigene Änderungen",
-            "`changed_pages` aus der letzten erfolgreichen `validate`-Antwort",
-            "vor dem",
-            "fremde Git-Änderungen",
+            "operation: read_source",
+            "operation: inspect",
+            "operation: stage",
+            "operation: publish",
+            "operation: resume",
+            "reference",
+            "Index und Log erzeugt Code",
+            "Kein Shell",
+            "Fremde Änderungen",
             "Amend oder Reset",
         ):
             with self.subTest(phrase=phrase):
@@ -192,16 +193,16 @@ class SkillContractTests(unittest.TestCase):
     def test_worker_preserves_shared_pages_and_stops_dirty_batches(self):
         text = WORKER_SKILL.read_text(encoding="utf-8")
         for phrase in (
-            "bestehende Seiten gezielte `edits`",
-            "`old_text`, `new_text`, exakter eindeutiger Treffer",
-            "`edits: []`",
-            "`log.md` ausschließlich mit `append`",
-            "Alle drei Pflichtseiten müssen vor dem Commit",
+            "reference",
+            "replacement",
+            "reviewed: true",
+            "Index und Log erzeugt Code",
+            "privaten Entwurf",
             "auch bei sauberem Git-Status",
             "beendet den Batch sofort",
             "noch nicht versucht",
-            "mögliche Kürzung",
-            "statt lange Sammelseiten aus dem Kontext zu rekonstruieren",
+            "still",
+            "Rekonstruktionen langer Sammelseiten",
         ):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, text)
@@ -355,6 +356,17 @@ class CommandAndAgentTests(unittest.TestCase):
                     if rule["action"] == "wiki_ingest_journal"
                 ]
                 self.assertEqual(denies, ["deny"], f"{name} must not write journal records")
+
+    def test_worker_reads_bounded_tools_and_cannot_write_or_commit_directly(self):
+        rules = self.config["agents"]["wiki-ingest"]["permissions"]
+        for action in ("shell", "edit", "grep", "glob"):
+            self.assertIn({"action": action, "resource": "*", "effect": "deny"}, rules)
+        self.assertIn({"action": "read", "resource": "*", "effect": "deny"}, rules)
+        worker = WORKER_SKILL.read_text(encoding="utf-8")
+        self.assertIn("genau eine Quelle je frischer Worker-Session", worker)
+        self.assertIn("correctable: true", worker)
+        self.assertIn("write_state: unchanged", worker)
+        self.assertIn("einmal", worker)
 
 
 class DeploymentTests(unittest.TestCase):
