@@ -120,6 +120,24 @@ class SkillContractTests(unittest.TestCase):
         self.assertIn("nur eine Zeile", text)
         self.assertIn("gehören nicht in die Rückmeldung", text)
 
+    def test_transport_failure_records_and_recovery_remain_explicit(self):
+        worker = WORKER_SKILL.read_text(encoding="utf-8")
+        for phrase in (
+            "`blocker: null`",
+            "Feld `blocker`",
+            "Schreibzustand zunächst unbekannt",
+            "Eingabevalidierung",
+            "wiederhole keinen Wiki-Schreibaufruf",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, worker)
+        orchestrator = ORCHESTRATOR_SKILL.read_text(encoding="utf-8")
+        self.assertIn("Fehlt der Fehlerdatensatz", orchestrator)
+        self.assertIn("explizitem `blocker`", orchestrator)
+        self.assertIn("diese Entscheidung vor\n  `run_finish`", orchestrator)
+        self.assertIn("keine Reparatur des Ingests", orchestrator)
+        self.assertIn("tatsächlichen Zustand zuerst nur lesend", orchestrator)
+
     def test_worker_requires_deterministic_transaction_before_commit(self):
         text = WORKER_SKILL.read_text(encoding="utf-8")
         for phrase in (

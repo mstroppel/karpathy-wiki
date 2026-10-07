@@ -115,6 +115,18 @@ unacknowledged blocked record, including records adopted from an interrupted run
 The orchestrator offers concrete repair, rollback-and-skip, or abort through
 `question` before dispatching more ingestion work.
 
+Transport failures leave the write outcome unknown until a read-only check;
+a clean worktree does not authorize replaying a write or bypassing recovery.
+Before closing such a run, the orchestrator asks for confirmed rollback and
+fresh ingestion, rollback-and-skip, or abort. Every model-facing journal record
+requires an explicit `blocker`: a concrete failing operation and error for
+`blocked`, or `null` for `ingested`. Error text in extraction limits is not a
+substitute. A rejected input may be corrected and submitted once without
+replaying any wiki write; an ambiguous journal write must instead be reported.
+If the worker's blocked record is missing, the orchestrator records the known
+failure without inventing source or Git verification. This journal repair does
+not resolve the ingestion failure or permit further workers.
+
 For an isolated failure, confirmed `rollback` restores only the failed
 preparation's owned, uncommitted pages to their baseline, including removing its
 new pages. It checks HEAD, index, ownership and retained evidence, requires no live

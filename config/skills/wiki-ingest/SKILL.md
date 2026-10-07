@@ -59,7 +59,8 @@ erzeugen. Bei Ablehnung stoppe für Wartung; keine Git-Reset-/Clean-Befehle.
    Rufe alle Transaktionsoperationen strikt nacheinander auf, auch für verschiedene
    Seiten: warte jeweils auf Erfolg. Bei jedem Fehler stoppe den Batch sofort,
    sichere `preparation_id` im blockierten Datensatz und melde den Fehler an den
-   Orchestrator. Keine automatische Wiederholung oder nächste Quelle. Ein später
+   Orchestrator. Keine automatische Wiederholung von Wiki-Schreibaufrufen oder
+   nächste Quelle. Ein später
    bestätigter Reparaturversuch kann denselben gespeicherten Schreibauftrag
    wieder aufnehmen; verbliebene Lock-Dateien benötigen bestätigte Wartung.
    Nenne den exakten Quellpfad und
@@ -89,7 +90,7 @@ Schreibe nach dem verifizierten Commit genau einen Ergebnisdatensatz über
 `wiki_ingest_journal` (`operation: record`) in den Lauf deines Auftrags
 (`run_id`): `adapter`, `source_key`, `source_path`, `source_revision`,
 `wiki_path`, `preparation_id`, `status: ingested`, `commit`, `changed_pages`, `content`,
-`contradictions`, `extraction_limits` und `source_unmodified: true`. Das
+`contradictions`, `extraction_limits`, `source_unmodified: true` und `blocker: null`. Das
 Tool prüft den tatsächlichen Commit gegen die validierten Inhalte und die
 unveränderte Quelle; bei Fehler melde `blocked`, keinen Erfolg. Der
 Datensatz ist die dauerhafte Grundlage des Abschlussberichts: Halte hier die
@@ -147,6 +148,19 @@ ist, wird nicht beschönigt: Schreibe `status: blocked` mit konkretem `blocker`
 und nenne den Grund, statt einen halben Erfolg zu melden. Ein Datensatz
 überschreitet nie sein Byte-Budget; kürze Detailtexte bewusst und weise jede
 Kürzung in `extraction_limits` aus. Inhalte fallen nie still weg.
+
+Für einen Fehlerdatensatz übergib die Quellenidentität aus dem Status,
+`status: blocked`, die vorhandene `preparation_id` (sonst `null`) und das eigene
+Feld `blocker` mit fehlgeschlagenem Vorgang und konkreter Fehlermeldung.
+Ein Fehlertext nur in `content` oder `extraction_limits` genügt nicht.
+Ohne verifizierten Commit: `commit: null`; `changed_pages` und
+`source_unmodified` nur gemäß tatsächlich geprüftem Zustand angeben.
+Bei Transportfehlern ist der Schreibzustand zunächst unbekannt, auch wenn der
+Tool-Aufruf keine vollständigen Argumente zeigt; behaupte ohne Prüfung nicht,
+dass nichts geschrieben wurde. Scheitert `record` an Eingabevalidierung,
+korrigiere ausschließlich den Fehlerdatensatz und sende ihn einmal erneut;
+wiederhole keinen Wiki-Schreibaufruf. Bei unklarem Journal-Schreibergebnis oder
+erneutem Fehler melde beide Fehler und die Quellenidentität an den Orchestrator.
 
 ## Abschlussbericht
 

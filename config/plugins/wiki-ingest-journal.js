@@ -110,8 +110,22 @@ export default {
                 contradictions: { type: ['string', 'null'] },
                 extraction_limits: { type: ['string', 'null'] },
                 source_unmodified: { type: 'boolean' },
-                blocker: { type: ['string', 'null'] },
+                blocker: {
+                  type: ['string', 'null'],
+                  minLength: 1,
+                  description:
+                    'Immer angeben: bei blocked konkreter Fehler mit fehlgeschlagenem Vorgang; bei ingested null. Fehler nur in content oder extraction_limits ersetzen dieses Feld nicht.',
+                },
               },
+              required: [
+                'adapter',
+                'source_key',
+                'source_path',
+                'source_revision',
+                'wiki_path',
+                'status',
+                'blocker',
+              ],
               additionalProperties: false,
             },
             offset: { type: 'integer', minimum: 0, description: 'Listenposition (Standard: 0)' },

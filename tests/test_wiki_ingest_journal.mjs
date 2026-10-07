@@ -61,6 +61,7 @@ function record(overrides = {}) {
     contradictions: 'Keine festgestellt',
     extraction_limits: 'Keine festgestellt',
     source_unmodified: true,
+    blocker: null,
     ...overrides,
   }
 }
@@ -199,6 +200,78 @@ test('records one verified result per source and supersedes rewrites', async () 
     assert.equal(loaded.effective[0].commit, 'def5678')
     assert.equal(loaded.effective[0].writes, 2)
     assert.equal(loaded.effective[0].record_index, 1)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('journal tool schema requires an explicit blocker field for every source result', async () => {
+  const source = await readFile(
+    new URL('../config/plugins/wiki-ingest-journal.js', import.meta.url),
+    'utf8',
+  )
+  const coreUrl = new URL('../config/tools/wiki_ingest_journal_core.mjs', import.meta.url).href
+  const { default: plugin } = await import(
+    `data:text/javascript;base64,${Buffer.from(
+      source.replace('/etc/opencode/tools/wiki_ingest_journal_core.mjs', coreUrl),
+    ).toString('base64')}`
+  )
+  let definition
+  await plugin.setup({
+    tool: {
+      transform: async (callback) =>
+        callback({
+          add: (tool) => {
+            definition = tool
+          },
+        }),
+    },
+  })
+  assert.equal(definition.name, 'wiki_ingest_journal')
+  const schema = definition.input.properties.record
+  for (const field of [
+    'adapter',
+    'source_key',
+    'source_path',
+    'source_revision',
+    'wiki_path',
+    'status',
+    'blocker',
+  ]) {
+    assert.ok(schema.required.includes(field), `${field} must be model-visible as required`)
+  }
+  assert.deepEqual(schema.properties.blocker.type, ['string', 'null'])
+  assert.equal(schema.properties.blocker.minLength, 1)
+  assert.match(schema.properties.blocker.description, /bei blocked/)
+  assert.match(schema.properties.blocker.description, /bei ingested null/)
+})
+
+test('transport failure requires a dedicated blocker and corrected record stays durable', async () => {
+  const { root, journalRoot, run } = await runFixture()
+  try {
+    const failure = 'apply: provider.transport: WebSocket closed with code 1000'
+    const failedRecord = blockedRecord({
+      blocker: undefined,
+      content: 'Quelle gelesen; Schreibzustand nicht ermittelt.',
+      extraction_limits: failure,
+    })
+    await assert.rejects(
+      writeRecord({ root: journalRoot, runId: run.run_id, record: failedRecord }),
+      /blocker fehlt für status blocked/,
+    )
+    assert.equal((await loadRun({ root: journalRoot, runId: run.run_id })).counts.records, 0)
+    await writeRecord({
+      root: journalRoot,
+      runId: run.run_id,
+      record: { ...failedRecord, blocker: failure },
+    })
+    const loaded = await loadRun({ root: journalRoot, runId: run.run_id })
+    assert.equal(loaded.counts.blocked, 1)
+    assert.equal(loaded.effective[0].blocker, failure)
+    assert.equal(loaded.effective[0].preparation_id, failedRecord.preparation_id)
+    assert.equal(loaded.effective[0].commit, null)
+    const report = await assembleReport({ root: journalRoot, runId: run.run_id })
+    assert.match(await readFile(report.absolute_path, 'utf8'), /apply: provider.transport/)
   } finally {
     await rm(root, { recursive: true, force: true })
   }
