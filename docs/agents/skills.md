@@ -30,6 +30,23 @@ uses this repository's locations, and keeps packaging guidance in the short
 main file. Updates should be reviewed against that revision and the local
 authoring rules rather than overwriting the adaptation with a bulk install.
 
+## Installation and updates
+
+`npx skills add` installs upstream skill files; it does not make them npm
+dependencies. The CLI supports `skills update`, but Dependabot's
+[supported ecosystems](https://docs.github.com/en/code-security/dependabot/ecosystems-supported-by-dependabot/supported-ecosystems-and-repositories)
+do not include the skills lockfile (`skills-lock.json`). Adding the `skills`
+CLI to `package.json` would let Dependabot update the installer, not the
+installed instructions; see the [CLI documentation](https://github.com/vercel-labs/skills#other-commands).
+
+Keep this local adaptation committed and review updates manually: compare
+upstream changes since the pinned revision, incorporate relevant guidance while
+preserving repository-specific links and safety rules, update the provenance
+revision and license if needed, then check links and walk through the skill.
+For future unmodified upstream skills, consider CLI-managed installs with a
+separate scheduled update PR workflow. Review instruction changes before merging;
+do not auto-merge them solely because installer or runtime tests pass.
+
 ## Candidates for later work
 
 Add a skill when a recurring task needs instructions beyond existing docs.
