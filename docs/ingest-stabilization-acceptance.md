@@ -42,6 +42,17 @@ permissions on someone else's temporary directory.
 ## Evidence status
 
 Execution is in progress; no passing real-model result is claimed yet.
+Earlier attempts failed rather than being accepted with partial ingestion:
+
+| Observed blocker | Correction before rerun |
+| --- | --- |
+| Worker paginated the large overview to its work limit | Targeted queries; no full historical scan |
+| Absolute source-page path supplied to prepare | Mandatory pages generated in code; invalid optional paths classified before preparation |
+| Redundant post-publication check reconstructed private receipt IDs incorrectly | Publisher owns commit/journal verification; nested draft receipt location documented |
+| Read-only call omitted preparation identity | Safe typed pre-access rejection allows one corrected input |
+
+The explicit calibration request must be forwarded to its source worker and
+included in that source commit, not separately delegated to maintenance.
 Deterministic regression coverage includes input correction, similar/stale
 section references, large-page preservation, owned index-lock recovery before
 and after HEAD transition, lost stage acknowledgement and journal interruptions
