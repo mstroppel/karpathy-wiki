@@ -758,7 +758,7 @@ export async function skipBlockedSource({
   if (!record) throw new Error('Kein aktueller blockierter Datensatz an record_index')
   await assertCleanIngestWiki(wikiRoot)
   if (record.preparation_id) {
-    await assertIngestRolledBack({ root, wikiRoot, preparationId: record.preparation_id })
+    await assertIngestRolledBack({ root, wikiRoot, preparationId: record.preparation_id, record })
   }
   const skipped = [...new Set([...(run.recovery?.skipped_records ?? []), recordIndex])]
   await writeRunFile(
@@ -846,8 +846,10 @@ export async function planNextBatch({
   }
 
   const excluded = new Set()
+  const skippedSources = new Set()
   for (const record of run.effective) {
-    if (record.status === 'blocked') excluded.add(recordKey(record))
+    if (record.status === 'blocked')
+      skippedSources.add(JSON.stringify([record.adapter, record.source_key]))
     if (record.status === 'ingested') {
       // A record whose source is still pending describes a commit that did not
       // stick: reprocess instead of trusting a stale record.
@@ -862,7 +864,9 @@ export async function planNextBatch({
   }
 
   const open = pendingEntries(status).filter(
-    (item) => !excluded.has(recordKey({ ...item.entry, adapter: item.adapter })),
+    (item) =>
+      !skippedSources.has(JSON.stringify([item.adapter, item.entry.source_key])) &&
+      !excluded.has(recordKey({ ...item.entry, adapter: item.adapter })),
   )
   if (open.length === 0) {
     return {

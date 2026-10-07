@@ -66,7 +66,7 @@ export default {
             confirmed: {
               type: 'boolean',
               description:
-                'Bei skip_blocked: ausdrückliche Zustimmung zum Auslassen genau von record_index; erst nach Rücksetzen eigener Entwürfe und sauberem Git. Fehler bleibt im Bericht.',
+                'Bei skip_blocked: ausdrückliche Zustimmung zu record_index; nach Rücksetzen eigener Entwürfe und sauberem Git bleibt dessen Quellenidentität für den ganzen Lauf ausgelassen, auch bei neuer Revision. Fehler bleibt im Bericht.',
             },
             budget_tokens: {
               type: 'integer',
@@ -124,7 +124,8 @@ export default {
             record_index: {
               type: 'integer',
               minimum: 0,
-              description: 'Position der Datensatzzeile für operation read',
+              description:
+                'Position der Datensatzzeile für read oder des bestätigten Fehlers für skip_blocked',
             },
             report: {
               type: 'boolean',
@@ -210,6 +211,7 @@ export default {
                 final_status: run.final_status,
                 unfinished: run.unfinished,
                 report: run.report,
+                recovery: run.recovery ?? { skipped_records: [] },
               }
               break
             }

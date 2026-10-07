@@ -33,9 +33,12 @@ take effect is retried instead of being silently skipped.
 
 Provider revisions and file integrity are distinct. Paperless hashes its document
 inputs and export settings, then embeds that revision in the rendered Markdown;
-it cannot equal the SHA-256 of that same Markdown. Prepare checks the Paperless
-identity/revision against the manifest and pins a separate `source_sha256` in
-the private receipt. All subsequent steps recheck both. Other current providers
+it cannot equal the SHA-256 of that same Markdown. The Paperless publisher records
+the rendered file's `source_sha256` in its manifest and verifies those bytes before
+reusing a published generation. Prepare requires that publisher digest, checks
+identity/revision against the manifest and pins `source_sha256` in the private
+receipt. Missing or mismatched publisher digests fail closed; they are never
+inferred by accepting the current bytes. All subsequent steps recheck both. Other current providers
 use byte-hash revisions, which are also verified against the file. Changed bytes,
 identity, revision or publication path invalidate the preparation.
 
@@ -119,7 +122,10 @@ provider, preserves displaced files privately, and can resume an interrupted res
 It never resets commits or discards foreign changes. Existing successful source
 commits remain intact. Changed HEAD, foreign edits or stale locks require maintenance.
 After rollback and a clean Git check, `skip_blocked` with `record_index` and
-`confirmed: true` acknowledges exactly that failure for this run. Without a
+`confirmed: true` acknowledges exactly that failure for this run and excludes its
+source identity (adapter and key) even if the provider republishes a new revision.
+The rolled-back receipt must match the failed source's identity, revision and paths.
+Without a
 preparation (e.g. prepare failed), only the clean Git check is needed. The blocked
 record remains in counts and the report; skipped sources are not reported as
 ingested. Any later failure stops planning again. A later run retries pending

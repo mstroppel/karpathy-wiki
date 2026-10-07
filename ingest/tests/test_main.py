@@ -1,4 +1,5 @@
 import dataclasses
+import hashlib
 import http.server
 import json
 import os
@@ -518,6 +519,11 @@ class IngestTests(unittest.TestCase):
             self.assertEqual(item["wiki_path"], "3000-3999/paperless-3246.md")
             self.assertEqual(item["claim"], {"paperless_id": "3246"})
             self.assertEqual(item["frontmatter"]["source_revision"], item["source_revision"])
+            self.assertEqual(
+                item["source_sha256"],
+                hashlib.sha256((root / "sanitized" / item["source_path"]).read_bytes()).hexdigest(),
+            )
+            self.assertNotEqual(item["source_sha256"], item["source_revision"])
             # The manifest frontmatter carries the validated HTTPS Paperless
             # link so every generated wiki page can render it.
             self.assertEqual(
@@ -730,6 +736,20 @@ class DurablePaperlessTests(unittest.TestCase):
         self.assertEqual(store.metrics()["source_generations"], 1)
         health = json.loads(self.settings_with_state.health_path.read_text())
         self.assertEqual(health["metrics"]["last_source_generation"]["provider"], "paperless")
+
+    def test_tampered_published_body_is_not_an_accepted_cached_generation(self):
+        self.assertEqual(self.ingestor.run_once(), (1, 0))
+        generation = (self.root / "sanitized" / "current").resolve()
+        source = source_document_path(generation, 3246)
+        original = source.read_bytes()
+        source.write_bytes(original + b"\nTampered body.\n")
+        self.assertFalse(self.ingestor.published_matches(self.ingestor.snapshot()[1]))
+        self.assertEqual(self.ingestor.run_once(), (1, 0))
+        self.assertNotEqual((self.root / "sanitized" / "current").resolve(), generation)
+        self.assertEqual(
+            source_document_path(self.root / "sanitized" / "current", 3246).read_bytes(), original
+        )
+        self.assertTrue(self.ingestor.published_matches(self.ingestor.snapshot()[1]))
 
     def test_algorithm_version_bump_reprocesses_paperless_documents(self):
         configuration = {"people": [{"replacement": "[ICH]", "values": ["Max Mustermann"]}]}

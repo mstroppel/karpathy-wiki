@@ -70,12 +70,32 @@ print(json.dumps({"revision": revision, "text": text}))
           source_path: '42.md',
           wiki_path: 'paperless/42.md',
           source_revision: revision,
+          source_sha256: SHA(text),
           frontmatter,
           claim: { paperless_id: '42' },
         },
       ],
     }),
   )
+  const manifestPath = path.join(f.sourceRoot, 'paperless', 'manifest.json')
+  const published = JSON.parse(await readFile(manifestPath, 'utf8'))
+  await writeFile(
+    path.join(f.sourceRoot, 'paperless', '42.md'),
+    text + 'Tampered before prepare.\n',
+  )
+  await assert.rejects(
+    f.prepare({ adapter: 'paperless', sourceKey: '42', sourceRevision: revision }),
+    /SHA-256/,
+  )
+  await writeFile(path.join(f.sourceRoot, 'paperless', '42.md'), text)
+  const missingDigest = structuredClone(published)
+  delete missingDigest.items[0].source_sha256
+  await writeFile(manifestPath, JSON.stringify(missingDigest))
+  await assert.rejects(
+    f.prepare({ adapter: 'paperless', sourceKey: '42', sourceRevision: revision }),
+    /benötigt source_sha256/,
+  )
+  await writeFile(manifestPath, JSON.stringify(published))
   const prepared = await f.prepare({
     adapter: 'paperless',
     sourceKey: '42',
@@ -110,6 +130,8 @@ print(json.dumps({"revision": revision, "text": text}))
     path.join(f.sourceRoot, 'paperless', '42.md'),
     text.replace('paperless_id: 42', 'paperless_id: 43'),
   )
+  published.items[0].source_sha256 = SHA(text.replace('paperless_id: 42', 'paperless_id: 43'))
+  await writeFile(manifestPath, JSON.stringify(published))
   await assert.rejects(
     f.prepare({ adapter: 'paperless', sourceKey: '42', sourceRevision: revision }),
     /paperless_id/,
@@ -223,8 +245,45 @@ test('failure stops planning until confirmed rollback and skip; next failure sto
     ['other.md'],
   )
   assert.equal((await loadRun(args)).counts.blocked, 1)
+  // Republishing must not smuggle an explicitly skipped source back into this run.
+  f.manifest.items[0].source_revision = SHA('Republished source')
+  f.manifest.items[0].frontmatter.source_revision = SHA('Republished source')
+  await writeFile(path.join(f.sourceRoot, 'webdav', 'manifest.json'), JSON.stringify(f.manifest))
+  assert.deepEqual(
+    (await planNextBatch(args)).batch.map((entry) => entry.source_key),
+    ['other.md'],
+  )
   await writeRecord({ ...args, record: blocked })
   assert.equal((await planNextBatch(args)).recovery_required, true)
+})
+
+test('skip rejects a reset receipt belonging to a different blocked source or revision', async (t) => {
+  const f = await fixture(t)
+  const input = await f.applied()
+  await rollbackIngest({ ...input, confirmed: true })
+  const { run } = await startRun({ root: f.root })
+  const args = { ...f.opts, runId: run.run_id, confirmed: true }
+  for (const [field, value] of Object.entries({
+    adapter: 'other',
+    source_key: 'other.md',
+    source_revision: SHA('other'),
+    source_path: '/knowledge/sources/other.md',
+    wiki_path: '/knowledge/wiki/sources/other.md',
+  })) {
+    const result = await writeRecord({
+      ...args,
+      record: f.record(input, null, {
+        status: 'blocked',
+        blocker: 'Synthetic failure',
+        changed_pages: [],
+        [field]: value,
+      }),
+    })
+    await assert.rejects(
+      skipBlockedSource({ ...args, recordIndex: result.record_index }),
+      /gehört nicht/,
+    )
+  }
 })
 
 for (const existing of [true, false]) {

@@ -139,7 +139,13 @@ async function freshSource({ sourceRoot, wikiRoot, adapter, sourceKey, sourceRev
   // Markdown (which itself contains source_revision). Pin byte integrity
   // separately; never compare that self-referential file with its input hash.
   const sourceSha256 = await fileHash(sourceRoot, sourcePath)
+  if (item.source_sha256 !== undefined && sourceSha256 !== item.source_sha256)
+    throw new Error('Quelldatei hat sich geändert: SHA-256 weicht vom Publisher ab')
   if (adapter === 'paperless') {
+    if (!item.source_sha256)
+      throw new Error(
+        'Paperless-Manifest benötigt source_sha256 vom Publisher; Provider neu veröffentlichen lassen',
+      )
     const fields = parseFrontmatterFields((await bytesAt(sourceRoot, sourcePath)).toString('utf8'))
     for (const [name, value] of Object.entries({ ...item.frontmatter, ...item.claim })) {
       if (String(fields[name]) !== String(value))
@@ -691,6 +697,10 @@ export async function assertIngestRolledBack(input) {
   const receipt = await loadPreparation(opts)
   if (receipt.wiki_root !== path.resolve(opts.wikiRoot) || !receipt.rolled_back)
     throw new Error('Vorbereitung muss zuerst bestätigt zurückgesetzt werden')
+  for (const field of ['adapter', 'source_key', 'source_revision', 'source_path', 'wiki_path']) {
+    if (receipt.source[field] !== opts.record[field])
+      throw new Error(`Rücksetzbeleg gehört nicht zum blockierten Datensatz: ${field}`)
+  }
 }
 
 // Only this preparation's uncommitted bytes can be reset. Keep displaced inodes

@@ -18,6 +18,7 @@
     "source_path": "normalized relative POSIX path of the sanitized source file inside the source root",
     "wiki_path": "normalized relative POSIX path of the wiki source page inside the wiki source root",
     "source_revision": "matches the ingest status contract revision pattern (lowercase SHA-256 hex)",
+    "source_sha256": "optional lowercase SHA-256 of the complete sanitized file bytes, independent of source_revision; required by wiki ingestion for Paperless input-derived revisions; when supplied, transaction validation must verify it",
     "frontmatter": "object with the exact frontmatter the wiki page must carry; frontmatter.source_revision must equal source_revision",
     "claim": "non-empty object mapping frontmatter field names to string values that identify this source on its wiki page"
   },
