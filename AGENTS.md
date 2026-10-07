@@ -18,6 +18,13 @@ impact, and test evidence in the pull request description.
 
 ## Agent skills
 
+Keep skills concise and actionable: explicit triggers, ordered steps where
+sequence matters, and verifiable completion criteria. Put optional detail behind
+task-specific links; preserve required behavior and safety boundaries when pruning.
+When creating or editing skills or agent instructions, read
+`.opencode/skills/writing-for-agents/SKILL.md`.
+See `docs/agents/skills.md` for skill locations, upstream provenance, and candidates.
+
 ### Issue tracker
 
 Issues and specs live in GitHub Issues for `mstroppel/karpathy-wiki`. See
