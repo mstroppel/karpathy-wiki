@@ -4,6 +4,7 @@ import { constants } from 'node:fs'
 import { link, lstat, mkdir, open, readdir, realpath, rename, rm } from 'node:fs/promises'
 import path from 'node:path'
 import { isDeepStrictEqual, promisify } from 'node:util'
+import { IngestInputError } from './wiki_ingest_errors.mjs'
 
 import {
   REVISION_RE,
@@ -804,7 +805,8 @@ function thematicText(current, { draft, edits, append }, page) {
   if (!Buffer.from(before).equals(current))
     throw new Error('Bestehende thematische Seite ist kein gültiger UTF-8-Text')
   if (append !== undefined) {
-    if (typeof append !== 'string' || !append.trim()) throw new Error('append fehlt oder ist leer')
+    if (typeof append !== 'string' || !append.length)
+      throw new IngestInputError('invalid_append', 'append fehlt oder ist leer')
     return before + append
   }
   if (page === 'log.md') throw new Error('log.md ist nur ergänzbar: append verwenden')
@@ -820,8 +822,10 @@ function thematicText(current, { draft, edits, append }, page) {
     )
       throw new Error('edit benötigt nichtleeres old_text und new_text')
     const offset = text.indexOf(edit.old_text)
-    if (offset < 0 || text.indexOf(edit.old_text, offset + 1) >= 0)
-      throw new Error('old_text muss genau einmal vorkommen; mehr Kontext angeben')
+    if (offset < 0)
+      throw new IngestInputError('anchor_missing', 'old_text muss genau einmal vorkommen; kein Treffer')
+    if (text.indexOf(edit.old_text, offset + 1) >= 0)
+      throw new IngestInputError('anchor_ambiguous', 'old_text muss genau einmal vorkommen; mehrere Treffer')
     text = text.slice(0, offset) + edit.new_text + text.slice(offset + edit.old_text.length)
   }
   return text

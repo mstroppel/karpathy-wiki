@@ -30,6 +30,21 @@ const PAGE = 'sources/webdav/notes.md'
 const SHA = (text) => createHash('sha256').update(text).digest('hex')
 const SOURCE = 'Synthetic selected source.\n'
 
+test('format-only append is valid and missing versus ambiguous edits are distinguishable', async (t) => {
+  const f = await fixture(t)
+  const input = await f.prepared()
+  await applyIngestDraft({ ...input, page: 'log.md', append: '\n' })
+  await assert.rejects(
+    applyIngestDraft({ ...input, page: 'overview.md', edits: [{ old_text: 'absent', new_text: 'x' }] }),
+    (error) => error.code === 'anchor_missing' && error.write_state === 'unchanged',
+  )
+  await applyIngestDraft({ ...input, page: 'overview.md', append: 'duplicate duplicate\n' })
+  await assert.rejects(
+    applyIngestDraft({ ...input, page: 'overview.md', edits: [{ old_text: 'duplicate', new_text: 'x' }] }),
+    (error) => error.code === 'anchor_ambiguous' && error.write_state === 'unchanged',
+  )
+})
+
 test('real Paperless renderer revisions survive prepare, apply, validate and journal verification', async (t) => {
   const f = await fixture(t, { existing: false })
   const { stdout } = await runFile(
