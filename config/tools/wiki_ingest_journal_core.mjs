@@ -1,6 +1,12 @@
 import { randomBytes } from 'node:crypto'
+import { constants } from 'node:fs'
 import { appendFile, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import {
+  PREPARATION_RE,
+  confinedIngestPath,
+  verifyIngestCommit,
+} from './wiki_ingest_transaction_core.mjs'
 
 import {
   RESULT_NAMES,
@@ -322,6 +328,7 @@ function normalizeRecord(record) {
     source_revision: record.source_revision,
     wiki_path: checkAbsolutePath(record.wiki_path, 'wiki_path'),
     status,
+    preparation_id: record.preparation_id ?? null,
     commit: null,
     changed_pages: [],
     content: checkText(record.content, 'content', { required: false }) ?? null,
@@ -367,6 +374,9 @@ function normalizeRecord(record) {
       throw new Error('source_unmodified muss für status ingested bestätigt sein')
     }
     if (normalized.blocker !== null) throw new Error('blocker ist mit status ingested unvereinbar')
+    if (!PREPARATION_RE.test(normalized.preparation_id)) {
+      throw new Error('preparation_id fehlt oder ist ungültig für status ingested')
+    }
   } else {
     if (normalized.blocker === null) throw new Error('blocker fehlt für status blocked')
   }
@@ -375,7 +385,17 @@ function normalizeRecord(record) {
 
 // Append one per-source result record. Records are append-only; a later write
 // for the same source identity supersedes the earlier one for reporting.
-export async function writeRecord({ root, runId, record, now = Date.now() }) {
+export async function writeRecord({
+  root,
+  runId,
+  record,
+  now = Date.now(),
+  sourceRoot,
+  wikiRoot,
+  verify = verifyIngestCommit,
+}) {
+  const directory = runDirectory(root, runId)
+  await confinedIngestPath(root, path.relative(root, path.join(directory, RUN_FILENAME)))
   const run = checkRunContract(await readRunFile(root, runId), runId)
   if (run.state !== 'running') {
     throw new Error(
@@ -383,16 +403,39 @@ export async function writeRecord({ root, runId, record, now = Date.now() }) {
     )
   }
   const normalized = { ...normalizeRecord(record), recorded_at: nowIso(now) }
-  const line = JSON.stringify(normalized)
-  const bytes = Buffer.byteLength(line, 'utf8')
+  let line = JSON.stringify(normalized)
+  let bytes = Buffer.byteLength(line, 'utf8')
   if (bytes > RECORD_MAX_BYTES) {
     throw new Error(
       `Datensatz ist ${bytes} Bytes groß und überschreitet das Budget von ${RECORD_MAX_BYTES} Bytes; kürze die Detailtexte, statt Inhalte still zu verlieren`,
     )
   }
-  const directory = runDirectory(root, runId)
-  await mkdir(directory, { recursive: true })
-  await appendFile(path.join(directory, RECORDS_FILENAME), `${line}\n`, 'utf8')
+  if (normalized.status === 'ingested') {
+    const verified = await verify({
+      root,
+      record: normalized,
+      ...(sourceRoot === undefined ? {} : { sourceRoot }),
+      ...(wikiRoot === undefined ? {} : { wikiRoot }),
+    })
+    normalized.commit = verified.commit
+    normalized.source_unmodified = verified.source_unmodified
+    line = JSON.stringify(normalized)
+    bytes = Buffer.byteLength(line, 'utf8')
+    if (bytes > RECORD_MAX_BYTES) {
+      throw new Error(
+        `Verifizierter Datensatz überschreitet das Budget von ${RECORD_MAX_BYTES} Bytes`,
+      )
+    }
+  }
+  const recordPath = await confinedIngestPath(
+    root,
+    path.relative(root, path.join(directory, RECORDS_FILENAME)),
+    true,
+  )
+  await appendFile(recordPath, `${line}\n`, {
+    encoding: 'utf8',
+    flag: constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | constants.O_NOFOLLOW,
+  })
   const records = await readRecordLines(root, runId)
   await writeRunFile(root, { ...runFileView(run), updated_at: nowIso(now) })
   return {

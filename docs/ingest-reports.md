@@ -14,17 +14,72 @@ summary and its durable file path. Details remain outside model context.
 /wiki-ingest-orchestrator (chat session)
   ├── wiki_ingest_journal  run_start / next_batch / run_finish
   ├── wiki_ingest_status   summary + diagnostics
+  ├── wiki-lint (read-only Git preflight / confirmed repair, sequential)
   └── wiki-ingest (one child session per batch, strictly sequential)
+        ├── wiki_ingest_transaction  prepare / apply / validate
         ├── one focused commit per source
         └── wiki_ingest_journal  record (after each verified commit)
 ```
 
-The orchestrator never reads sources and never writes the wiki; every change
-comes from a `wiki-ingest` worker, exactly one commit per source. Each call to
+The orchestrator never reads sources and never writes the wiki; ingestion changes
+come from a `wiki-ingest` worker, exactly one commit per source. Confirmed repairs
+go to `wiki-lint`, sequentially, with separate correction commits. Each call to
 `next_batch` performs a fresh status scan, so a run never works from stale list
 positions. Sources already recorded for the run are excluded, interrupted runs
 resume with their records intact, and a source whose recorded commit did not
 take effect is retried instead of being silently skipped.
+
+## Ingest validation and repair
+
+`wiki_ingest_transaction` prepares one selected source against a clean Git
+checkout and a fresh source status. The worker declares all relative wiki paths
+before writes and retains the returned `preparation_id`. `apply` accepts the
+complete source-page draft, derives canonical frontmatter from the fresh status,
+and preserves extra fields; supplied conflicting identity or revision is rejected.
+For thematic pages, `apply` takes a declared relative `page` and its complete
+`draft`; all worker writes, including overview/index/log corrections, use this API.
+`validate` accepts only baseline bytes or hashes owned by successful `apply`
+operations, rejecting foreign edits even on declared paths before the worker commits.
+Only those validated contents may be committed. An `ingested` journal record must
+include `preparation_id`; the journal checks the actual commit tree, changed paths,
+and source hash rather than trusting the worker's success claim. This validates
+provenance and file contents, not semantic completeness of model extraction.
+An explicit reread may leave findings unchanged; byte differences are not evidence
+of reading. Reapplying a corrected draft requires the previous applied bytes still
+to match and invalidates prior validation. Validate again before committing.
+Pages and preparation receipts are written to exclusive sibling temporary files
+and installed only after complete writes. Page publication first persists intent,
+moves an existing destination into retained private `.git/ingest-backup-<random-id>/page`
+evidence, checks the displaced bytes, then exclusively links the new draft into
+the absent destination. There is a short absent-page interval, but no overwrite:
+a concurrent destination creator wins; racing edits to the displaced inode remain
+in its backup, including writes through old descriptors. A detected mismatch blocks
+publication and restores the displaced inode only if the destination is absent.
+Receipts retain every displaced-inode hash after handoff; missing evidence or later
+descriptor edits block apply, validation, and journal commit acceptance.
+Backups are never automatically deleted; see [data layout](data-layout.md).
+A final receipt-write failure is retryable using the saved pending hashes: `apply`
+or `validate` can finish the handoff only if the page and retained evidence match.
+If interrupted before installation, retry restores a copy of the verified previous
+page into an absent destination, preserving the backup. This is not a lock against
+arbitrary external editors or a host sandbox; external writers must be stopped
+before confirmed cleanup. Apply/validate calls for one preparation are mutually
+exclusive. Abrupt process termination can leave a temporary file or lock;
+treat those as blockers for confirmed maintenance, never permission to erase
+unmatched work. Omitted extra
+frontmatter fields remain preserved; `apply` does not remove them.
+
+Own uncommitted mistakes can be corrected and validated again in the same source
+transaction. Foreign work is preserved and blocks ingestion. Already committed
+mistakes require a confirmed, separate `wiki-lint` correction commit; maintenance
+does not count as successful ingestion and never rewrites history. The orchestrator
+can dispatch that maintenance directly without asking the user to switch agents.
+Each run first asks `wiki-lint` for a targeted, read-only Git preflight; open Git
+changes trigger confirmation before batch planning, rather than repeated worker
+failures. Workers still check clean state at preparation to catch intervening work.
+If the run already contains final blocked records, finish it and deliver its report
+before starting a fresh continuation run; otherwise those records would exclude
+repaired-but-still-pending sources from planning. Closed runs and reports remain audit.
 
 ## Report
 
@@ -57,7 +112,7 @@ attributed statements, not independently verified findings. Reading every line
 does not imply extracting every statement. A test source with little usable
 content should be described honestly rather than padded.
 
-The record schema and budgets are unchanged: text fields accept single-line
+The detail-text fields and budgets are unchanged: text fields accept single-line
 text, at most 4,000 Unicode characters each, and the entire record must fit
 8 KiB. Workers use thematic labels and separators, reduce repetition first, and
 identify compressed topics with evidence locations and wiki paths to fuller
@@ -119,6 +174,7 @@ requested by the user; they must still be treated as private.
 
 ```text
 ${DATA_ROOT}/incoming/ingest-journal/          # private (0700), mounted read-write
+├── preparations/<preparation-id>.json       # source identity and validated hashes (0600)
 └── runs/<run-id>/
     ├── run.json        # run state, budget settings, batch counter, report pointer
     ├── records.jsonl   # one result record per processed source, append-only
@@ -141,8 +197,9 @@ lines for audit.
 A record holds `adapter`, `source_key`, `source_path`, `source_revision`,
 `wiki_path`, `status` (`ingested` or `blocked`), `commit`, `changed_pages`,
 `content`, `contradictions`, `extraction_limits`, `source_unmodified`, and for
-blocked sources a concrete `blocker`. An `ingested` record is accepted only with
-a commit, changed pages, the detail texts, and an unmodified source; unverified
+blocked sources a concrete `blocker`. An `ingested` record additionally requires
+`preparation_id` linking its validated transaction. It is accepted only with
+a verified commit, changed pages, the detail texts, and an unmodified source; unverified
 results are recorded as `blocked` instead of being softened. Records have a
 fixed byte budget (8 KiB); exceeding it is an explicit error, never a silent
 truncation.
@@ -265,7 +322,18 @@ unfinished sources.
 ## Troubleshooting
 
 - **Run stops with `invalid` or `conflict`:** global diagnostics block all
-  writes. Fix or resolve the reported pages first; nothing was changed.
+  ingestion writes. The orchestrator offers a concrete repair through `wiki-lint`
+  and requests confirmation unless its scope was already explicitly approved.
+  After repair it rechecks source status and requires a clean Git status before
+  replanning. A failed repair closes the run with blockers, not a retry loop.
+  Already committed errors may exist: a clean Git status is not proof of valid
+  provenance. A closed run stays closed; continuation starts a new run.
+- **Local Git changes:** inspect and identify foreign work before writing. Commit
+  it separately only with explicit consent; do not silently stage or discard it.
+- **Revoked or orphaned entries:** maintenance is separate from ingestion. Confirm
+  a concrete cleanup plan, including derived claims; missing sources alone do
+  not authorize deletion. Never replace an old revision with the current hash
+  without evidence that the content was actually evaluated at that revision.
 - **A source is listed as unfinished:** its blocker is in the report. A blocked
   record is final for the run; request a fresh `/ingest` for exactly that source
   after fixing the cause.

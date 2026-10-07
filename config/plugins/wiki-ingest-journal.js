@@ -92,6 +92,11 @@ export default {
                 source_revision: { type: 'string' },
                 wiki_path: { type: 'string' },
                 status: { type: 'string', enum: ['ingested', 'blocked'] },
+                preparation_id: {
+                  type: ['string', 'null'],
+                  description:
+                    'Für ingested erforderlich: Kennung aus wiki_ingest_transaction prepare/apply/validate',
+                },
                 commit: { type: ['string', 'null'] },
                 changed_pages: { type: 'array', items: { type: 'string' } },
                 content: { type: ['string', 'null'] },

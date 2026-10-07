@@ -112,6 +112,19 @@ wiki publication.
 Bulk wiki ingestion records its per-source results in
 `incoming/ingest-journal/runs/<run-id>/`: append-only result records, the run
 state with its working-context budget, and the assembled per-source report.
+`incoming/ingest-journal/preparations/<preparation-id>.json` holds private
+transaction receipts (`0600`): selected source identity, baseline commit and
+file hashes, and the exact validated changed-page hashes. Include these receipts
+in journal backups so pending commits remain verifiable.
+Receipts also track transaction-owned page hashes, retained-backup hashes and pending publication intent.
+`preparations/<preparation-id>.json.lock` excludes concurrent apply/validate calls;
+a lock left by abrupt termination requires confirmed maintenance, not automatic removal.
+Existing wiki pages displaced during publication retain their original inode at
+`wiki/.git/ingest-backup-<random-id>/page`, inside an exclusive `0700` directory.
+These private recovery files are outside Git's content tree and public wiki pages;
+include `.git` in wiki backups. They are never automatically removed, since an
+external writer may still hold a descriptor to the displaced inode. Inspect and
+clean them only during explicitly confirmed maintenance with writers stopped.
 These records hold source-derived summaries of processed sources, so they live
 in the private `incoming/` area alongside the answer drafts instead of the
 content-free state store. The directory is private to OpenCode and its operator

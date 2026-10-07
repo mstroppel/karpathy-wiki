@@ -14,6 +14,11 @@
       "system": "Bearbeite ausschließlich Einleseaufträge für das Wiki. Delegiere nicht erneut. Lade einmal den Skill wiki-ingest, befolge ihn vollständig und führe den Auftrag selbst aus.",
       "permissions": [
         {
+          "action": "wiki_ingest_transaction",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
           "action": "subagent",
           "resource": "*",
           "effect": "deny"
@@ -28,11 +33,16 @@
     "wiki-ingest-orchestrator": {
       "description": "Orchestriert die Aufnahme neuer und geänderter Quellen in kontextbegrenzten Batches.",
       "mode": "all",
-      "system": "Orchestriere ausschließlich Einleseaufträge für das Wiki. Delegiere nicht erneut und lies Quellen nicht selbst ein. Lade einmal den Skill wiki-ingest-orchestrator, befolge ihn vollständig und führe den Auftrag selbst aus. Änderungen am Wiki führt ausschließlich der Subagent wiki-ingest aus.",
+      "system": "Orchestriere Einleseaufträge und ihre bestätigte Bereinigung. Lade wiki-ingest-orchestrator. Delegiere Einlesen an wiki-ingest, lesende Git-Prüfung und bestätigte Wartung an wiki-lint, stets sequenziell. Lies Quellen nicht selbst ein und ändere das Wiki nicht selbst.",
       "permissions": [
         {
           "action": "read",
           "resource": "/knowledge/incoming/ingest-journal/**",
+          "effect": "deny"
+        },
+        {
+          "action": "wiki_ingest_transaction",
+          "resource": "*",
           "effect": "deny"
         },
         {
@@ -74,6 +84,11 @@
           "action": "subagent",
           "resource": "wiki-ingest",
           "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "wiki-lint",
+          "effect": "allow"
         }
       ]
     },
@@ -99,6 +114,11 @@
       "mode": "subagent",
       "system": "Bearbeite ausschließlich ausdrücklich angeforderte wissenschaftliche Analysen. Delegiere nicht erneut. Lade einmal den Skill wiki-analysis, befolge ihn vollständig und führe den Auftrag selbst aus.",
       "permissions": [
+        {
+          "action": "wiki_ingest_transaction",
+          "resource": "*",
+          "effect": "deny"
+        },
         {
           "action": "edit",
           "resource": "*",
@@ -126,6 +146,11 @@
       "mode": "subagent",
       "system": "Bearbeite ausschließlich Aufträge, eine fertige Analyse als Wiki-Seite zu speichern. Delegiere nicht erneut. Lade einmal den Skill wiki-analysis-save, befolge ihn vollständig und führe den Auftrag selbst aus.",
       "permissions": [
+        {
+          "action": "wiki_ingest_transaction",
+          "resource": "*",
+          "effect": "deny"
+        },
         {
           "action": "subagent",
           "resource": "*",
@@ -302,6 +327,11 @@
       "action": "wiki_ingest_status",
       "resource": "*",
       "effect": "allow"
+    },
+    {
+      "action": "wiki_ingest_transaction",
+      "resource": "*",
+      "effect": "deny"
     },
     {
       "action": "wiki_ingest_journal",

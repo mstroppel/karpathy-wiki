@@ -34,8 +34,22 @@ auf. Lies `AGENTS.md` und vor Änderungen Git-Status und Historie sowie `index.m
    Neuauswertung `current` sein) und stoppe, wenn die globalen Zähler `invalid`
    oder `conflict` ungleich null sind. Brich bei unlesbarem Format oder
    mehrdeutiger Auswahl ab.
-2. Lies die vollständige Quelle. Schreibe das gelieferte Frontmatter unverändert
-   als YAML; erhalte bestehende Felder. Nenne den exakten Quellpfad und
+2. Lies die vollständige Quelle. Vor dem ersten Schreiben je Quelle rufe
+   `wiki_ingest_transaction` (`operation: prepare`, `adapter`, `source_key`,
+   `source_revision`, `changed_pages`: alle geplanten relativen Wiki-Pfade) auf.
+   Merke `preparation_id`; fremde Git-Änderungen sind ein Blocker, kein Auftrag
+   zum Staging oder Verwerfen. Schreibe die Quellenseite mit `operation: apply`,
+   `preparation_id` und `draft` (vollständiges Markdown ohne kanonische
+   Felder aus `canonical_fields`); das Tool übernimmt diese strukturiert und erhält
+    Zusatzfelder. Korrigiere auch eigene Quellseitenentwürfe nur über `apply`.
+    Schreibe jede thematische Seite ebenfalls über `operation: apply` mit
+    `preparation_id`, `page` (deklarierter relativer Wiki-Pfad) und vollständigem
+    `draft`; verwende diesen Weg auch für Korrekturen an `overview.md`, `index.md`
+    und `log.md`. Nur diese Tool-Schreibvorgänge zählen als eigene Änderungen.
+    Bei einem Receipt-Schreibfehler wiederhole `apply` mit derselben Vorbereitung;
+    das Tool prüft den gespeicherten Schreibauftrag, bevor es fortsetzt. Bei
+    fremden Änderungen oder verbliebenen Lock-Dateien stoppe für bestätigte Wartung.
+   Nenne den exakten Quellpfad und
    Fundstellen. Bei `paperless_url`: HTTPS-Feld erhalten und im Seitentext als
    klickbaren Originallink anzeigen. Integriere belegte Aussagen in betroffene
    Wiki-Seiten; kennzeichne Unsicherheit und Widersprüche. Bei `answers`:
@@ -44,16 +58,24 @@ auf. Lies `AGENTS.md` und vor Änderungen Git-Status und Historie sowie `index.m
    Übersprungene, zurückgestellte oder unsichere Antworten nicht als geklärte
    Tatsachen übernehmen; verbleibende Konflikte ausdrücklich melden.
 3. Aktualisiere `overview.md`, `index.md` und `log.md`. Prüfe Diff, Links und
-   Herkunftsnachweise; committe genau einmal pro Quelle. Melde Erfolg erst
-   nach dem Commit und halte die Details für den Ergebnisdatensatz fest.
+   Herkunftsnachweise. Rufe `operation: validate` mit `preparation_id` vor dem
+   Commit auf; korrigiere eigene uncommitted Fehler im selben Auftrag und
+   validiere erneut. Bei fremden Änderungen stoppe. Erst nach erfolgreicher
+    Validierung committe genau einmal pro Quelle: Verwende für Commit und Journal
+    `changed_pages` aus der letzten erfolgreichen `validate`-Antwort, nicht die
+    geplante Pfadliste aus `prepare` (unveränderte Seiten können fehlen).
+   Melde Erfolg erst nach verifiziertem Commit; bereits committed Fehler gehören
+   als Blocker an die bestätigte Wartung, nicht in einen Amend oder Reset.
 
 ## Ergebnisdatensatz je Quelle
 
 Schreibe nach dem verifizierten Commit genau einen Ergebnisdatensatz über
 `wiki_ingest_journal` (`operation: record`) in den Lauf deines Auftrags
 (`run_id`): `adapter`, `source_key`, `source_path`, `source_revision`,
-`wiki_path`, `status: ingested`, `commit`, `changed_pages`, `content`,
-`contradictions`, `extraction_limits` und `source_unmodified: true`. Der
+`wiki_path`, `preparation_id`, `status: ingested`, `commit`, `changed_pages`, `content`,
+`contradictions`, `extraction_limits` und `source_unmodified: true`. Das
+Tool prüft den tatsächlichen Commit gegen die validierten Inhalte und die
+unveränderte Quelle; bei Fehler melde `blocked`, keinen Erfolg. Der
 Datensatz ist die dauerhafte Grundlage des Abschlussberichts: Halte hier die
 interpretativen Feststellungen fest, die Git nicht rekonstruieren kann.
 

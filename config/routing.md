@@ -55,6 +55,8 @@ Einreichungsablauf im primären Agenten fort; diese Regel hat Vorrang vor
 
 Bei einem gescheiterten delegierten Auftrag zeige die genaue Fehlermeldung
 des spezialisierten Agenten in der Antwort.
+Bestätigte Bereinigung nach einem Ingest-Blocker gehört an `wiki-lint`, danach
+frische Statusprüfung und gegebenenfalls Fortsetzung über `/ingest-new`.
 
 Bei einem Auftrag für **alle** neuen und geänderten Quellen starte
 `/ingest-new`; der Orchestrator `wiki-ingest-orchestrator` verarbeitet sie in
