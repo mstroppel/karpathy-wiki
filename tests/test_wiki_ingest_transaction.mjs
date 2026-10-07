@@ -104,6 +104,74 @@ test('private proposals preserve the live wiki and publish one commit with autom
   assert.equal((await loadRun({ root: f.root, runId: run.run_id })).records.length, 1)
 })
 
+for (const failure of ['dirty', 'budget', 'git-config']) {
+  test(`failed implicit preparation (${failure}) creates no adoptable run`, async (t) => {
+    const { ingestPublication } = await import('../config/tools/wiki_ingest_publication_core.mjs')
+    const f = await fixture(t, { existing: false })
+    if (failure === 'dirty') await writeFile(path.join(f.wikiRoot, 'overview.md'), 'Foreign work\n')
+    if (failure === 'git-config') await f.git('config', '--unset', 'user.email')
+    await assert.rejects(
+      ingestPublication({
+        ...f.opts,
+        operation: 'prepare',
+        adapter: 'webdav',
+        sourceKey: 'notes.md',
+        sourceRevision: SHA(SOURCE),
+        ...(failure === 'budget' ? { budgetTokens: 0 } : {}),
+      }),
+    )
+    const next = await startRun({ root: f.root })
+    assert.equal(next.adopted, false)
+    assert.equal((await readdir(path.join(f.root, 'runs'))).length, 1)
+  })
+}
+
+for (const suppliedRun of [false, true]) {
+  test(`failed final preparation receipt closes only its implicit run (supplied=${suppliedRun})`, async (t) => {
+    const { ingestPublication } = await import('../config/tools/wiki_ingest_publication_core.mjs')
+    const f = await fixture(t, { existing: false })
+    const { run } = await startRun({ root: f.root })
+    const originalRename = fs.rename
+    let injected = false
+    fs.rename = async (...args) => {
+      if (String(args[1]).endsWith('.json') && String(args[1]).includes('/preparations/')) {
+        const receipt = JSON.parse(await readFile(args[0], 'utf8'))
+        if (!injected && receipt.publication?.phase === 'draft') {
+          injected = true
+          throw new Error('Synthetic final preparation write failure')
+        }
+      }
+      return originalRename(...args)
+    }
+    syncBuiltinESMExports()
+    try {
+      await assert.rejects(
+        ingestPublication({
+          ...f.opts,
+          operation: 'prepare',
+          adapter: 'webdav',
+          sourceKey: 'notes.md',
+          sourceRevision: SHA(SOURCE),
+          ...(suppliedRun ? { runId: run.run_id } : {}),
+        }),
+        /Synthetic final preparation write failure/,
+      )
+    } finally {
+      fs.rename = originalRename
+      syncBuiltinESMExports()
+    }
+    assert.equal((await loadRun({ root: f.root, runId: run.run_id })).state, 'running')
+    const ids = await readdir(path.join(f.root, 'runs'))
+    assert.equal(ids.length, suppliedRun ? 1 : 2)
+    if (!suppliedRun) {
+      const failed = await loadRun({ root: f.root, runId: ids.find((id) => id !== run.run_id) })
+      assert.equal(failed.state, 'completed')
+      assert.equal(failed.unfinished.length, 1)
+      assert.equal(failed.records.length, 0)
+    }
+  })
+}
+
 async function publicationFixture(t) {
   const { ingestPublication } = await import('../config/tools/wiki_ingest_publication_core.mjs')
   const f = await fixture(t, { existing: false })

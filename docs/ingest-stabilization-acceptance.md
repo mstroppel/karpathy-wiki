@@ -29,9 +29,10 @@ re-extraction or a duplicate commit.
 Assertions cover exactly four source commits/records, unchanged source bytes,
 preserved historical paragraphs/tail, clean Git, final `new=0`/`outdated=0`, every
 report detail field, a parent report link/run ID, no worker shell/edit calls,
-four preparations and a resume, preservation of the archive measurement and
+four preparations in four distinct worker sessions (at most one preparation per
+worker, including interrupted sessions) and a resume, preservation of the archive measurement and
 correction of the current measurement, an exercised pre-write rejection,
-plus measured worker peak context at or below
+plus measured worker and orchestrator peak context each at or below
 32,000 input-plus-cache tokens. Evidence is written to a newly created private
 directory below `/tmp/opencode`; only its aggregate `summary.json` should be
 published. Session/trace files remain private even though fixtures are synthetic.
@@ -50,9 +51,9 @@ passed, including the interrupted first worker in context measurements:
 | --- | --- |
 | Sources / source commits / journal records | 4 / 4 / 4 |
 | Container restarts / verified resumes | 1 / 1 |
-| Preparation calls | 4; no re-extraction |
+| Preparation calls | 4, in four distinct worker sessions; one additional resume-only worker |
 | Worker peak `input + cache.read` | 10,680 tokens, below 32,000 |
-| Orchestrator peak `input + cache.read` | 13,259 tokens |
+| Orchestrator peak `input + cache.read` | 13,259 tokens, below 32,000 |
 | Historical paragraphs / tail | All 2,000 and tail preserved |
 | Source bytes / Git status | Unchanged / clean |
 | Final `new` / `outdated` | 0 / 0; same run completed |
@@ -64,6 +65,10 @@ The subsequent follow-up source may legitimately update the current measurement
 to 15 Hz while documenting the unexplained change from 12 Hz. The strengthened
 calibration assertion therefore checks its source commit's overview, not the
 later overview snapshot; it also passed against the retained synthetic result.
+The subsequent Copilot-review fixes enforce both agent context ceilings and
+per-session preparation isolation. Those strengthened assertions also pass on
+all retained exports from this run, including the interrupted and resume-only
+workers; this is revalidation of existing evidence, not a new model run.
 Only aggregates are published here. Raw exports, tool traces and fixture results
 remain private; no production data or credentials are included.
 

@@ -16,6 +16,7 @@ import tempfile
 import time
 import uuid
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -134,6 +135,105 @@ print(json.dumps(sorted(ids)))
     return set(
         json.loads(run("docker", "exec", "--user", "1000:100", container, "python3", "-c", script))
     )
+
+
+def session_metrics(exported: dict[str, Any]) -> dict[str, Any]:
+    peaks: dict[str, int] = {}
+    prepares = resumes = 0
+    parent_answers = []
+    worker_prepares: dict[str, int] = {}
+    for session, value in exported.items():
+        role = value["info"]["agent"]
+        peak = 0
+        session_prepares = 0
+        for message in value["messages"]:
+            tokens = message.get("tokens", {})
+            peak = max(peak, tokens.get("input", 0) + tokens.get("cache", {}).get("read", 0))
+            for content in message.get("content", []):
+                if role == "wiki-ingest-orchestrator" and content["type"] == "text":
+                    parent_answers.append(content["text"])
+                if content["type"] == "tool":
+                    if content["name"] in ("shell", "edit", "patch") and role == "wiki-ingest":
+                        raise AssertionError("Worker attempted a direct write/commit tool")
+                    operation = content.get("state", {}).get("input", {}).get("operation")
+                    if content["name"] == "wiki_ingest_transaction":
+                        if operation == "prepare":
+                            assert role == "wiki-ingest", "Preparation must belong to a worker"
+                            session_prepares += 1
+                        resumes += operation == "resume"
+        if role == "wiki-ingest":
+            worker_prepares[session] = session_prepares
+            assert session_prepares <= 1, "Worker session prepared more than one source"
+        prepares += session_prepares
+        peaks[role] = max(peaks.get(role, 0), peak)
+    assert prepares == 4 and resumes >= 1, (
+        "Sources were re-extracted or publication was not resumed"
+    )
+    for role in ("wiki-ingest", "wiki-ingest-orchestrator"):
+        assert peaks[role] <= 32000, f"{role} exceeded context budget: {peaks}"
+    return {
+        "prepare_calls": prepares,
+        "resume_calls": resumes,
+        "prepare_calls_by_worker_session": worker_prepares,
+        "peak_input_plus_cache_by_agent": peaks,
+        "parent_answer": "\n".join(parent_answers),
+    }
+
+
+def preserve_failure_evidence(container: str, evidence: Path) -> None:
+    # Do not print export bodies or credential information.
+    try:
+        failed_sessions = stored_sessions(container)
+    except (subprocess.CalledProcessError, ValueError):
+        failed_sessions = set()
+    for trace in evidence.glob("*.jsonl"):
+        failed_sessions |= session_ids(trace.read_text())
+    attempted: set[str] = set()
+    while failed_sessions:
+        session = failed_sessions.pop()
+        if session in attempted:
+            continue
+        attempted.add(session)
+        exported_result = subprocess.run(
+            [
+                "docker",
+                "exec",
+                "--user",
+                "1000:100",
+                "-w",
+                "/knowledge/wiki",
+                container,
+                "opencode",
+                "session",
+                "export",
+                "--standalone",
+                session,
+            ],
+            capture_output=True,
+        )
+        if exported_result.returncode == 0:
+            (evidence / f"{session}.json").write_bytes(exported_result.stdout)
+            try:
+                failed_sessions |= session_ids(json.loads(exported_result.stdout)) - attempted
+            except ValueError:
+                pass
+
+
+def cleanup(
+    container: str, process: subprocess.Popen[bytes] | None, evidence: Path, failed: bool
+) -> None:
+    try:
+        if process is not None:
+            process.terminate()
+            try:
+                process.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+        if failed:
+            preserve_failure_evidence(container, evidence)
+    finally:
+        subprocess.run(["docker", "rm", "--force", container], check=False, capture_output=True)
 
 
 def main() -> None:
@@ -410,32 +510,9 @@ def main() -> None:
             exported[session] = value
             (evidence / f"{session}.json").write_bytes(raw)
             pending |= session_ids(value) - exported.keys()
-        peaks: dict[str, int] = {}
-        prepares = resumes = 0
-        parent_answers = []
-        for value in exported.values():
-            role = value["info"]["agent"]
-            peak = 0
-            for message in value["messages"]:
-                tokens = message.get("tokens", {})
-                peak = max(peak, tokens.get("input", 0) + tokens.get("cache", {}).get("read", 0))
-                for content in message.get("content", []):
-                    if role == "wiki-ingest-orchestrator" and content["type"] == "text":
-                        parent_answers.append(content["text"])
-                    if content["type"] == "tool":
-                        if content["name"] in ("shell", "edit", "patch") and role == "wiki-ingest":
-                            raise AssertionError("Worker attempted a direct write/commit tool")
-                        operation = content.get("state", {}).get("input", {}).get("operation")
-                        if content["name"] == "wiki_ingest_transaction":
-                            prepares += operation == "prepare"
-                            resumes += operation == "resume"
-            peaks[role] = max(peaks.get(role, 0), peak)
-        assert prepares == 4 and resumes >= 1, (
-            "Sources were re-extracted or publication was not resumed"
-        )
-        answer = "\n".join(parent_answers)
+        metrics = session_metrics(exported)
+        answer = metrics.pop("parent_answer")
         assert run_data["run_id"] in answer and "report.md" in answer
-        assert peaks["wiki-ingest"] <= 32000, f"Worker exceeded context budget: {peaks}"
         summary = {
             "model": args.model,
             "runtime": version,
@@ -443,9 +520,7 @@ def main() -> None:
             "commits": 4,
             "records": 4,
             "container_restarts": 1,
-            "prepare_calls": prepares,
-            "resume_calls": resumes,
-            "peak_input_plus_cache_by_agent": peaks,
+            **metrics,
             "historical_paragraphs_preserved": 2000,
             "source_bytes_unchanged": True,
         }
@@ -453,50 +528,7 @@ def main() -> None:
         print(json.dumps(summary, indent=2))
         print(f"Synthetic acceptance evidence: {evidence}")
     finally:
-        if process is not None:
-            process.terminate()
-            process.wait(timeout=30)
-        if sys.exc_info()[0] is not None:
-            # Preserve synthetic child evidence on failure before deleting the
-            # container. Do not print export bodies or credential information.
-            try:
-                failed_sessions = stored_sessions(name)
-            except (subprocess.CalledProcessError, ValueError):
-                failed_sessions = set()
-            for trace in evidence.glob("*.jsonl"):
-                failed_sessions |= session_ids(trace.read_text())
-            attempted: set[str] = set()
-            while failed_sessions:
-                session = failed_sessions.pop()
-                if session in attempted:
-                    continue
-                attempted.add(session)
-                exported_result = subprocess.run(
-                    [
-                        "docker",
-                        "exec",
-                        "--user",
-                        "1000:100",
-                        "-w",
-                        "/knowledge/wiki",
-                        name,
-                        "opencode",
-                        "session",
-                        "export",
-                        "--standalone",
-                        session,
-                    ],
-                    capture_output=True,
-                )
-                if exported_result.returncode == 0:
-                    (evidence / f"{session}.json").write_bytes(exported_result.stdout)
-                    try:
-                        failed_sessions |= (
-                            session_ids(json.loads(exported_result.stdout)) - attempted
-                        )
-                    except ValueError:
-                        pass
-        subprocess.run(["docker", "rm", "--force", name], check=False, capture_output=True)
+        cleanup(name, process, evidence, failed=sys.exc_info()[0] is not None)
 
 
 if __name__ == "__main__":

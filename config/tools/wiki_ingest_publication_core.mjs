@@ -87,10 +87,14 @@ async function prepare(opts) {
   } catch (error) {
     throw new IngestInputError('invalid_pages', error.message)
   }
-  const runId = opts.runId ?? (await startRun({ root: opts.root, resume: false })).run.run_id
-  const run = await loadRun({ root: opts.root, runId })
-  if (run.state !== 'running')
-    throw new IngestInputError('closed_run', 'Lauf ist bereits geschlossen')
+  if (opts.runId !== undefined) {
+    const run = await loadRun({ root: opts.root, runId: opts.runId })
+    if (run.state !== 'running')
+      throw new IngestInputError('closed_run', 'Lauf ist bereits geschlossen')
+  }
+  const budgetTokens = opts.budgetTokens ?? 32000
+  if (!Number.isInteger(budgetTokens) || budgetTokens < 1000 || budgetTokens > 1000000)
+    throw new IngestInputError('invalid_budget', 'Ungültiges Kontextbudget')
   const result = await prepareIngest(opts)
   opts.preparationId = result.preparation_id
   const receipt = await loadPreparation({ ...opts, preparationId: result.preparation_id })
@@ -109,9 +113,9 @@ async function prepare(opts) {
   }
   const root = path.join(directory, 'journal')
   const draft = await prepareIngest({ ...opts, root, wikiRoot })
-  const budgetTokens = opts.budgetTokens ?? 32000
-  if (!Number.isInteger(budgetTokens) || budgetTokens < 1000 || budgetTokens > 1000000)
-    throw new IngestInputError('invalid_budget', 'Ungültiges Kontextbudget')
+  // Only create an implicit run once all draft setup has succeeded. If the
+  // final receipt write fails, close only this call's run, never a supplied one.
+  const runId = opts.runId ?? (await startRun({ root: opts.root, resume: false })).run.run_id
   receipt.publication = {
     single_source: opts.runId === undefined,
     draft_id: draft.preparation_id,
@@ -125,7 +129,17 @@ async function prepare(opts) {
     budget_tokens: budgetTokens,
     context_bytes_limit: Math.max(0, budgetTokens - 12000) * 2,
   }
-  await savePreparation(opts.root, receipt)
+  try {
+    await savePreparation(opts.root, receipt)
+  } catch (error) {
+    await closeSingleRun(opts, receipt.publication, [
+      {
+        source_path: source.source_path,
+        blocker: 'Initialisierung der Publikation fehlgeschlagen',
+      },
+    ])
+    throw error
+  }
   return { ...result, run_id: runId, isolation: 'private-draft', read_bytes: READ_BYTES }
 }
 
@@ -771,7 +785,7 @@ async function publish(opts, receipt) {
   return result
 }
 
-async function closeSingleRun(opts, pub) {
+async function closeSingleRun(opts, pub, unfinished = []) {
   if (!pub.single_source) return
   const run = await loadRun({ root: opts.root, runId: pub.run_id })
   if (run.state === 'completed') return
@@ -784,7 +798,7 @@ async function closeSingleRun(opts, pub) {
     root: opts.root,
     runId: pub.run_id,
     finalStatus: status.summary,
-    unfinished: [],
+    unfinished,
   })
 }
 
