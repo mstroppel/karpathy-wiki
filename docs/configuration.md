@@ -100,7 +100,7 @@ budget for the configured model:
 | Variable | Default | Description |
 | --- | --- | --- |
 | `WIKI_INGEST_BATCH_BUDGET_TOKENS` | `32000` | Estimated working context per worker session |
-| `WIKI_INGEST_BATCH_MAX_SOURCES` | `4` | Maximum sources per batch |
+| `WIKI_INGEST_BATCH_MAX_SOURCES` | `1` | Upper cap; one fresh worker/source is always enforced |
 | `WIKI_INGEST_RUN_MAX_BATCHES` | `12` | Batches per run before a clean rollover (`0` = unlimited) |
 
 Token values are documented estimates, not measured model tokens; see
