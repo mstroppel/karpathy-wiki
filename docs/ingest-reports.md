@@ -55,6 +55,8 @@ the absent destination. There is a short absent-page interval, but no overwrite:
 a concurrent destination creator wins; racing edits to the displaced inode remain
 in its backup, including writes through old descriptors. A detected mismatch blocks
 publication and restores the displaced inode only if the destination is absent.
+Receipts retain every displaced-inode hash after handoff; missing evidence or later
+descriptor edits block apply, validation, and journal commit acceptance.
 Backups are never automatically deleted; see [data layout](data-layout.md).
 A final receipt-write failure is retryable using the saved pending hashes: `apply`
 or `validate` can finish the handoff only if the page and retained evidence match.

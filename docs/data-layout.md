@@ -116,7 +116,7 @@ state with its working-context budget, and the assembled per-source report.
 transaction receipts (`0600`): selected source identity, baseline commit and
 file hashes, and the exact validated changed-page hashes. Include these receipts
 in journal backups so pending commits remain verifiable.
-Receipts also track transaction-owned page hashes and pending publication intent.
+Receipts also track transaction-owned page hashes, retained-backup hashes and pending publication intent.
 `preparations/<preparation-id>.json.lock` excludes concurrent apply/validate calls;
 a lock left by abrupt termination requires confirmed maintenance, not automatic removal.
 Existing wiki pages displaced during publication retain their original inode at

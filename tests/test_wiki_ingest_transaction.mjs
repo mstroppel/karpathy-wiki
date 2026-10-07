@@ -321,6 +321,48 @@ test('writes through an old descriptor remain in retained evidence after publica
     await readFile(path.join(f.wikiRoot, '.git', backups[0], 'page'), 'utf8'),
     '# Late descriptor edit\n',
   )
+  await assert.rejects(validateIngest(input), /Fremde Änderung.*Backup/)
+})
+
+test('missing retained evidence blocks validation and commit acceptance', async (t) => {
+  const f = await fixture(t)
+  const input = await f.validated()
+  const receipt = JSON.parse(
+    await readFile(path.join(f.root, 'preparations', `${input.preparationId}.json`)),
+  )
+  await rm(path.join(f.wikiRoot, '.git', receipt.backups[0].path))
+  await assert.rejects(validateIngest(input), /fehlendes Backup/)
+  const commit = await f.commit()
+  await assert.rejects(
+    verifyIngestCommit({ ...f.opts, record: f.record(input, commit) }),
+    /fehlendes Backup/,
+  )
+})
+
+test('pending receipt recovery rejects an installed page with missing displaced evidence', async (t) => {
+  const f = await fixture(t)
+  const input = await f.prepared()
+  const probe = await open(path.join(f.base, 'probe'), 'wx')
+  const prototype = Object.getPrototypeOf(probe)
+  await probe.close()
+  const original = prototype.write
+  const injected = t.mock.method(prototype, 'write', async function (buffer, ...args) {
+    if (buffer.toString().includes('"pending":null'))
+      throw new Error('Synthetic final receipt failure')
+    return original.call(this, buffer, ...args)
+  })
+  await assert.rejects(
+    applyIngestDraft({ ...input, draft: '# Installed draft\n' }),
+    /final receipt failure/,
+  )
+  injected.mock.restore()
+  const receiptPath = path.join(f.root, 'preparations', `${input.preparationId}.json`)
+  const receipt = await readFile(receiptPath)
+  await rm(path.join(f.wikiRoot, '.git', JSON.parse(receipt).pending.backup))
+  const page = await readFile(path.join(f.wikiRoot, PAGE))
+  await assert.rejects(applyIngestDraft({ ...input, draft: '# Retry\n' }), /Backup fehlt/)
+  assert.deepEqual(await readFile(receiptPath), receipt)
+  assert.deepEqual(await readFile(path.join(f.wikiRoot, PAGE)), page)
 })
 
 test('a failed installation restores the verified prior page on retry', async (t) => {

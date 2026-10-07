@@ -346,6 +346,7 @@ export async function prepareIngest(input) {
     baseline,
     applied: null,
     owned: {},
+    backups: [],
     pending: null,
     validated: null,
   }
@@ -375,6 +376,7 @@ async function applyDraft(input) {
   if ((await commitHash(wikiRoot)) !== receipt.base_commit)
     throw new Error('HEAD hat sich geändert')
   await recoverPending(opts, receipt)
+  await checkRetainedBackups(wikiRoot, receipt)
   const page = opts.page ?? source.page
   if (!Object.hasOwn(receipt.baseline, page)) throw new Error('Seite ist nicht deklariert')
   const current = await bytesAt(wikiRoot, page, true)
@@ -432,6 +434,7 @@ async function applyDraft(input) {
     await rm(temporaryPath, { force: true })
   }
   await recoverPending(opts, receipt)
+  await checkRetainedBackups(wikiRoot, receipt)
   return {
     preparation_id: preparationId,
     wiki_path: path.join(wikiRoot, page),
@@ -452,6 +455,7 @@ async function validateDraft(input) {
   if ((await commitHash(wikiRoot)) !== receipt.base_commit)
     throw new Error('HEAD hat sich geändert')
   await recoverPending(opts, receipt)
+  await checkRetainedBackups(wikiRoot, receipt)
   if (!receipt.applied) throw new Error('apply mit explizitem Draft fehlt')
   const dirty = (await git(wikiRoot, ['status', '--porcelain=v1', '-z', '--untracked-files=all']))
     .toString()
@@ -485,6 +489,7 @@ async function validateDraft(input) {
     if (revision !== baseline) snapshot[page] = revision
   }
   if (!Object.keys(snapshot).length) throw new Error('Keine Wiki-Änderungen für einen Commit')
+  await checkRetainedBackups(wikiRoot, receipt)
   receipt.validated = snapshot
   await savePreparation(root, receipt)
   return { preparation_id: preparationId, validated: true, changed_pages: Object.keys(snapshot) }
@@ -543,15 +548,43 @@ async function recoverPending(opts, receipt) {
     }
   }
   const revision = current === null ? null : hash(current)
+  const backup =
+    pending.backup === null
+      ? null
+      : await bytesAt(await backupRoot(opts.wikiRoot), pending.backup, true)
+  if (pending.backup !== null && backup === null && revision === pending.before) {
+    // Intent was saved, but displacement never happened. Retry from baseline.
+    receipt.pending = null
+    receipt.validated = null
+    await savePreparation(opts.root, receipt)
+    return
+  }
   if (revision === pending.after) {
+    if (pending.backup !== null && backup === null)
+      throw new Error('Backup fehlt; Schreibauftrag nicht verifizierbar')
     receipt.owned[pending.page] = pending.after
     if (pending.page === receipt.source.page) receipt.applied = pending.after
   } else if (revision !== pending.before) {
     throw new Error('Fremde worktree Änderung während apply; kein automatisches Reparieren')
   }
+  if (pending.backup !== null) {
+    if (backup !== null) receipt.backups.push({ path: pending.backup, hash: pending.before })
+  }
   receipt.pending = null
   receipt.validated = null
   await savePreparation(opts.root, receipt)
+}
+
+async function checkRetainedBackups(wikiRoot, receipt) {
+  if (!receipt.backups.length) return
+  const directory = await backupRoot(wikiRoot)
+  for (const backup of receipt.backups) {
+    const bytes = await bytesAt(directory, backup.path, true)
+    if (bytes === null || hash(bytes) !== backup.hash)
+      throw new Error(
+        `Fremde Änderung oder fehlendes Backup; bestätigte Wartung erforderlich: .git/${backup.path}`,
+      )
+  }
 }
 
 async function withPreparationLock(input, operation) {
@@ -584,6 +617,7 @@ export async function verifyIngestCommit(input) {
   }
   const receipt = await loadPreparation({ ...opts, preparationId: record.preparation_id })
   if (receipt.wiki_root !== path.resolve(wikiRoot)) throw new Error('Wiki-Wurzel weicht ab')
+  await checkRetainedBackups(wikiRoot, receipt)
   const source = await checkFresh(opts, receipt)
   for (const name of ['adapter', 'source_key', 'source_path', 'source_revision', 'wiki_path']) {
     if (record[name] !== source[name])
@@ -649,5 +683,6 @@ export async function verifyIngestCommit(input) {
   // Providers may publish concurrently; check once more after inspecting the
   // tree, not just before the Git reads, before authorizing the journal append.
   await checkFresh(opts, receipt)
+  await checkRetainedBackups(wikiRoot, receipt)
   return { commit, source_unmodified: true }
 }
