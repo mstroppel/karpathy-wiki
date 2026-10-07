@@ -36,8 +36,20 @@ checkout and a fresh source status. The worker declares all relative wiki paths
 before writes and retains the returned `preparation_id`. `apply` accepts the
 complete source-page draft, derives canonical frontmatter from the fresh status,
 and preserves extra fields; supplied conflicting identity or revision is rejected.
-For thematic pages, `apply` takes a declared relative `page` and its complete
-`draft`; all worker writes, including overview/index/log corrections, use this API.
+`prepare.changed_pages` must include the source page, `overview.md`, `index.md`,
+and `log.md`. For new thematic pages, `apply` takes a declared relative `page`
+and a complete `draft`. Existing thematic pages accept only exact, sequential
+`edits: [{old_text, new_text}]` or `append`; the untouched text remains on disk,
+not in the model's reconstructed draft. Each `old_text` must match exactly once;
+an absent or ambiguous match rejects the entire call before writing. `edits: []`
+explicitly acknowledges a reviewed, unchanged overview or index. `log.md` accepts
+only `append`, preserving all historical bytes. All worker writes use this API.
+Validation requires all three shared pages to have been applied/reviewed and a
+new log entry, preventing a source-only transaction from being approved for commit.
+Overview/index need not change bytes when the reviewed findings or catalog entry
+are unchanged. This is a structural completion gate, not a semantic quality test;
+workers must still review the diff and evidence. A targeted edit can itself be
+wrong, and an arbitrary shell commit is not prevented by this API.
 `validate` accepts only baseline bytes or hashes owned by successful `apply`
 operations, rejecting foreign edits even on declared paths before the worker commits.
 Only those validated contents may be committed. An `ingested` journal record must
@@ -60,6 +72,10 @@ descriptor edits block apply, validation, and journal commit acceptance.
 Backups are never automatically deleted; see [data layout](data-layout.md).
 A final receipt-write failure is retryable using the saved pending hashes: `apply`
 or `validate` can finish the handoff only if the page and retained evidence match.
+Pending writes also retain a request fingerprint: retrying the same `apply`
+after a failed final receipt write acknowledges the installed incremental edit
+without appending it again or rematching already replaced text. After a successful
+call, another `append` is a new append; this is not general request deduplication.
 If interrupted before installation, retry restores a copy of the verified previous
 page into an absent destination, preserving the backup. This is not a lock against
 arbitrary external editors or a host sandbox; external writers must be stopped
@@ -80,6 +96,9 @@ failures. Workers still check clean state at preparation to catch intervening wo
 If the run already contains final blocked records, finish it and deliver its report
 before starting a fresh continuation run; otherwise those records would exclude
 repaired-but-still-pending sources from planning. Closed runs and reports remain audit.
+Workers stop a batch immediately when failed work leaves open drafts or another
+Git/transaction blocker; remaining sources are not attempted or given speculative
+blocked records. The orchestrator handles confirmed maintenance before replanning.
 
 ## Report
 
@@ -330,6 +349,18 @@ unfinished sources.
   provenance. A closed run stays closed; continuation starts a new run.
 - **Local Git changes:** inspect and identify foreign work before writing. Commit
   it separately only with explicit consent; do not silently stage or discard it.
+- **Interrupted worker replaced a shared page with a partial draft:** pause writers
+  and back up the wiki and private journal. Have `wiki-lint` inspect the exact
+  uncommitted diff against the last clean commit. Confirm a repair scoped to the
+  identified worker-owned files; preserve unrelated edits and retained backup
+  evidence. Recheck clean Git and source diagnostics, close a run with final
+  blocked records, then start a fresh `/ingest-new` run. This workflow does not repair
+  existing installations automatically or alter production data.
+- **A partial source-only commit already made a source `current`:** the normal
+  backlog scan will not retry it. Confirm separate maintenance of the missing
+  overview/index/log updates, or explicitly request `/ingest <source>` to reread
+  that current source. Preserve the original commit and blocked audit record;
+  do not rewrite history or count maintenance as successful ingestion.
 - **Revoked or orphaned entries:** maintenance is separate from ingestion. Confirm
   a concrete cleanup plan, including derived claims; missing sources alone do
   not authorize deletion. Never replace an old revision with the current hash

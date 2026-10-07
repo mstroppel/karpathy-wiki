@@ -16,6 +16,7 @@ import {
 const runFile = promisify(execFile)
 export const PREPARATION_RE = /^prep-[0-9a-f]{32}$/
 const COMMIT_RE = /^[0-9a-f]{7,40}$/
+const REQUIRED_PAGES = ['overview.md', 'index.md', 'log.md']
 const DEFAULTS = {
   root: '/knowledge/incoming/ingest-journal',
   sourceRoot: '/knowledge/sources',
@@ -305,6 +306,9 @@ export async function prepareIngest(input) {
   }
   const pages = [...new Set(changedPages.map((page) => checkRelativePath(page, 'changed_pages')))]
   if (!pages.includes(source.page)) throw new Error('changed_pages enthält die Quellseite nicht')
+  for (const page of REQUIRED_PAGES) {
+    if (!pages.includes(page)) throw new Error(`Pflichtseite fehlt in changed_pages: ${page}`)
+  }
   const baseline = {}
   for (const page of pages) {
     if (!page.endsWith('.md') || (page.startsWith('sources/') && page !== source.page)) {
@@ -363,7 +367,7 @@ export async function prepareIngest(input) {
   }
 }
 
-// No generic metadata repair: apply requires an explicit complete draft.
+// No generic metadata repair: source apply requires an explicit complete draft.
 // Identical findings after a requested reread are legitimate; byte changes do
 // not prove semantic extraction. Supplied wrong identity/revision is rejected.
 async function applyDraft(input) {
@@ -375,8 +379,25 @@ async function applyDraft(input) {
   await cleanIndex(wikiRoot)
   if ((await commitHash(wikiRoot)) !== receipt.base_commit)
     throw new Error('HEAD hat sich geändert')
-  await recoverPending(opts, receipt)
+  const requestHash = hash(
+    Buffer.from(
+      JSON.stringify({
+        page: opts.page ?? source.page,
+        draft: opts.draft,
+        edits: opts.edits,
+        append: opts.append,
+      }),
+    ),
+  )
+  const recovered = await recoverPending(opts, receipt)
   await checkRetainedBackups(wikiRoot, receipt)
+  if (recovered?.request_hash === requestHash) {
+    return {
+      preparation_id: preparationId,
+      wiki_path: path.join(wikiRoot, recovered.page),
+      source_revision: source.source_revision,
+    }
+  }
   const page = opts.page ?? source.page
   if (!Object.hasOwn(receipt.baseline, page)) throw new Error('Seite ist nicht deklariert')
   const current = await bytesAt(wikiRoot, page, true)
@@ -384,9 +405,10 @@ async function applyDraft(input) {
   if ((current === null ? null : hash(current)) !== expectedCurrent) {
     throw new Error(`Fremde worktree Änderung an ${page}; kein Überschreiben`)
   }
-  if (typeof draft !== 'string' || !draft.trim()) throw new Error('draft fehlt oder ist leer')
-  let text = draft
+  let text
   if (page === source.page) {
+    if (opts.edits !== undefined || opts.append !== undefined)
+      throw new Error('Quellseite benötigt einen vollständigen draft')
     validateFields(draft, source.expected, true)
     const proposed = splitDraft(draft)
     const old = current === null ? { fields: {} } : splitDraft(current.toString('utf8'))
@@ -396,6 +418,21 @@ async function applyDraft(input) {
       .map(([name, value]) => `${name}: ${JSON.stringify(String(value))}`)
       .join('\n')}\n---\n${proposed.body}`
     validateFields(text, source.expected)
+  } else {
+    text = thematicText(current, opts, page)
+  }
+  // An explicit review can retain a thematic page byte-for-byte. Persist its
+  // ownership without displacing the inode or spending context on a full copy.
+  if (current !== null && Buffer.from(text).equals(current)) {
+    receipt.owned[page] = hash(current)
+    if (page === source.page) receipt.applied = hash(current)
+    receipt.validated = null
+    await savePreparation(root, receipt)
+    return {
+      preparation_id: preparationId,
+      wiki_path: path.join(wikiRoot, page),
+      source_revision: source.source_revision,
+    }
   }
   const destination = await confined(wikiRoot, page, true)
   await mkdir(path.dirname(destination), { recursive: true })
@@ -422,7 +459,13 @@ async function applyDraft(input) {
     // A writer racing the move is preserved in the backup; a writer creating
     // the destination in the gap wins, and link fails without overwriting it.
     const backup = current === null ? null : await createBackupSlot(wikiRoot)
-    receipt.pending = { page, before: expectedCurrent, after: hash(Buffer.from(text)), backup }
+    receipt.pending = {
+      page,
+      before: expectedCurrent,
+      after: hash(Buffer.from(text)),
+      backup,
+      request_hash: requestHash,
+    }
     receipt.validated = null
     await savePreparation(root, receipt)
     if (backup !== null) {
@@ -489,6 +532,7 @@ async function validateDraft(input) {
     if (revision !== baseline) snapshot[page] = revision
   }
   if (!Object.keys(snapshot).length) throw new Error('Keine Wiki-Änderungen für einen Commit')
+  checkRequiredPages(receipt, snapshot)
   await checkRetainedBackups(wikiRoot, receipt)
   receipt.validated = snapshot
   await savePreparation(root, receipt)
@@ -573,6 +617,7 @@ async function recoverPending(opts, receipt) {
   receipt.pending = null
   receipt.validated = null
   await savePreparation(opts.root, receipt)
+  return revision === pending.after ? pending : undefined
 }
 
 async function checkRetainedBackups(wikiRoot, receipt) {
@@ -607,6 +652,52 @@ async function withPreparationLock(input, operation) {
 export const applyIngestDraft = (input) => withPreparationLock(input, applyDraft)
 export const validateIngest = (input) => withPreparationLock(input, validateDraft)
 
+function checkRequiredPages(receipt, snapshot) {
+  for (const page of REQUIRED_PAGES) {
+    if (!Object.hasOwn(receipt.baseline, page) || !Object.hasOwn(receipt.owned, page))
+      throw new Error(`Pflichtseite noch nicht über apply bearbeitet/geprüft: ${page}`)
+  }
+  if (!Object.hasOwn(snapshot, 'log.md'))
+    throw new Error('log.md benötigt einen neuen Einleseeintrag vor dem Commit')
+}
+
+// Existing thematic pages stay on disk; the model supplies only exact local
+// replacements or an append, never a context-truncated reconstruction.
+function thematicText(current, { draft, edits, append }, page) {
+  if (current === null) {
+    if (edits !== undefined || append !== undefined || typeof draft !== 'string' || !draft.trim())
+      throw new Error('Neue thematische Seite benötigt einen vollständigen draft')
+    return draft
+  }
+  if (draft !== undefined || (edits === undefined) === (append === undefined))
+    throw new Error('Bestehende thematische Seite benötigt genau edits oder append, keinen draft')
+  const before = current.toString('utf8')
+  if (!Buffer.from(before).equals(current))
+    throw new Error('Bestehende thematische Seite ist kein gültiger UTF-8-Text')
+  if (append !== undefined) {
+    if (typeof append !== 'string' || !append.trim()) throw new Error('append fehlt oder ist leer')
+    return before + append
+  }
+  if (page === 'log.md') throw new Error('log.md ist nur ergänzbar: append verwenden')
+  if (!Array.isArray(edits) || edits.length > 100)
+    throw new Error('edits muss 0 bis 100 Einträge enthalten')
+  let text = before
+  for (const edit of edits) {
+    if (
+      !edit ||
+      typeof edit.old_text !== 'string' ||
+      !edit.old_text ||
+      typeof edit.new_text !== 'string'
+    )
+      throw new Error('edit benötigt nichtleeres old_text und new_text')
+    const offset = text.indexOf(edit.old_text)
+    if (offset < 0 || text.indexOf(edit.old_text, offset + 1) >= 0)
+      throw new Error('old_text muss genau einmal vorkommen; mehr Kontext angeben')
+    text = text.slice(0, offset) + edit.new_text + text.slice(offset + edit.old_text.length)
+  }
+  return text
+}
+
 // Required before appending status=ingested. Verify source SHA, fresh identity,
 // the actual commit parent, complete changed-path set, and each committed blob.
 export async function verifyIngestCommit(input) {
@@ -624,6 +715,7 @@ export async function verifyIngestCommit(input) {
       throw new Error(`Datensatz ${name} weicht vom frischen Status ab`)
   }
   if (!receipt.validated) throw new Error('validate vor dem Commit fehlt')
+  checkRequiredPages(receipt, receipt.validated)
   const commit = await commitHash(wikiRoot, record.commit)
   if ((await commitHash(wikiRoot)) !== commit) throw new Error('Commit ist nicht der aktuelle HEAD')
   const parents = (await git(wikiRoot, ['rev-list', '--parents', '-n', '1', commit]))

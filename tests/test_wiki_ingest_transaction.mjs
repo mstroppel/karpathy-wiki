@@ -37,6 +37,8 @@ async function fixture(t, { existing = true, revision = SHA('previous source') }
   await git('config', 'user.name', 'Synthetic Fixture')
   await git('config', 'user.email', 'fixture@example.invalid')
   await writeFile(path.join(wikiRoot, 'overview.md'), '# Previous overview\n')
+  await writeFile(path.join(wikiRoot, 'index.md'), '# Wiki index\n')
+  await writeFile(path.join(wikiRoot, 'log.md'), '# Historical log\n')
   if (existing) {
     await writeFile(
       path.join(wikiRoot, PAGE),
@@ -73,12 +75,21 @@ async function fixture(t, { existing = true, revision = SHA('previous source') }
       adapter: 'webdav',
       sourceKey: 'notes.md',
       sourceRevision: SHA(SOURCE),
-      changedPages: [PAGE, 'overview.md'],
+      changedPages: [PAGE, 'overview.md', 'index.md', 'log.md'],
       ...extra,
     })
   const prepared = async () => {
     const result = await prepare()
     return { ...opts, preparationId: result.preparation_id }
+  }
+  const complete = async (input) => {
+    await applyIngestDraft({ ...input, page: 'overview.md', edits: [] })
+    await applyIngestDraft({ ...input, page: 'index.md', edits: [] })
+    const receipt = JSON.parse(
+      await readFile(path.join(root, 'preparations', `${input.preparationId}.json`)),
+    )
+    if (!Object.hasOwn(receipt.owned, 'log.md'))
+      await applyIngestDraft({ ...input, page: 'log.md', append: '\n- Synthetic ingestion.\n' })
   }
   const applied = async () => {
     const input = await prepared()
@@ -86,7 +97,12 @@ async function fixture(t, { existing = true, revision = SHA('previous source') }
       ...input,
       draft: '---\nnew_extra: "retain too"\n---\n# Newly read source\nA supported synthesis.\n',
     })
-    await applyIngestDraft({ ...input, page: 'overview.md', draft: '# New overview\n' })
+    await applyIngestDraft({
+      ...input,
+      page: 'overview.md',
+      edits: [{ old_text: 'Previous overview', new_text: 'New overview' }],
+    })
+    await complete(input)
     return input
   }
   const validated = async () => {
@@ -95,7 +111,7 @@ async function fixture(t, { existing = true, revision = SHA('previous source') }
     return input
   }
   const commit = async () => {
-    await git('add', '--', PAGE, 'overview.md')
+    await git('add', '--', PAGE, 'overview.md', 'index.md', 'log.md')
     await git('commit', '-qm', 'ingest explicit selected source')
     return git('rev-parse', 'HEAD')
   }
@@ -108,7 +124,7 @@ async function fixture(t, { existing = true, revision = SHA('previous source') }
     status: 'ingested',
     preparation_id: input.preparationId,
     commit: commitHash,
-    changed_pages: [PAGE, 'overview.md'],
+    changed_pages: [PAGE, 'overview.md', 'log.md'],
     content: 'Supported synthesis with evidence.',
     contradictions: 'None identified.',
     extraction_limits: 'None identified.',
@@ -124,6 +140,7 @@ async function fixture(t, { existing = true, revision = SHA('previous source') }
     git,
     prepare,
     prepared,
+    complete,
     applied,
     validated,
     commit,
@@ -158,8 +175,93 @@ test('handles a new page without canonical fields and unused declared paths', as
   const f = await fixture(t, { existing: false })
   const input = await f.prepared()
   await applyIngestDraft({ ...input, draft: '# New source page\nSynthetic content.\n' })
+  await f.complete(input)
   const result = await validateIngest(input)
-  assert.deepEqual(result.changed_pages, [PAGE])
+  assert.deepEqual(result.changed_pages, [PAGE, 'log.md'])
+})
+
+test('source-only and unfinished shared-page transactions cannot validate', async (t) => {
+  const f = await fixture(t)
+  await assert.rejects(f.prepare({ changedPages: [PAGE] }), /Pflichtseite/)
+  const input = await f.prepared()
+  await applyIngestDraft({ ...input, draft: '# Source synthesis\n' })
+  await assert.rejects(validateIngest(input), /Pflichtseite.*overview/)
+  await applyIngestDraft({ ...input, page: 'overview.md', edits: [] })
+  await assert.rejects(validateIngest(input), /Pflichtseite.*index/)
+  await applyIngestDraft({ ...input, page: 'index.md', edits: [] })
+  await assert.rejects(validateIngest(input), /Pflichtseite.*log/)
+  await assert.rejects(applyIngestDraft({ ...input, page: 'log.md', edits: [] }), /nur ergänzbar/)
+  await f.complete(input)
+  assert.deepEqual((await validateIngest(input)).changed_pages, [PAGE, 'log.md'])
+  const commit = await f.commit()
+  await verifyIngestCommit({
+    ...f.opts,
+    record: f.record(input, commit, { changed_pages: [PAGE, 'log.md'] }),
+  })
+})
+
+test('targeted edits preserve a long overview and reject truncated drafts before writing', async (t) => {
+  const f = await fixture(t)
+  const history =
+    '# Overview\n\n' + Array.from({ length: 500 }, (_, n) => `Historical finding ${n}.\n`).join('')
+  const overview = path.join(f.wikiRoot, 'overview.md')
+  await writeFile(overview, history)
+  await f.git('add', '--', 'overview.md')
+  await f.git('commit', '-qm', 'synthetic long history')
+  const input = await f.prepared()
+  await assert.rejects(
+    applyIngestDraft({
+      ...input,
+      page: 'overview.md',
+      draft: '# Overview\nHistorical content unchanged …\n',
+    }),
+    /keinen draft/,
+  )
+  assert.equal(await readFile(overview, 'utf8'), history)
+  for (const edits of [
+    [{ old_text: 'not present', new_text: 'replacement' }],
+    [{ old_text: 'Historical finding', new_text: 'replacement' }],
+    [{ old_text: '', new_text: 'replacement' }],
+    [
+      { old_text: 'Historical finding 1.', new_text: 'changed' },
+      { old_text: 'missing', new_text: 'changed' },
+    ],
+  ]) {
+    await assert.rejects(applyIngestDraft({ ...input, page: 'overview.md', edits }))
+    assert.equal(await readFile(overview, 'utf8'), history)
+  }
+  await applyIngestDraft({
+    ...input,
+    page: 'overview.md',
+    edits: [{ old_text: 'Historical finding 42.', new_text: 'Updated finding 42.' }],
+  })
+  assert.equal(
+    await readFile(overview, 'utf8'),
+    history.replace('Historical finding 42.', 'Updated finding 42.'),
+  )
+  await applyIngestDraft({ ...input, page: 'overview.md', append: '\nNew supported finding.\n' })
+  assert.equal(
+    await readFile(overview, 'utf8'),
+    history.replace('Historical finding 42.', 'Updated finding 42.') + '\nNew supported finding.\n',
+  )
+  await applyIngestDraft({ ...input, draft: '# Source synthesis\n' })
+  await f.complete(input)
+  await validateIngest(input)
+})
+
+test('incremental edits reject invalid UTF-8 without changing historical bytes', async (t) => {
+  const f = await fixture(t)
+  const destination = path.join(f.wikiRoot, 'overview.md')
+  const bytes = Buffer.from([0x23, 0x20, 0xff, 0x0a])
+  await writeFile(destination, bytes)
+  await f.git('add', '--', 'overview.md')
+  await f.git('commit', '-qm', 'synthetic invalid encoding')
+  const input = await f.prepared()
+  await assert.rejects(
+    applyIngestDraft({ ...input, page: 'overview.md', append: '\nFinding.\n' }),
+    /UTF-8/,
+  )
+  assert.deepEqual(await readFile(destination), bytes)
 })
 
 test('creates the initial wiki source directories only when applying an explicit draft', async (t) => {
@@ -168,6 +270,7 @@ test('creates the initial wiki source directories only when applying an explicit
   const input = await f.prepared()
   await assert.rejects(readFile(path.join(f.wikiRoot, PAGE)), /ENOENT/)
   await applyIngestDraft({ ...input, draft: '# First synthesis\n' })
+  await f.complete(input)
   await validateIngest(input)
 })
 
@@ -235,8 +338,9 @@ test('an explicit reread may retain identical findings while refreshing metadata
   await applyIngestDraft({
     ...input,
     page: 'overview.md',
-    draft: '# Confirmed unchanged findings\n',
+    edits: [{ old_text: 'Previous overview', new_text: 'Confirmed unchanged findings' }],
   })
+  await f.complete(input)
   await validateIngest(input)
   const commit = await f.commit()
   await verifyIngestCommit({ ...f.opts, record: f.record(input, commit) })
@@ -297,6 +401,7 @@ for (const existing of [true, false]) {
     assert.deepEqual(await readFile(receiptPath), receipt)
     assert.deepEqual(await readdir(path.dirname(destination)), existing ? ['notes.md'] : [])
     await applyIngestDraft({ ...input, draft: '# Fresh synthetic draft\n' })
+    await f.complete(input)
     await validateIngest(input)
   })
 }
@@ -385,8 +490,38 @@ test('a failed installation restores the verified prior page on retry', async (t
   }
   await assert.rejects(readFile(path.join(f.wikiRoot, PAGE)), /ENOENT/)
   await applyIngestDraft({ ...input, draft: '# Retry draft\n' })
+  await f.complete(input)
   await validateIngest(input)
 })
+
+for (const operation of [
+  { page: 'log.md', append: '\n- Exactly one synthetic entry.\n' },
+  { page: 'overview.md', edits: [{ old_text: 'Previous overview', new_text: 'Updated overview' }] },
+]) {
+  test(`recovers ${operation.page} without replaying an installed incremental edit`, async (t) => {
+    const f = await fixture(t)
+    const input = await f.prepared()
+    const before = await readFile(path.join(f.wikiRoot, operation.page), 'utf8')
+    const probe = await open(path.join(f.base, 'probe'), 'wx')
+    const prototype = Object.getPrototypeOf(probe)
+    await probe.close()
+    const original = prototype.write
+    const injected = t.mock.method(prototype, 'write', async function (buffer, ...args) {
+      if (buffer.toString().includes('"pending":null'))
+        throw new Error('Synthetic final receipt failure')
+      return original.call(this, buffer, ...args)
+    })
+    await assert.rejects(applyIngestDraft({ ...input, ...operation }), /final receipt failure/)
+    injected.mock.restore()
+    const installed = await readFile(path.join(f.wikiRoot, operation.page), 'utf8')
+    assert.notEqual(installed, before)
+    await applyIngestDraft({ ...input, ...operation })
+    assert.equal(await readFile(path.join(f.wikiRoot, operation.page), 'utf8'), installed)
+    await applyIngestDraft({ ...input, draft: '# Source synthesis\n' })
+    await f.complete(input)
+    await validateIngest(input)
+  })
+}
 
 test('apply and validate never proceed through an existing preparation lock', async (t) => {
   const f = await fixture(t)
@@ -487,7 +622,9 @@ test('validate rejects foreign edits to declared thematic pages without adopting
 
 test('thematic apply supports new pages and corrections, but rejects undeclared paths', async (t) => {
   const f = await fixture(t)
-  const prepared = await f.prepare({ changedPages: [PAGE, 'new.md'] })
+  const prepared = await f.prepare({
+    changedPages: [PAGE, 'new.md', 'overview.md', 'index.md', 'log.md'],
+  })
   const input = { ...f.opts, preparationId: prepared.preparation_id }
   await applyIngestDraft({ ...input, draft: '# Source draft\n' })
   await assert.rejects(
@@ -495,8 +632,13 @@ test('thematic apply supports new pages and corrections, but rejects undeclared 
     /nicht deklariert/,
   )
   await applyIngestDraft({ ...input, page: 'new.md', draft: '# New theme\n' })
-  await applyIngestDraft({ ...input, page: 'new.md', draft: '# Corrected theme\n' })
-  assert.deepEqual((await validateIngest(input)).changed_pages, [PAGE, 'new.md'])
+  await applyIngestDraft({
+    ...input,
+    page: 'new.md',
+    edits: [{ old_text: 'New theme', new_text: 'Corrected theme' }],
+  })
+  await f.complete(input)
+  assert.deepEqual((await validateIngest(input)).changed_pages, [PAGE, 'new.md', 'log.md'])
 })
 
 test('a mutation immediately before page displacement is retained and blocks publication', async (t) => {
@@ -571,6 +713,7 @@ for (const existing of [true, false]) {
     )
     injected.mock.restore()
     await applyIngestDraft({ ...input, draft: '# Retryable draft\n' })
+    await f.complete(input)
     const result = await validateIngest(input)
     const commit = await f.commit()
     await verifyIngestCommit({
@@ -588,9 +731,14 @@ test('current-source reread can commit only the log/overview and still verify it
   input = await f.prepared()
   const page = await readFile(path.join(f.wikiRoot, PAGE), 'utf8')
   await applyIngestDraft({ ...input, draft: page })
-  await applyIngestDraft({ ...input, page: 'overview.md', draft: '# Explicit reread confirmed\n' })
+  await applyIngestDraft({
+    ...input,
+    page: 'overview.md',
+    edits: [{ old_text: 'New overview', new_text: 'Explicit reread confirmed' }],
+  })
+  await f.complete(input)
   const result = await validateIngest(input)
-  assert.deepEqual(result.changed_pages, ['overview.md'])
+  assert.deepEqual(result.changed_pages, ['overview.md', 'log.md'])
   const commit = await f.commit()
   await verifyIngestCommit({
     ...f.opts,

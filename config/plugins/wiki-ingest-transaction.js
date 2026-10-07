@@ -11,7 +11,7 @@ export default {
       tools.add({
         name: 'wiki_ingest_transaction',
         description:
-          'Ein ausgewählter Quelleinleseauftrag: prepare(adapter, source_key, source_revision, changed_pages) vor Änderungen im sauberen Wiki; apply(preparation_id, page?, draft) schreibt jede deklarierte Seite, die Quellseite mit frischem Frontmatter. Ohne page wird die Quellseite geschrieben; thematische Seiten benötigen den relativen page-Pfad. validate(preparation_id) akzeptiert nur unveränderte oder über apply geschriebene Inhalte vor dem expliziten Git-Commit. Quellen bleiben unverändert. Journal status=ingested erfordert preparation_id und prüft den tatsächlichen Commit.',
+          'Ein ausgewählter Quelleinleseauftrag: prepare vor Änderungen im sauberen Wiki, changed_pages enthält Quellseite, overview.md, index.md und log.md. apply schreibt die Quellseite oder neue thematische Seiten mit draft; bestehende thematische Seiten ausschließlich mit exakten edits oder append. edits: [] bestätigt eine unveränderte Seite. log.md ist nur ergänzbar. validate erfordert apply für alle Pflichtseiten und einen neuen Logeintrag vor dem expliziten Git-Commit. Quellen bleiben unverändert. Journal status=ingested prüft den tatsächlichen Commit.',
         input: {
           type: 'object',
           properties: {
@@ -25,7 +25,7 @@ export default {
               maxItems: 100,
               items: { type: 'string' },
               description:
-                'Bei prepare: alle vorgesehenen relativen Wiki-Markdown-Pfade einschließlich der Quellseite; nur saubere oder noch nicht vorhandene Ziele',
+                'Bei prepare: alle vorgesehenen relativen Wiki-Markdown-Pfade einschließlich Quellseite, overview.md, index.md und log.md; nur saubere oder noch nicht vorhandene Ziele',
             },
             preparation_id: { type: 'string', pattern: '^prep-[0-9a-f]{32}$' },
             page: {
@@ -36,7 +36,27 @@ export default {
             draft: {
               type: 'string',
               description:
-                'Bei apply: vollständiger neu erarbeiteter Quellseiteninhalt; Felder aus prepare.canonical_fields im Draft weglassen. Frontmatter mit Zusatzfeldern ist optional. Falsche mitgelieferte Identität/Revision wird abgelehnt, nicht repariert; bestehende Zusatzfelder bleiben erhalten.',
+                'Bei apply: vollständiger Quellseiteninhalt oder neue thematische Seite. Bestehende thematische Seiten benötigen edits oder append. Auf der Quellseite Felder aus prepare.canonical_fields weglassen; Frontmatter mit Zusatzfeldern ist optional. Falsche Identität/Revision wird abgelehnt; bestehende Zusatzfelder bleiben erhalten.',
+            },
+            edits: {
+              type: 'array',
+              maxItems: 100,
+              description:
+                'Bei apply für bestehende thematische Seiten: sequenzielle exakte Ersetzungen; old_text muss jeweils genau einmal vorkommen. [] bestätigt nach Prüfung unveränderten Inhalt. Nicht für log.md.',
+              items: {
+                type: 'object',
+                properties: {
+                  old_text: { type: 'string', minLength: 1 },
+                  new_text: { type: 'string' },
+                },
+                required: ['old_text', 'new_text'],
+                additionalProperties: false,
+              },
+            },
+            append: {
+              type: 'string',
+              description:
+                'Bei apply: Text einschließlich benötigter Zeilenumbrüche exakt an bestehende thematische Seite anhängen; für log.md verpflichtend. Genau eines von draft, edits oder append.',
             },
           },
           required: ['operation'],
@@ -52,6 +72,8 @@ export default {
             preparationId: args.preparation_id,
             page: args.page,
             draft: args.draft,
+            edits: args.edits,
+            append: args.append,
           }
           let result
           switch (args.operation) {

@@ -36,16 +36,21 @@ auf. Lies `AGENTS.md` und vor Änderungen Git-Status und Historie sowie `index.m
    mehrdeutiger Auswahl ab.
 2. Lies die vollständige Quelle. Vor dem ersten Schreiben je Quelle rufe
    `wiki_ingest_transaction` (`operation: prepare`, `adapter`, `source_key`,
-   `source_revision`, `changed_pages`: alle geplanten relativen Wiki-Pfade) auf.
+   `source_revision`, `changed_pages`: Quellseite, `overview.md`, `index.md`,
+   `log.md` und alle weiteren geplanten relativen Wiki-Pfade) auf.
    Merke `preparation_id`; fremde Git-Änderungen sind ein Blocker, kein Auftrag
    zum Staging oder Verwerfen. Schreibe die Quellenseite mit `operation: apply`,
    `preparation_id` und `draft` (vollständiges Markdown ohne kanonische
    Felder aus `canonical_fields`); das Tool übernimmt diese strukturiert und erhält
     Zusatzfelder. Korrigiere auch eigene Quellseitenentwürfe nur über `apply`.
-    Schreibe jede thematische Seite ebenfalls über `operation: apply` mit
-    `preparation_id`, `page` (deklarierter relativer Wiki-Pfad) und vollständigem
-    `draft`; verwende diesen Weg auch für Korrekturen an `overview.md`, `index.md`
-    und `log.md`. Nur diese Tool-Schreibvorgänge zählen als eigene Änderungen.
+    Bearbeite jede thematische Seite ebenfalls über `operation: apply` mit
+    `preparation_id` und `page` (deklarierter relativer Wiki-Pfad): Neue Seiten
+    erhalten einen vollständigen `draft`; bestehende Seiten gezielte `edits`
+    (`old_text`, `new_text`, exakter eindeutiger Treffer) oder `append` einschließlich
+    benötigter Zeilenumbrüche. Der übrige Inhalt bleibt unverändert auf Platte.
+    Prüfe `overview.md` und `index.md` je Quelle; wenn keine Änderung nötig ist,
+    bestätige sie mit `edits: []`. Ergänze `log.md` ausschließlich mit `append`.
+    Nur diese Tool-Schreibvorgänge zählen als eigene Änderungen.
     Bei einem Receipt-Schreibfehler wiederhole `apply` mit derselben Vorbereitung;
     das Tool prüft den gespeicherten Schreibauftrag, bevor es fortsetzt. Bei
     fremden Änderungen oder verbliebenen Lock-Dateien stoppe für bestätigte Wartung.
@@ -57,7 +62,10 @@ auf. Lies `AGENTS.md` und vor Änderungen Git-Status und Historie sowie `index.m
    verknüpfte Fragennummern, Befunde und betroffene Wiki-Seiten nachführen.
    Übersprungene, zurückgestellte oder unsichere Antworten nicht als geklärte
    Tatsachen übernehmen; verbleibende Konflikte ausdrücklich melden.
-3. Aktualisiere `overview.md`, `index.md` und `log.md`. Prüfe Diff, Links und
+3. Aktualisiere oder bestätige `overview.md` und `index.md` und ergänze einen
+   neuen Einleseeintrag in `log.md`. Alle drei Pflichtseiten müssen vor dem Commit
+   über `apply` bearbeitet sein; die Validierung lehnt einen Quellseiten-Commit
+   ohne diese Schritte ab. Prüfe Diff, Links und
    Herkunftsnachweise. Rufe `operation: validate` mit `preparation_id` vor dem
    Commit auf; korrigiere eigene uncommitted Fehler im selben Auftrag und
    validiere erneut. Bei fremden Änderungen stoppe. Erst nach erfolgreicher
@@ -170,11 +178,18 @@ Keine Details erfinden; Unbekanntes als „Nicht ermittelt“ angeben.
   Datei als Ersatz.
 - Einzelne Quellenfehler (unlesbares Format, mehrdeutige Auswahl, fehlender
   Commit) hältst du als `record` (`status: blocked`) mit konkretem Blocker fest
-  und fährst mit der nächsten Quelle deines Auftrags fort. Globale `invalid`-
+  und fährst nur bei sauberem Git-Status mit der nächsten Quelle deines Auftrags
+  fort. Offene Entwürfe oder Git-/Transaktionsblocker beenden den Batch sofort;
+  melde übrige Quellen als noch nicht versucht, damit der Orchestrator zuerst
+  bestätigte Wartung veranlasst. Globale `invalid`-
   oder `conflict`-Befunde stoppen sofort; melde sie und bearbeite nichts mehr.
 - Übersteigt eine Quelle oder ihr Seitenumfang das Kontextbudget, lies sie in
   validierten Abschnitten (`read` mit `offset` und `limit`) und verarbeite sie
   vollständig oder melde einen konkreten Blocker. Kürze nie still und behaupte
   nie vollständige Extraktion bei ungelösten Grenzen.
+  Prüfe bei Wiki-Leseantworten den ausgewiesenen Umfang und mögliche Kürzung;
+  lies fehlende Abschnitte mit `offset` und `limit` nach. Für gezielte Änderungen
+  genügt der vollständig gelesene betroffene Abschnitt; bewahre den Rest über
+  `edits`/`append`, statt lange Sammelseiten aus dem Kontext zu rekonstruieren.
 - Beende den Auftrag mit dem erreichten Stand: bearbeitete Quellen, offene
   Blocker und für jede Quelle den passenden Ergebnisdatensatz.
