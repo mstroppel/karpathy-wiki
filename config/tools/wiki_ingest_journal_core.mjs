@@ -478,6 +478,55 @@ function compactRecord(record) {
   }
 }
 
+// Reconcile the planned assignment with publisher evidence, not a model's
+// interpretation of a generation-specific locator. This is read-only and
+// retains the publisher's actual path in both the result and the journal.
+export async function verifyBatchResult({
+  root,
+  runId,
+  source,
+  sourceRoot,
+  wikiRoot,
+  verify = verifyIngestCommit,
+}) {
+  if (!source || typeof source !== 'object' || Array.isArray(source))
+    throw new Error('source muss die geplante Quellenidentität enthalten')
+  const adapter = checkText(source.adapter, 'adapter')
+  if (!ADAPTER_RE.test(adapter)) throw new Error('adapter ist ungültig')
+  const sourceKey = checkText(source.source_key, 'source_key')
+  if (!REVISION_RE.test(source.source_revision))
+    throw new Error('source_revision ist kein SHA-256-Hash')
+  const plannedPath = checkAbsolutePath(source.source_path, 'source_path')
+  const wikiPath = checkAbsolutePath(source.wiki_path, 'wiki_path')
+  const { effective } = await loadRun({ root, runId })
+  const key = recordKey({ adapter, source_key: sourceKey, source_revision: source.source_revision })
+  const record = effective.find((item) => recordKey(item) === key)
+  if (!record) throw new Error('Kein Ergebnisdatensatz für die geplante Quellenidentität')
+  if (record.status !== 'ingested') throw new Error(`Quelle blockiert: ${record.blocker}`)
+  if (record.wiki_path !== wikiPath) throw new Error('Datensatz wiki_path weicht vom Auftrag ab')
+  const relocated = record.source_path !== plannedPath
+  if (relocated && adapter !== 'paperless')
+    throw new Error('Datensatz source_path weicht vom Auftrag ab')
+  // The receipt pins actual manifest path and bytes. Key/revision agreement
+  // alone never authorizes a relocation or an unverified success record.
+  const verified = await verify({
+    root,
+    record,
+    ...(sourceRoot === undefined ? {} : { sourceRoot }),
+    ...(wikiRoot === undefined ? {} : { wikiRoot }),
+  })
+  const result = {
+    ...compactRecord(record),
+    commit: verified.commit,
+    verified: true,
+    planned_source_path: plannedPath,
+    relocated,
+  }
+  if (Buffer.byteLength(JSON.stringify(result), 'utf8') > JOURNAL_OUTPUT_BUDGET_BYTES)
+    throw new Error('Batch-Ergebnis überschreitet das Ausgabebudget')
+  return result
+}
+
 // Bounded listing of the effective records, shrunk to the response budget so
 // a large backlog can never flood model context.
 export async function listRecords({ root, runId, offset = 0, limit = 10 }) {

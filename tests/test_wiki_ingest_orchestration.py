@@ -120,6 +120,18 @@ class SkillContractTests(unittest.TestCase):
         self.assertIn("nur eine Zeile", text)
         self.assertIn("gehören nicht in die Rückmeldung", text)
 
+    def test_batch_results_use_code_verification_not_generation_path_comparison(self):
+        text = ORCHESTRATOR_SKILL.read_text(encoding="utf-8")
+        for phrase in (
+            "operation: verify_batch",
+            "Nur `verified: true` belegt Erfolg",
+            "`relocated: true` ist dann kein Blocker",
+            "ändere weder Wiki noch Journal",
+            "`list` dient nur der Übersicht",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, text)
+
     def test_transport_failure_records_and_recovery_remain_explicit(self):
         worker = WORKER_SKILL.read_text(encoding="utf-8")
         for phrase in (
