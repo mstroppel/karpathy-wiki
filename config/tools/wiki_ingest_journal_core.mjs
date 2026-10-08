@@ -502,7 +502,7 @@ export async function verifyBatchResult({
   const key = recordKey({ adapter, source_key: sourceKey, source_revision: source.source_revision })
   const record = effective.find((item) => recordKey(item) === key)
   if (!record) throw new Error('Kein Ergebnisdatensatz für die geplante Quellenidentität')
-  if (record.status !== 'ingested') throw new Error(`Quelle blockiert: ${record.blocker}`)
+  if (record.status !== 'ingested') throw new Error('Quelle blockiert')
   if (record.wiki_path !== wikiPath) throw new Error('Datensatz wiki_path weicht vom Auftrag ab')
   const relocated = record.source_path !== plannedPath
   if (relocated && adapter !== 'paperless')

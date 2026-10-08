@@ -127,6 +127,31 @@ test('batch verification fails closed for missing, blocked or non-Paperless relo
   }
 })
 
+test('blocked batch verification keeps worker-supplied details in the private journal', async () => {
+  const { root, journalRoot, run } = await runFixture()
+  try {
+    const blocker = 'Synthetic private excerpt: Example Person, account 123456'
+    await writeRecord({ root: journalRoot, runId: run.run_id, record: blockedRecord({ blocker }) })
+    await assert.rejects(
+      verifyBatchResult({
+        root: journalRoot,
+        runId: run.run_id,
+        source: record(),
+        verify: async () => {
+          assert.fail('blocked records must not reach commit verification')
+        },
+      }),
+      { message: 'Quelle blockiert' },
+    )
+    const loaded = await loadRun({ root: journalRoot, runId: run.run_id })
+    assert.equal(loaded.effective[0].blocker, blocker)
+    const chunk = await readChunk({ root: journalRoot, runId: run.run_id, recordIndex: 0 })
+    assert.ok(chunk.record.text.includes(blocker))
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 function manifest(source, items) {
   return {
     contract: 'karpathy-wiki-provider-manifest',
