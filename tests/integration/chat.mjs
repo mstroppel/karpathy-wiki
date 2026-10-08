@@ -52,6 +52,31 @@ assert.ok(login.ok, `UI login: HTTP ${login.status}`)
 cookie = login.headers.get('set-cookie')?.split(';')[0]
 assert.ok(cookie, 'UI login did not issue a cookie')
 
+// File links use the frontend FS API, not the backend filesystem. Reports live
+// outside the wiki workspace and must be read by exact path under UI auth.
+const reportRoot = '/knowledge/incoming/ingest-journal/runs'
+for (const [run, expected] of [
+  ['run-smoke-a', '# Synthetic report A\n'],
+  ['run-smoke-b', '# Synthetic report B\n'],
+]) {
+  const query = new URLSearchParams({
+    path: `${reportRoot}/${run}/report.md`,
+    directory,
+    allowOutsideWorkspace: 'true',
+  })
+  const route = `/api/fs/read?${query}`
+  assert.equal((await request(route, { authenticated: false })).status, 401)
+  const response = await request(route)
+  assert.ok(response.ok, `Report read: HTTP ${response.status}`)
+  assert.equal(await response.text(), expected, 'Viewer API returned the wrong report')
+}
+const missingReport = new URLSearchParams({
+  path: `${reportRoot}/run-missing/report.md`,
+  directory,
+  allowOutsideWorkspace: 'true',
+})
+assert.equal((await request(`/api/fs/read?${missingReport}`)).status, 404)
+
 await json('/api/opencode/directory', { method: 'POST', body: { path: directory } })
 const commands = await json('/api/command')
 const agents = await json('/api/agent')
@@ -150,4 +175,4 @@ try {
   clearTimeout(timeout)
   controller.abort()
 }
-console.log(`openchamber-smoke: ${phase} OK (auth, discovery, session, SSE)`)
+console.log(`openchamber-smoke: ${phase} OK (auth, exact report reads, discovery, session, SSE)`)
