@@ -14,6 +14,7 @@ worker:      prepare → read_source → inspect/declare → stage → publish
 publisher:   validate complete private draft → generated index/log
              → sealed commit → owned live installation → Git HEAD/index
              → verified journal record
+orchestrator: verify_batch with original planned identity → fresh next_batch
 restart:     next_batch prioritizes persisted publication → state → resume
 finish:      fresh status → run_finish → private report link
 ```
@@ -34,6 +35,17 @@ fail closed. Other current providers use byte-hash revisions. Every preparation,
 validation and successful journal write checks fresh identity, revision,
 publication path and file bytes. Sources are never written by this workflow.
 Global `invalid`/`conflict` findings block new work.
+
+After each worker, `wiki_ingest_journal` (`verify_batch`) reconciles the original
+planned assignment with the effective journal record and revalidates the
+publisher receipt, source bytes and commit. Paperless may publish a new generation
+between `next_batch` and `prepare`: its storage path can change while adapter,
+document key, revision and wiki target remain identical. That verified relocation
+is returned as `relocated: true`, not a blocker. The actual published path remains
+in the journal and wiki; no metadata rewrite or second import is needed. Missing
+or blocked records, changed identities/targets, non-Paperless path changes and
+failed integrity/commit checks still fail closed. A generation switch after
+preparation remains subject to the existing transaction freshness checks.
 
 `prepare` requires a pristine wiki Git checkout and declares the source page,
 `overview.md`, `index.md`, `log.md` and known thematic pages. It retains a private

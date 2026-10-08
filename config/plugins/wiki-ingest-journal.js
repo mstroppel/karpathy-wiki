@@ -8,6 +8,7 @@ import {
   readChunk,
   skipBlockedSource,
   startRun,
+  verifyBatchResult,
   writeRecord,
 } from '/etc/opencode/tools/wiki_ingest_journal_core.mjs'
 
@@ -47,6 +48,7 @@ export default {
                 'next_batch',
                 'record',
                 'list',
+                'verify_batch',
                 'read',
                 'report',
                 'run_finish',
@@ -126,6 +128,20 @@ export default {
                 'status',
                 'blocker',
               ],
+              additionalProperties: false,
+            },
+            source: {
+              type: 'object',
+              description:
+                'Für verify_batch: geplante Quellenidentität unverändert aus next_batch. Prüft Publisher-Belege; ein Paperless-Generationswechsel bei gleichem Schlüssel/Revision ist kein Quellenwechsel.',
+              properties: {
+                adapter: { type: 'string' },
+                source_key: { type: 'string' },
+                source_path: { type: 'string' },
+                source_revision: { type: 'string' },
+                wiki_path: { type: 'string' },
+              },
+              required: ['adapter', 'source_key', 'source_path', 'source_revision', 'wiki_path'],
               additionalProperties: false,
             },
             offset: { type: 'integer', minimum: 0, description: 'Listenposition (Standard: 0)' },
@@ -259,6 +275,16 @@ export default {
                 runId: args.run_id,
                 offset: args.offset,
                 limit: args.limit,
+              })
+              break
+            }
+            case 'verify_batch': {
+              result = await verifyBatchResult({
+                root,
+                runId: args.run_id,
+                source: args.source,
+                sourceRoot: SOURCE_ROOT,
+                wikiRoot: '/knowledge/wiki',
               })
               break
             }

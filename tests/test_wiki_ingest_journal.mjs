@@ -17,6 +17,7 @@ import {
   readChunk,
   renderReport,
   startRun,
+  verifyBatchResult,
   writeRecord as writeRecordCore,
 } from '../config/tools/wiki_ingest_journal_core.mjs'
 
@@ -85,6 +86,71 @@ async function runFixture() {
   const { run } = await startRun({ root: paths.journalRoot, now: NOW, idSuffix: SUFFIX })
   return { ...paths, run }
 }
+
+test('batch verification fails closed for missing, blocked or non-Paperless relocated records', async () => {
+  const { root, journalRoot, run } = await runFixture()
+  try {
+    const source = record()
+    const verify = () =>
+      verifyBatchResult({
+        root: journalRoot,
+        runId: run.run_id,
+        source,
+        verify: async () => {
+          throw new Error('must not reach commit verification')
+        },
+      })
+    await assert.rejects(verify(), /Kein Ergebnisdatensatz/)
+    await writeRecord({ root: journalRoot, runId: run.run_id, record: blockedRecord() })
+    await assert.rejects(verify(), /Quelle blockiert/)
+    await writeRecord({
+      root: journalRoot,
+      runId: run.run_id,
+      record: record({ source_path: '/knowledge/sources/webdav/other.md' }),
+    })
+    await assert.rejects(verify(), /source_path/)
+    for (const invalid of [
+      null,
+      [],
+      {},
+      { ...source, adapter: '../paperless' },
+      { ...source, source_revision: 'bad' },
+      { ...source, source_path: 'relative.md' },
+      { ...source, wiki_path: 'relative.md' },
+    ]) {
+      await assert.rejects(
+        verifyBatchResult({ root: journalRoot, runId: run.run_id, source: invalid }),
+      )
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('blocked batch verification keeps worker-supplied details in the private journal', async () => {
+  const { root, journalRoot, run } = await runFixture()
+  try {
+    const blocker = 'Synthetic private excerpt: Example Person, account 123456'
+    await writeRecord({ root: journalRoot, runId: run.run_id, record: blockedRecord({ blocker }) })
+    await assert.rejects(
+      verifyBatchResult({
+        root: journalRoot,
+        runId: run.run_id,
+        source: record(),
+        verify: async () => {
+          assert.fail('blocked records must not reach commit verification')
+        },
+      }),
+      { message: 'Quelle blockiert' },
+    )
+    const loaded = await loadRun({ root: journalRoot, runId: run.run_id })
+    assert.equal(loaded.effective[0].blocker, blocker)
+    const chunk = await readChunk({ root: journalRoot, runId: run.run_id, recordIndex: 0 })
+    assert.ok(chunk.record.text.includes(blocker))
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
 
 function manifest(source, items) {
   return {
@@ -244,6 +310,19 @@ test('journal tool schema requires an explicit blocker field for every source re
   assert.equal(schema.properties.blocker.minLength, 1)
   assert.match(schema.properties.blocker.description, /bei blocked/)
   assert.match(schema.properties.blocker.description, /bei ingested null/)
+  assert.ok(definition.input.properties.operation.enum.includes('verify_batch'))
+  assert.deepEqual(definition.input.properties.source.required, [
+    'adapter',
+    'source_key',
+    'source_path',
+    'source_revision',
+    'wiki_path',
+  ])
+  assert.equal(definition.input.properties.source.additionalProperties, false)
+  await assert.rejects(
+    definition.execute({ operation: 'verify_batch', run_id: RUN_ID }),
+    /source muss die geplante Quellenidentität enthalten/,
+  )
 })
 
 test('transport failure requires a dedicated blocker and corrected record stays durable', async () => {

@@ -21,6 +21,7 @@ import {
   planNextBatch,
   skipBlockedSource,
   startRun,
+  verifyBatchResult,
   writeRecord,
 } from '../config/tools/wiki_ingest_journal_core.mjs'
 import { parseFrontmatterFields } from '../config/tools/wiki_ingest_status_core.mjs'
@@ -99,9 +100,123 @@ test('private proposals preserve the live wiki and publish one commit with autom
   assert.match(await readFile(path.join(f.wikiRoot, 'index.md'), 'utf8'), /sources\/webdav\/notes/)
   assert.match(await readFile(path.join(f.wikiRoot, 'log.md'), 'utf8'), /notes.md/)
   assert.equal((await loadRun({ root: f.root, runId: run.run_id })).counts.ingested, 1)
+  const checked = await verifyBatchResult({
+    ...f.opts,
+    runId: run.run_id,
+    source: {
+      adapter: 'webdav',
+      source_key: 'notes.md',
+      source_path: path.join(f.sourceRoot, 'webdav/notes.md'),
+      source_revision: SHA(SOURCE),
+      wiki_path: path.join(f.wikiRoot, PAGE),
+    },
+  })
+  assert.equal(checked.verified, true)
+  assert.equal(checked.relocated, false)
+  assert.equal(checked.commit, result.commit)
   const repeated = await ingestPublication({ ...input, operation: 'publish' })
   assert.equal(repeated.commit, result.commit)
   assert.equal((await loadRun({ root: f.root, runId: run.run_id })).records.length, 1)
+})
+
+test('batch verification accepts a Paperless generation switch before prepare without a second commit', async (t) => {
+  const { ingestPublication } = await import('../config/tools/wiki_ingest_publication_core.mjs')
+  const f = await fixture(t, { existing: false })
+  // Isolate the Paperless assignment from the fixture's WebDAV provider.
+  await rm(path.join(f.sourceRoot, 'webdav'), { recursive: true })
+  const revision = SHA('synthetic document inputs')
+  const text = `---\npaperless_id: 42\nsource_revision: ${revision}\n---\nSynthetic evidence.\n`
+  const page = 'sources/paperless/42.md'
+  const providerRoot = path.join(f.sourceRoot, 'paperless')
+  const publishGeneration = async (generation) => {
+    const relative = `generations/${generation}/42.md`
+    await mkdir(path.dirname(path.join(providerRoot, relative)), { recursive: true })
+    await writeFile(path.join(providerRoot, relative), text)
+    await writeFile(
+      path.join(providerRoot, 'manifest.json'),
+      JSON.stringify({
+        ...f.manifest,
+        source: 'paperless',
+        wiki_root: 'paperless',
+        items: [
+          {
+            source_key: '42',
+            source_path: relative,
+            wiki_path: 'paperless/42.md',
+            source_revision: revision,
+            source_sha256: SHA(text),
+            frontmatter: { paperless_id: 42, source_revision: revision },
+            claim: { paperless_id: '42' },
+          },
+        ],
+      }),
+    )
+    return path.join(providerRoot, relative)
+  }
+  const oldPath = await publishGeneration('a'.repeat(32))
+  const { run } = await startRun({ root: f.root })
+  const plan = () =>
+    planNextBatch({
+      ...f.opts,
+      wikiSourceRoot: path.join(f.wikiRoot, 'sources'),
+      runId: run.run_id,
+    })
+  const batch = await plan()
+  const { adapter, source_key, source_path, source_revision, wiki_path } = batch.batch[0]
+  const source = { adapter, source_key, source_path, source_revision, wiki_path }
+  assert.equal(source.source_path, oldPath)
+  const actualPath = await publishGeneration('b'.repeat(32))
+  await rm(path.dirname(oldPath), { recursive: true })
+  const baseline = await f.git('rev-parse', 'HEAD')
+  const prepared = await ingestPublication({
+    ...f.opts,
+    operation: 'prepare',
+    runId: run.run_id,
+    adapter,
+    sourceKey: source_key,
+    sourceRevision: source_revision,
+    changedPages: [page, 'overview.md', 'index.md', 'log.md'],
+  })
+  assert.equal(prepared.source_path, actualPath)
+  const call = (operation, args = {}) =>
+    ingestPublication({ ...f.opts, preparationId: prepared.preparation_id, operation, ...args })
+  await call('read_source')
+  await call('stage', { draft: `# Synthetic finding\nEvidence at source line 5: ${actualPath}\n` })
+  await call('stage', { page: 'overview.md', reviewed: true })
+  const published = await call('publish', {
+    runId: run.run_id,
+    title: 'Synthetic finding',
+    content: 'Finding; line 5.',
+    contradictions: 'None.',
+    extractionLimits: 'Fully read.',
+  })
+  const before = await loadRun({ root: f.root, runId: run.run_id })
+  const verify = (planned = source) =>
+    verifyBatchResult({ ...f.opts, runId: run.run_id, source: planned })
+  const result = await verify()
+  assert.equal(result.verified, true)
+  assert.equal(result.relocated, true)
+  assert.equal(result.planned_source_path, oldPath)
+  assert.equal(result.source_path, actualPath)
+  assert.equal(result.commit, published.commit)
+  assert.equal((await verify({ ...source, source_path: actualPath })).relocated, false)
+  for (const overrides of [
+    { adapter: 'webdav' },
+    { source_key: '43' },
+    { source_revision: SHA('changed inputs') },
+    { wiki_path: path.join(f.wikiRoot, 'sources/paperless/43.md') },
+  ])
+    await assert.rejects(verify({ ...source, ...overrides }), /Quellenidentität|wiki_path/)
+  assert.deepEqual(await loadRun({ root: f.root, runId: run.run_id }), before)
+  assert.equal((await plan()).done, true)
+  assert.equal(await f.git('rev-list', '--count', `${baseline}..HEAD`), '1')
+  assert.equal(await f.git('status', '--porcelain'), '')
+  assert.match(await readFile(path.join(f.wikiRoot, page), 'utf8'), /generations\/bbbb/)
+  await writeFile(actualPath, text + 'Tampered.\n')
+  await assert.rejects(verify(), /SHA-256/)
+  await writeFile(actualPath, text)
+  await writeFile(path.join(f.wikiRoot, page), 'Tampered wiki.\n')
+  await assert.rejects(verify(), /invalid\/conflict|Quellseite|Worktree/)
 })
 
 for (const failure of ['dirty', 'budget', 'git-config']) {
