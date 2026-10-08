@@ -30,7 +30,8 @@ Confirmed Q&A -> local inbox -> local redaction -> sources/answers/ -+
 
 OpenChamber exposes the private OpenCode backend's sessions and wiki commands;
 sessions are not exported to SilverBullet. The frontend has a separate private
-settings directory and only a read-only wiki mount. See [chat deployment](chat.md).
+settings directory, a read-only wiki mount and read-only ingest run records and
+reports. Private transaction drafts remain backend-only. See [chat deployment](chat.md).
 
 OpenCode reads source directories and writes generated Markdown to `wiki/`.
 SilverBullet serves the wiki space from a read-only mount. Services do not publish host ports; the

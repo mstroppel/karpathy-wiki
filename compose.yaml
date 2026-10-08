@@ -292,6 +292,7 @@ services:
       OPENCODE_DISABLE_CLAUDE_CODE_SKILLS: "1"
     volumes:
       - ${DATA_ROOT:-./data}/wiki:/knowledge/wiki:ro
+      - ${DATA_ROOT:-./data}/incoming/ingest-journal/runs:/knowledge/incoming/ingest-journal/runs:ro
       - ${DATA_ROOT:-./data}/openchamber:/home/openchamber/.config/openchamber:rw
     depends_on:
       opencode:
