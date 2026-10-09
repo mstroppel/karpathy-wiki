@@ -115,6 +115,10 @@ uncommitted drafts before skipping it and continuing with other sources.
 Successful source commits remain intact. See [stabilization acceptance](docs/ingest-stabilization-acceptance.md)
 for the opt-in synthetic real-model/restart test; no production data is mounted.
 
+Automatic triggering is not enabled yet. See the
+[automatic-ingest runtime gate](docs/auto-ingest-runtime-gate.md) for the
+model-free negative probe and the known blocker to plugin-only writer coordination.
+
 ## Analyses
 
 Scientific analyses (`/analysis`) can be saved from the same conversation with
@@ -209,6 +213,7 @@ node --test tests/test_chat_bootstrap.mjs
 docker build --target opencode -t kw-opencode:integration -f opencode/Dockerfile .
 docker build --target openchamber -t kw-openchamber:integration -f opencode/Dockerfile .
 sh tests/integration/chat.sh  # authentication, discovery, native SSE and restart persistence
+sh tests/integration/auto-ingest-runtime.sh  # negative writer-gate probe, NOT auto-ingest approval
 tests/integration/run.sh  # requires Docker; disposable Compose stack test
 ```
 
