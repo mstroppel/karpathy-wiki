@@ -99,8 +99,10 @@ pages, concrete thematic findings with evidence locations and changes from the
 previous wiki, contradictions or open questions, and justified omissions and
 extraction limits. After ingestion, the main session links the complete private report and
 gives a short summary: overall status, unfinished sources with their blockers,
-record count, run ID, and durable report path. Details stay in the file rather
-than growing chat context; they are read only on request. Local link support
+record count, run ID, and durable report path, plus a concise overview for every
+processed file: name, one-sentence content, and bullet lists of contradictions/open
+questions and extraction limits. The overview uses bounded reads of effective
+journal records; full details stay in the report and are read only on request. Local link support
 depends on the client; the operator can also open the stated path. Blocked,
 paused, and zero-source runs use the same contract; report-creation failures are
 explicitly flagged separately from ingestion status. See
