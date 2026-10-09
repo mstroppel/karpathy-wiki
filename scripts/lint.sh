@@ -56,6 +56,8 @@ node --check config/tools/wiki_ingest_transaction_core.mjs
 node --check config/tools/wiki_ingest_publication_core.mjs
 node --check config/tools/wiki_ingest_storage.mjs
 node --check config/tools/wiki_ingest_errors.mjs
+node --check publisher/control.mjs
+node --check publisher/cli.mjs
 docker compose --env-file .env.example config --quiet
 
 printf 'lint: OK\n'

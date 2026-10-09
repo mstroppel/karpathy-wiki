@@ -9,6 +9,7 @@ export default [
       'config/**/*.js',
       'config/**/*.mjs',
       'openchamber/**/*.mjs',
+      'publisher/**/*.mjs',
       'tests/**/*.mjs',
       'eslint.config.mjs',
     ],

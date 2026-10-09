@@ -15,15 +15,15 @@ variable "RCLONE_VERSION" {
 }
 
 group "default" {
-  targets = ["opencode", "openchamber", "ingest", "ingest-webdav", "ingest-audio", "ingest-speech", "ingest-paperless"]
+  targets = ["opencode", "openchamber", "publisher", "ingest", "ingest-webdav", "ingest-audio", "ingest-speech", "ingest-paperless"]
 }
 
 group "release" {
-  targets = ["opencode-release", "openchamber-release", "ingest-release", "ingest-webdav-release", "ingest-audio-release", "ingest-speech-release", "ingest-paperless-release"]
+  targets = ["opencode-release", "openchamber-release", "publisher-release", "ingest-release", "ingest-webdav-release", "ingest-audio-release", "ingest-speech-release", "ingest-paperless-release"]
 }
 
 group "stable" {
-  targets = ["opencode-stable", "openchamber-stable", "ingest-stable", "ingest-webdav-stable", "ingest-audio-stable", "ingest-speech-stable", "ingest-paperless-stable"]
+  targets = ["opencode-stable", "openchamber-stable", "publisher-stable", "ingest-stable", "ingest-webdav-stable", "ingest-audio-stable", "ingest-speech-stable", "ingest-paperless-stable"]
 }
 
 target "common" {
@@ -57,6 +57,24 @@ target "ingest" {
     RCLONE_VERSION = RCLONE_VERSION
   }
   tags = ["karpathy-wiki-ingest:test"]
+}
+
+target "publisher" {
+  inherits = ["common"]
+  context = "."
+  dockerfile = "opencode/Dockerfile"
+  target = "publisher"
+  tags = ["karpathy-wiki-publisher:test"]
+}
+
+target "publisher-release" {
+  inherits = ["publisher"]
+  tags = ["${REGISTRY}/karpathy-wiki-publisher:${IMAGE_VERSION}"]
+}
+
+target "publisher-stable" {
+  inherits = ["publisher"]
+  tags = ["${REGISTRY}/karpathy-wiki-publisher:${IMAGE_VERSION}", "${REGISTRY}/karpathy-wiki-publisher:latest"]
 }
 
 target "ingest-webdav" {

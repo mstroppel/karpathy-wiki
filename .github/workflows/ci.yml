@@ -35,6 +35,7 @@ jobs:
           scripts/test-python.sh
           node --test tests/test_wiki_ingest_status.mjs tests/test_contract_fixtures.mjs tests/test_wiki_ingest_journal.mjs tests/test_ingest_context_budget.mjs tests/test_wiki_ingest_transaction.mjs tests/test_answer_intake.mjs
           node --test tests/test_chat_bootstrap.mjs
+          node --test tests/test_trusted_publisher.mjs
       - uses: actions/upload-artifact@v7
         with:
           name: python-coverage
@@ -77,6 +78,10 @@ jobs:
           sh tests/integration/chat.sh
       - name: Prove kernel-enforced runtime write isolation
         run: sh tests/integration/runtime-write-isolation.sh
+      - name: Prove isolated trusted publication and crash recovery
+        run: |
+          docker build --target publisher -t kw-publisher:integration -f opencode/Dockerfile .
+          sh tests/integration/trusted-publisher.sh
 
   images:
     name: Images

@@ -74,3 +74,15 @@ ENV HOME=/home/openchamber NODE_ENV=production OPENCHAMBER_DATA_DIR=/home/opench
 USER 1000:1000
 WORKDIR /knowledge/wiki
 ENTRYPOINT ["karpathy-wiki-chat"]
+
+# Trusted writer only: no OpenCode, chat, npm packages, model credentials or API.
+FROM node:26-bookworm-slim@sha256:662933cf47f013bc8e4beb31a6116448427a82057ba7c42c97e4c5ba766504c2 AS publisher
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git python3 \
+    && rm -rf /var/lib/apt/lists/*
+COPY config/tools /opt/karpathy-wiki/config/tools
+COPY publisher /opt/karpathy-wiki/publisher
+RUN chmod 0755 /opt/karpathy-wiki/publisher/entrypoint.sh
+USER 1000:1000
+WORKDIR /knowledge/wiki
+ENTRYPOINT ["/opt/karpathy-wiki/publisher/entrypoint.sh"]

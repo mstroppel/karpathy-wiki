@@ -40,8 +40,8 @@ Compose mounts. This changes no stored data layout and performs no migration.
 In reader mode, model questions, file reads and private session state remain
 available, but `/ingest-new`, `/analysis-save`, journal/report writes and saving
 confirmed `/gap-review` answers cannot work. Do not enable automated ingest here
-yet: an independently isolated trusted publisher must be implemented before
-authoring can resume without granting the model backend write authority.
+yet: the [operator-only trusted publisher](trusted-publisher.md) provides a separate
+write boundary, but model/chat authoring has not been routed through it.
 The existing publisher core reports a generic lock failure when its kernel lock
 write is denied; that is not evidence of another active writer.
 
@@ -53,7 +53,7 @@ against kernel/container-runtime exploits or an administrator who changes the
 deployment, grants a remote writer credential, exposes a privileged socket or
 pre-seeds writable hardlink aliases outside the protected trees. Keep host data
 roots disjoint and do not expose Docker/host-writer authority to OpenCode.
-Initialization, source providers and future publishers are separate trusted
+Initialization, source providers and the optional publisher are separate trusted
 writers outside this runtime boundary; do not mistake reader mode for their
 coordination or for immutable source publication over time.
 
