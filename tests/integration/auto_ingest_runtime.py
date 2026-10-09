@@ -100,6 +100,11 @@ def main() -> None:
                 "probe_completed": True,
                 "auto_ingest_admissible": False,
                 "reason": "direct filesystem writes bypass permission/tool/shell hooks",
+                "hook_evidence": {
+                    "permission": "registration_completed_only",
+                    "tool": "registration_completed_only",
+                    "shell": "denial_exercised",
+                },
                 "bypasses": findings,
                 "untested_gates": [
                     "writer ownership and fencing",

@@ -24,6 +24,11 @@ hook without creating its target file. Unauthenticated requests must return 401.
 Authenticated direct filesystem writes are then tested inside and outside the
 requested location, checking actual file bytes rather than only HTTP responses.
 
+The marker proves permission/tool hook registration completed, not that their
+denials were exercised. Only the shell hook has an executed denial control.
+The JSON `hook_evidence` makes this distinction explicit; this probe does not
+validate permission/tool denial behavior during model-driven execution.
+
 On OpenCode 2.0.25 these direct writes bypass the permission, tool and shell
 guards. The JSON result therefore says `auto_ingest_admissible: false` and the
 human-readable result says `release gate BLOCKED`. Normal exit zero means only
