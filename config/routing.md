@@ -68,7 +68,11 @@ Orchestrator-Skills aus: Verlinke den vollständigen privaten Bericht und gib ei
 kurze Zusammenfassung in der Hauptsession aus, mit Status, offenen Quellen und
 Blockern, Anzahl der Ergebnisdatensätze, Lauf-ID und dauerhaftem Berichtspfad.
 Das gilt auch für blockierte und pausierte Läufe; kennzeichne eine unvollständige
-Berichtserstellung ausdrücklich. Details werden nur auf Nachfrage gelesen.
+Berichtserstellung ausdrücklich. Ergänze für jede bearbeitete Datei die kurze
+Dateiübersicht der Berichtsphase: Name, Inhalt in einem Satz sowie Bulletpoint-Listen
+für Widersprüche/offene Fragen und Extraktionsgrenzen. Lies dafür die effektiven
+Journaldatensätze begrenzt, nicht den vollständigen Bericht. Weitere Details nur
+auf Nachfrage.
 
 Ist die Absicht mehrdeutig, verwende den Abfragemodus. Behandle nicht
 eingelesene Dateien unter `/knowledge/sources` nicht als Wiki-Wissen. Verwende
