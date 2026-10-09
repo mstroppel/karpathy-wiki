@@ -86,6 +86,50 @@ test('authoritative admission, private staging, focused commit/report and exact 
   assert.equal(await readFile(path.join(f.sourceRoot, 'webdav/notes.md'), 'utf8'), SOURCE)
 })
 
+test('source and inspection replays stay private; control state and status remain content-free', async (t) => {
+  const f = await fixture(t)
+  await f.enqueue()
+  const job = await f.call({ operation: 'activate' })
+  const read = await f.propose(job, { operation: 'read_source' }, 'req-private-read')
+  assert.equal(read.text, SOURCE)
+  assert.deepEqual(await f.propose(job, { operation: 'read_source' }, 'req-private-read'), read)
+  await f.propose(job, {
+    operation: 'stage',
+    page: 'overview.md',
+    append: '\nUnique synthetic inspection text.\n',
+  })
+  const inspected = await f.propose(
+    job,
+    { operation: 'inspect', page: 'overview.md' },
+    'req-private-inspect',
+  )
+  assert.match(inspected.text, /Unique synthetic inspection text/)
+  assert.deepEqual(
+    await f.propose(job, { operation: 'inspect', page: 'overview.md' }, 'req-private-inspect'),
+    inspected,
+  )
+  const control = await readFile(path.join(f.stateRoot, 'control.json'), 'utf8')
+  const status = JSON.stringify(await f.call({ operation: 'status' }))
+  for (const text of [SOURCE.trim(), 'Unique synthetic inspection text']) {
+    assert.ok(!control.includes(text))
+    assert.ok(!status.includes(text))
+  }
+  assert.ok(!Object.hasOwn(await f.call({ operation: 'status' }), 'responses'))
+  const replay = JSON.parse(
+    await readFile(path.join(f.root, 'publisher-replays/req-private-read.json'), 'utf8'),
+  )
+  assert.equal(replay.result.text, SOURCE)
+  await writeFile(
+    path.join(f.root, 'publisher-replays/req-private-read.json'),
+    '{"result":{"text":"damaged"}}',
+  )
+  await assert.rejects(
+    f.propose(job, { operation: 'read_source' }, 'req-private-read'),
+    /invalid_replay_evidence/,
+  )
+  assert.equal((await f.call({ operation: 'status' })).stop, 'operator_action_required')
+})
+
 test('manual priority at a complete source boundary; no takeover or lease expiry', async (t) => {
   const f = await fixture(t)
   const active = await f.ready()

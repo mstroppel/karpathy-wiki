@@ -116,8 +116,11 @@ For an interrupted **publication**:
    Unverifiable state stays blocked; interrupted prepare is never blindly redispatched.
 
 Back up **all** `publisher/`, wiki `.git` and the entire private ingest-journal
-together with writers stopped. Queue/owner/intents/replays are private evidence
-(`0700` directories, `0600` files). No automatic retention cleanup or migrations.
+together with writers stopped. Control state stores content-free queue/owner/intents
+and replay digests; source-bearing replay payloads live separately under private
+`incoming/ingest-journal/publisher-replays/`. Status is an explicit content-free
+projection without replay payloads. Evidence uses `0700` directories and `0600`
+files. No automatic retention cleanup or migrations.
 
 ## Validation and remaining gates
 

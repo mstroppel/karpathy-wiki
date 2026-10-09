@@ -97,7 +97,13 @@ export async function publisherControl(input, configuration = {}) {
     const state = await loadState(opts)
     if (input.operation === 'status') {
       object(input, ['operation'])
-      return { ...state, queue: await queued(opts, state) }
+      return {
+        active: state.active,
+        inflight: state.inflight,
+        stop: state.stop,
+        finished_count: state.finished.length,
+        queue: await queued(opts, state),
+      }
     }
     if (input.operation === 'recover') return recover(opts, state, input)
     if (state.inflight || state.stop) throw new Error('operator_action_required')
@@ -146,7 +152,13 @@ export async function publisherControl(input, configuration = {}) {
       const previous = state.responses[input.request_id]
       if (previous) {
         if (previous.digest !== hash(input)) throw new Error('request_id_conflict')
-        return previous.result
+        try {
+          return await readResponse(opts, input.request_id, previous)
+        } catch (error) {
+          state.stop = 'operator_action_required'
+          await saveState(opts, state)
+          throw error
+        }
       }
     }
     jobId(input.job_id)
@@ -234,7 +246,7 @@ export async function publisherControl(input, configuration = {}) {
           ...coreOptions(opts),
           preparationId: state.active.preparation_id,
         })
-        state.responses[input.request_id] = { digest, result }
+        await saveResponse(opts, state, input.request_id, digest, result)
         if (input.operation === 'publish') {
           await verifyCompleted(opts, state)
           complete(state)
@@ -247,6 +259,24 @@ export async function publisherControl(input, configuration = {}) {
 
 function coreOptions(opts) {
   return { root: opts.root, sourceRoot: opts.sourceRoot, wikiRoot: opts.wikiRoot }
+}
+
+async function saveResponse(opts, state, requestId, digest, result) {
+  // Read/inspection results contain document text. They belong in the private
+  // journal, never in content-free coordination state or status output.
+  const relative = `publisher-replays/${requestId}.json`
+  await mkdir(path.join(opts.root, 'publisher-replays'), { recursive: true, mode: 0o700 })
+  const file = await confinedIngestPath(opts.root, relative, true)
+  await writeIngestFile(file, `${JSON.stringify({ result })}\n`)
+  state.responses[requestId] = { digest, result_hash: hash(result) }
+}
+
+async function readResponse(opts, requestId, response) {
+  const relative = `publisher-replays/${requestId}.json`
+  const payload = await readJson(await confinedIngestPath(opts.root, relative))
+  if (!payload || hash(payload.result) !== response.result_hash)
+    throw new Error('invalid_replay_evidence')
+  return payload.result
 }
 
 async function ownedReceipt(opts, state) {
@@ -417,6 +447,16 @@ async function loadState(opts) {
       if (!/^[0-9a-f]{64}$/.test(state.inflight.digest)) throw new Error('invalid_state')
     }
   }
+  for (const [id, response] of Object.entries(state.responses)) {
+    requestId(id)
+    object(response, ['digest', 'result_hash'], ['digest', 'result_hash'])
+    if (
+      ![response.digest, response.result_hash].every(
+        (digest) => typeof digest === 'string' && /^[0-9a-f]{64}$/.test(digest),
+      )
+    )
+      throw new Error('invalid_state')
+  }
   return state
 }
 
@@ -471,7 +511,7 @@ async function recover(opts, state, input) {
       operation: 'resume',
       preparationId: state.active.preparation_id,
     })
-    state.responses[intent.request_id] = { digest: intent.digest, result }
+    await saveResponse(opts, state, intent.request_id, intent.digest, result)
     await verifyCompleted(opts, state)
     complete(state)
     return result
