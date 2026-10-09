@@ -87,16 +87,33 @@ OpenCode to import `/knowledge/sources/webdav`. Generated pages are written to
 ## Ingestion reports
 
 `/ingest-new` processes all new and changed sources sequentially, with one
-commit per source, in batches planned against a documented working-context
-budget. Every processed source leaves a durable result record in a private
+commit per source, with one fresh worker session per source and a documented
+soft working-context target. Estimated overshoots warn rather than abort; the
+model's actual context limit still applies. Workers propose changes in private drafts; code validates
+and publishes complete transactions, generates index/log entries, and reconciles
+interrupted commit/journal boundaries without duplicate publication.
+Every processed source leaves a durable result record in a private
 journal below `${DATA_ROOT}/incoming/ingest-journal`, and the complete per-source
 report is written there as a file: source path, commit hash, changed wiki
-pages, content summary, contradictions or open questions, and extraction
-limits. The final answer reports the overall status, unfinished sources with
-their blockers, and the report path; per-source details live in the report
-file. Blocked runs also identify unfinished sources. See
+pages, concrete thematic findings with evidence locations and changes from the
+previous wiki, contradictions or open questions, and justified omissions and
+extraction limits. After ingestion, the main session links the complete private report and
+gives a short summary: overall status, unfinished sources with their blockers,
+record count, run ID, and durable report path, plus a concise overview for every
+processed file: name, one-sentence content, and bullet lists of contradictions/open
+questions and extraction limits. The overview uses bounded reads of effective
+journal records; full details stay in the report and are read only on request. Local link support
+depends on the client; the operator can also open the stated path. Blocked,
+paused, and zero-source runs use the same contract; report-creation failures are
+explicitly flagged separately from ingestion status. See
 [ingestion reports](docs/ingest-reports.md) for the budget model, resume
 behavior, and validation.
+Ingestion checks local Git changes before planning and validates source metadata
+and committed contents before recording success. Blocked runs stop on the first
+error and offer confirmed repair or a scoped rollback of the failed source's
+uncommitted drafts before skipping it and continuing with other sources.
+Successful source commits remain intact. See [stabilization acceptance](docs/ingest-stabilization-acceptance.md)
+for the opt-in synthetic real-model/restart test; no production data is mounted.
 
 ## Analyses
 
@@ -187,7 +204,7 @@ npm ci
 scripts/install-shellcheck.sh  # add ~/.local/bin to PATH if needed; Linux x86_64
 scripts/lint.sh
 scripts/test-python.sh
-node --test tests/test_wiki_ingest_status.mjs tests/test_contract_fixtures.mjs tests/test_wiki_ingest_journal.mjs tests/test_ingest_context_budget.mjs tests/test_answer_intake.mjs
+node --test tests/test_wiki_ingest_status.mjs tests/test_contract_fixtures.mjs tests/test_wiki_ingest_journal.mjs tests/test_ingest_context_budget.mjs tests/test_wiki_ingest_transaction.mjs tests/test_answer_intake.mjs
 node --test tests/test_chat_bootstrap.mjs
 docker build --target opencode -t kw-opencode:integration -f opencode/Dockerfile .
 docker build --target openchamber -t kw-openchamber:integration -f opencode/Dockerfile .

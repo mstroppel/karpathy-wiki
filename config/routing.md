@@ -55,14 +55,24 @@ Einreichungsablauf im primären Agenten fort; diese Regel hat Vorrang vor
 
 Bei einem gescheiterten delegierten Auftrag zeige die genaue Fehlermeldung
 des spezialisierten Agenten in der Antwort.
+Bestätigte Bereinigung nach einem Ingest-Blocker gehört an `wiki-lint`, danach
+frische Statusprüfung und gegebenenfalls Fortsetzung über `/ingest-new`.
 
 Bei einem Auftrag für **alle** neuen und geänderten Quellen starte
 `/ingest-new`; der Orchestrator `wiki-ingest-orchestrator` verarbeitet sie in
 kontextbegrenzten Batches über `wiki-ingest` und hält die Ergebnisdatensätze im
 Einlese-Journal fest. Ketten von `wiki-ingest`-Teilergebnissen sind dafür nicht
 vorgesehen. Beende erst nach `new=0` und `outdated=0` oder nenne einen
-konkreten Blocker und alle offenen Quellen; die Detailblöcke je Quelle stehen
-vollständig im privaten Bericht, dessen Pfad in der Antwort genannt wird.
+konkreten Blocker und alle offenen Quellen. Führe danach die Berichtsphase des
+Orchestrator-Skills aus: Verlinke den vollständigen privaten Bericht und gib eine
+kurze Zusammenfassung in der Hauptsession aus, mit Status, offenen Quellen und
+Blockern, Anzahl der Ergebnisdatensätze, Lauf-ID und dauerhaftem Berichtspfad.
+Das gilt auch für blockierte und pausierte Läufe; kennzeichne eine unvollständige
+Berichtserstellung ausdrücklich. Ergänze für jede bearbeitete Datei die kurze
+Dateiübersicht der Berichtsphase: Name, Inhalt in einem Satz sowie Bulletpoint-Listen
+für Widersprüche/offene Fragen und Extraktionsgrenzen. Lies dafür die effektiven
+Journaldatensätze begrenzt, nicht den vollständigen Bericht. Weitere Details nur
+auf Nachfrage.
 
 Ist die Absicht mehrdeutig, verwende den Abfragemodus. Behandle nicht
 eingelesene Dateien unter `/knowledge/sources` nicht als Wiki-Wissen. Verwende

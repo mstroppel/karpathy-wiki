@@ -17,7 +17,8 @@ import {
   readChunk,
   renderReport,
   startRun,
-  writeRecord,
+  verifyBatchResult,
+  writeRecord as writeRecordCore,
 } from '../config/tools/wiki_ingest_journal_core.mjs'
 
 const REVISION = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
@@ -25,6 +26,15 @@ const OTHER_REVISION = 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffff
 const NOW = new Date('2026-10-03T12:00:00.000Z')
 const SUFFIX = 'abc123'
 const RUN_ID = 'run-20261003t120000z-abc123'
+
+// These tests isolate journal/report mechanics. Real Git/source verification
+// (including the journal append boundary) is covered by transaction fixtures.
+function writeRecord(input) {
+  return writeRecordCore({
+    ...input,
+    verify: async ({ record: item }) => ({ commit: item.commit, source_unmodified: true }),
+  })
+}
 
 async function fixture() {
   const root = await mkdtemp(path.join(os.tmpdir(), 'wiki-ingest-journal-'))
@@ -45,12 +55,14 @@ function record(overrides = {}) {
     source_revision: REVISION,
     wiki_path: '/knowledge/wiki/sources/webdav/notes.md',
     status: 'ingested',
+    preparation_id: `prep-${'a'.repeat(32)}`,
     commit: 'abc1234',
     changed_pages: ['sources/webdav/notes.md', 'overview.md'],
     content: 'Aussage mit Wert 3,5 m.',
     contradictions: 'Keine festgestellt',
     extraction_limits: 'Keine festgestellt',
     source_unmodified: true,
+    blocker: null,
     ...overrides,
   }
 }
@@ -74,6 +86,71 @@ async function runFixture() {
   const { run } = await startRun({ root: paths.journalRoot, now: NOW, idSuffix: SUFFIX })
   return { ...paths, run }
 }
+
+test('batch verification fails closed for missing, blocked or non-Paperless relocated records', async () => {
+  const { root, journalRoot, run } = await runFixture()
+  try {
+    const source = record()
+    const verify = () =>
+      verifyBatchResult({
+        root: journalRoot,
+        runId: run.run_id,
+        source,
+        verify: async () => {
+          throw new Error('must not reach commit verification')
+        },
+      })
+    await assert.rejects(verify(), /Kein Ergebnisdatensatz/)
+    await writeRecord({ root: journalRoot, runId: run.run_id, record: blockedRecord() })
+    await assert.rejects(verify(), /Quelle blockiert/)
+    await writeRecord({
+      root: journalRoot,
+      runId: run.run_id,
+      record: record({ source_path: '/knowledge/sources/webdav/other.md' }),
+    })
+    await assert.rejects(verify(), /source_path/)
+    for (const invalid of [
+      null,
+      [],
+      {},
+      { ...source, adapter: '../paperless' },
+      { ...source, source_revision: 'bad' },
+      { ...source, source_path: 'relative.md' },
+      { ...source, wiki_path: 'relative.md' },
+    ]) {
+      await assert.rejects(
+        verifyBatchResult({ root: journalRoot, runId: run.run_id, source: invalid }),
+      )
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('blocked batch verification keeps worker-supplied details in the private journal', async () => {
+  const { root, journalRoot, run } = await runFixture()
+  try {
+    const blocker = 'Synthetic private excerpt: Example Person, account 123456'
+    await writeRecord({ root: journalRoot, runId: run.run_id, record: blockedRecord({ blocker }) })
+    await assert.rejects(
+      verifyBatchResult({
+        root: journalRoot,
+        runId: run.run_id,
+        source: record(),
+        verify: async () => {
+          assert.fail('blocked records must not reach commit verification')
+        },
+      }),
+      { message: 'Quelle blockiert' },
+    )
+    const loaded = await loadRun({ root: journalRoot, runId: run.run_id })
+    assert.equal(loaded.effective[0].blocker, blocker)
+    const chunk = await readChunk({ root: journalRoot, runId: run.run_id, recordIndex: 0 })
+    assert.ok(chunk.record.text.includes(blocker))
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
 
 function manifest(source, items) {
   return {
@@ -189,6 +266,91 @@ test('records one verified result per source and supersedes rewrites', async () 
     assert.equal(loaded.effective[0].commit, 'def5678')
     assert.equal(loaded.effective[0].writes, 2)
     assert.equal(loaded.effective[0].record_index, 1)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('journal tool schema requires an explicit blocker field for every source result', async () => {
+  const source = await readFile(
+    new URL('../config/plugins/wiki-ingest-journal.js', import.meta.url),
+    'utf8',
+  )
+  const coreUrl = new URL('../config/tools/wiki_ingest_journal_core.mjs', import.meta.url).href
+  const { default: plugin } = await import(
+    `data:text/javascript;base64,${Buffer.from(
+      source.replace('/etc/opencode/tools/wiki_ingest_journal_core.mjs', coreUrl),
+    ).toString('base64')}`
+  )
+  let definition
+  await plugin.setup({
+    tool: {
+      transform: async (callback) =>
+        callback({
+          add: (tool) => {
+            definition = tool
+          },
+        }),
+    },
+  })
+  assert.equal(definition.name, 'wiki_ingest_journal')
+  const schema = definition.input.properties.record
+  for (const field of [
+    'adapter',
+    'source_key',
+    'source_path',
+    'source_revision',
+    'wiki_path',
+    'status',
+    'blocker',
+  ]) {
+    assert.ok(schema.required.includes(field), `${field} must be model-visible as required`)
+  }
+  assert.deepEqual(schema.properties.blocker.type, ['string', 'null'])
+  assert.equal(schema.properties.blocker.minLength, 1)
+  assert.match(schema.properties.blocker.description, /bei blocked/)
+  assert.match(schema.properties.blocker.description, /bei ingested null/)
+  assert.ok(definition.input.properties.operation.enum.includes('verify_batch'))
+  assert.deepEqual(definition.input.properties.source.required, [
+    'adapter',
+    'source_key',
+    'source_path',
+    'source_revision',
+    'wiki_path',
+  ])
+  assert.equal(definition.input.properties.source.additionalProperties, false)
+  await assert.rejects(
+    definition.execute({ operation: 'verify_batch', run_id: RUN_ID }),
+    /source muss die geplante Quellenidentität enthalten/,
+  )
+})
+
+test('transport failure requires a dedicated blocker and corrected record stays durable', async () => {
+  const { root, journalRoot, run } = await runFixture()
+  try {
+    const failure = 'apply: provider.transport: WebSocket closed with code 1000'
+    const failedRecord = blockedRecord({
+      blocker: undefined,
+      content: 'Quelle gelesen; Schreibzustand nicht ermittelt.',
+      extraction_limits: failure,
+    })
+    await assert.rejects(
+      writeRecord({ root: journalRoot, runId: run.run_id, record: failedRecord }),
+      /blocker fehlt für status blocked/,
+    )
+    assert.equal((await loadRun({ root: journalRoot, runId: run.run_id })).counts.records, 0)
+    await writeRecord({
+      root: journalRoot,
+      runId: run.run_id,
+      record: { ...failedRecord, blocker: failure },
+    })
+    const loaded = await loadRun({ root: journalRoot, runId: run.run_id })
+    assert.equal(loaded.counts.blocked, 1)
+    assert.equal(loaded.effective[0].blocker, failure)
+    assert.equal(loaded.effective[0].preparation_id, failedRecord.preparation_id)
+    assert.equal(loaded.effective[0].commit, null)
+    const report = await assembleReport({ root: journalRoot, runId: run.run_id })
+    assert.match(await readFile(report.absolute_path, 'utf8'), /apply: provider.transport/)
   } finally {
     await rm(root, { recursive: true, force: true })
   }
@@ -404,6 +566,96 @@ test('reads journal lines and the report back in bounded chunks', async () => {
   }
 })
 
+test('reconstructs a multi-chunk report with effective records and Unicode details', async () => {
+  const { root, journalRoot, run } = await runFixture()
+  try {
+    await writeRecord({
+      root: journalRoot,
+      runId: run.run_id,
+      record: record({ content: 'Ersetzte Aussage', commit: 'aaa1111' }),
+      now: NOW,
+    })
+    const effective = []
+    for (let index = 0; index < 18; index += 1) {
+      const item = record({
+        source_key: index === 0 ? 'notes.md' : `quelle-${index}.md`,
+        source_path: `/knowledge/sources/webdav/${index === 0 ? 'notes' : `quelle-${index}`}.md`,
+        content: `Aussage ${index}: Größe 3,5 m 🧪. ${'Prüftext äöü. '.repeat(45)}`,
+        contradictions: `Offene Frage ${index}`,
+        extraction_limits: `Grenze ${index}`,
+      })
+      effective.push(item)
+      await writeRecord({ root: journalRoot, runId: run.run_id, record: item, now: NOW })
+    }
+    const blocked = blockedRecord({
+      source_key: 'blockiert.md',
+      source_path: '/knowledge/sources/webdav/blockiert.md',
+    })
+    await writeRecord({ root: journalRoot, runId: run.run_id, record: blocked, now: NOW })
+    const finished = await finishRun({
+      root: journalRoot,
+      runId: run.run_id,
+      finalStatus: {
+        new: 1,
+        outdated: 0,
+        current: 18,
+        conflict: 0,
+        revoked: 3,
+        orphaned: 7,
+        invalid: 0,
+      },
+      unfinished: [],
+      now: NOW,
+    })
+    let offset = 0
+    let text = ''
+    let parts = 0
+    let totalCharacters
+    for (;;) {
+      const payload = await readChunk({
+        root: journalRoot,
+        runId: run.run_id,
+        report: true,
+        offset,
+        chunkBytes: CHUNK_BYTES_DEFAULT,
+      })
+      const chunk = payload.report
+      assert.equal(chunk.offset, offset)
+      totalCharacters ??= chunk.total_characters
+      assert.equal(chunk.total_characters, totalCharacters)
+      assert.ok(Buffer.byteLength(chunk.text, 'utf8') <= CHUNK_BYTES_DEFAULT)
+      assert.ok(Buffer.byteLength(JSON.stringify(payload), 'utf8') <= JOURNAL_OUTPUT_BUDGET_BYTES)
+      text += chunk.text
+      parts += 1
+      offset += Array.from(chunk.text).length
+      if (chunk.next_offset === null) break
+      assert.equal(chunk.next_offset, offset)
+    }
+    assert.ok(parts > 1)
+    assert.equal(offset, totalCharacters)
+    assert.equal(text, await readFile(finished.absolute_path, 'utf8'))
+    assert.equal(Buffer.byteLength(text, 'utf8'), finished.report.bytes)
+    assert.equal((text.match(/^## \d+\./gm) ?? []).length, finished.counts.records)
+    assert.equal(finished.counts.records, 19)
+    assert.equal(finished.state, 'completed')
+    assert.equal((await loadRun({ root: journalRoot, runId: run.run_id })).state, 'completed')
+    assert.match(text, /\*\*Lauf:\*\* .*abgeschlossen\)/)
+    assert.doesNotMatch(text, /\*\*Lauf:\*\* .*laufend\)/)
+    assert.doesNotMatch(text, /Ersetzte Aussage|aaa1111/)
+    for (const item of effective) {
+      for (const field of ['source_path', 'content', 'contradictions', 'extraction_limits']) {
+        assert.ok(text.includes(item[field]), `${item.source_key}: ${field}`)
+      }
+    }
+    assert.ok(text.includes(blocked.source_path))
+    assert.match(text, /blockiert: Quelle nicht lesbar/)
+    assert.match(text, /\*\*Inhalt:\*\* Nicht ermittelt/)
+    assert.match(text, /revoked=3, orphaned=7/)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('renders the report with every detail block and the final status', async () => {
   const { root, journalRoot, run } = await runFixture()
   try {
@@ -448,6 +700,11 @@ test('renders the report with every detail block and the final status', async ()
     assert.match(text, /blockiert: Quelle nicht lesbar/)
     assert.match(text, /Unvollständige Quellen:.*offen\.md/)
     assert.match(text, /- \/knowledge\/sources\/webdav\/offen\.md: Lauf pausiert/)
+    assert.equal(result.state, 'running', 'report delivery must not close a paused run')
+    assert.match(text, /\*\*Lauf:\*\* .*laufend\)/)
+    assert.equal((await loadRun({ root: journalRoot, runId: run.run_id })).state, 'running')
+    const first = await readChunk({ root: journalRoot, runId: run.run_id, report: true })
+    assert.ok(first.report.text.includes('# Einlesebericht'))
 
     await assert.rejects(
       finishRun({ root: journalRoot, runId: run.run_id, now: NOW }),
@@ -491,6 +748,36 @@ test('renders an empty report explicitly', async () => {
   assert.match(text, /Gesamtstatus:\*\* nicht abgeschlossen/)
 })
 
+test('reads a completed zero-source report through the same delivery API', async () => {
+  const { root, journalRoot, run } = await runFixture()
+  try {
+    const result = await finishRun({
+      root: journalRoot,
+      runId: run.run_id,
+      finalStatus: {
+        new: 0,
+        outdated: 0,
+        current: 0,
+        conflict: 0,
+        revoked: 0,
+        orphaned: 0,
+        invalid: 0,
+      },
+      unfinished: [],
+      now: NOW,
+    })
+    const { report } = await readChunk({ root: journalRoot, runId: run.run_id, report: true })
+    assert.equal(report.next_offset, null)
+    assert.equal(result.counts.records, 0)
+    assert.equal(result.state, 'completed')
+    assert.match(report.text, /\*\*Lauf:\*\* .*abgeschlossen\)/)
+    assert.match(report.text, /Keine Quelle bearbeitet\./)
+    assert.equal(report.text, await readFile(result.absolute_path, 'utf8'))
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('estimates working context from measured bytes', async () => {
   assert.equal(estimateTokensFromBytes(800), 200)
   const tokens = estimateSourceTokens({ sourceBytes: 4000, wikiBytes: 4000 })
@@ -522,11 +809,11 @@ test('plans bounded batches from a fresh status scan', async () => {
       runId: run.run_id,
       now: NOW,
     })
-    // 4000 fixed overhead + 4 * (2000 content + 4000 overhead) = 28000 > 20000:
-    // the budget, not the source count, decides how many sources fit.
-    assert.equal(first.batch.length, 2)
-    assert.equal(first.batch_estimate_tokens, 16000)
-    assert.equal(first.remaining, 2)
+    // Even a configured upper cap of four cannot accumulate multiple sources
+    // in one worker: each assignment starts a fresh per-source context.
+    assert.equal(first.batch.length, 1)
+    assert.equal(first.batch_estimate_tokens, 18000)
+    assert.equal(first.remaining, 3)
     assert.equal(first.batch[0].source_key, 'quelle-0.md')
     assert.equal(first.batch[0].adapter, 'webdav')
     assert.equal(first.batch[0].estimate.tokens, 6000)
@@ -556,10 +843,10 @@ test('plans bounded batches from a fresh status scan', async () => {
     })
     assert.deepEqual(
       second.batch.map((entry) => entry.source_key),
-      ['quelle-1.md', 'quelle-2.md'],
+      ['quelle-1.md'],
     )
-    assert.equal(second.batch_estimate_tokens, 16000)
-    assert.equal(second.remaining, 1)
+    assert.equal(second.batch_estimate_tokens, 18000)
+    assert.equal(second.remaining, 2)
 
     const after = await loadRun({ root: journalRoot, runId: run.run_id })
     assert.equal(after.budget.batches_dispatched, 2)
@@ -568,7 +855,7 @@ test('plans bounded batches from a fresh status scan', async () => {
   }
 })
 
-test('excludes blocked records and retries stale ingested records', async () => {
+test('blocked records stop the run instead of silently skipping to stale ingested records', async () => {
   const { root, journalRoot, sourceRoot, wikiSourceRoot } = await fixture()
   try {
     const items = [
@@ -607,14 +894,12 @@ test('excludes blocked records and retries stale ingested records', async () => 
       runId: run.run_id,
       now: NOW,
     })
-    assert.deepEqual(
-      plan.batch.map((entry) => entry.source_key),
-      ['b.md'],
-      'the blocked record is excluded, the stale ingested record is retried',
-    )
-    assert.ok(
-      plan.warnings.some((warning) => warning.includes('veralteter Datensatz')),
-      'the stale record is reported',
+    assert.deepEqual(plan.batch, [])
+    assert.equal(plan.recovery_required, true)
+    assert.equal(plan.blocked, true)
+    assert.equal(
+      (await loadRun({ root: journalRoot, runId: run.run_id })).budget.batches_dispatched,
+      0,
     )
   } finally {
     await rm(root, { recursive: true, force: true })
@@ -671,7 +956,7 @@ test('runs an oversized source alone with an explicit warning', async () => {
   }
 })
 
-test('rolls over at the configured batch limit and finishes when nothing is left', async () => {
+test('rolls over at the batch limit but does not call unacknowledged failures done', async () => {
   const { root, journalRoot, sourceRoot, wikiSourceRoot } = await fixture()
   try {
     await writeManifest(sourceRoot, 'webdav', [
@@ -746,8 +1031,9 @@ test('rolls over at the configured batch limit and finishes when nothing is left
       now: NOW,
     })
     assert.deepEqual(done.batch, [])
-    assert.equal(done.remaining, 0)
-    assert.equal(done.done, true)
+    assert.equal(done.remaining, 2)
+    assert.equal(done.recovery_required, true)
+    assert.notEqual(done.done, true)
   } finally {
     await rm(root, { recursive: true, force: true })
   }

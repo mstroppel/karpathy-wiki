@@ -5,6 +5,13 @@ updates:
     directory: /openchamber
     schedule:
       interval: weekly
+    # Temporary risk acceptance: #168. Upstream still imports the default
+    # export removed in simple-git 4; forcing the fixed major breaks startup.
+    # Keep security alerts open and @openchamber/web updates enabled. Remove
+    # both rules after an upstream release supports the patched dependency tree.
+    ignore:
+      - dependency-name: simple-git
+      - dependency-name: "@simple-git/argv-parser"
     groups:
       chat-runtime:
         update-types: [minor, patch]

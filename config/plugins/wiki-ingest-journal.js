@@ -6,7 +6,9 @@ import {
   loadRun,
   planNextBatch,
   readChunk,
+  skipBlockedSource,
   startRun,
+  verifyBatchResult,
   writeRecord,
 } from '/etc/opencode/tools/wiki_ingest_journal_core.mjs'
 
@@ -46,9 +48,11 @@ export default {
                 'next_batch',
                 'record',
                 'list',
+                'verify_batch',
                 'read',
                 'report',
                 'run_finish',
+                'skip_blocked',
               ],
               description: 'Vorgang',
             },
@@ -60,6 +64,11 @@ export default {
               type: 'boolean',
               description:
                 'Bei run_start einen offenen Lauf fortsetzen statt einen neuen zu starten (Standard: true)',
+            },
+            confirmed: {
+              type: 'boolean',
+              description:
+                'Bei skip_blocked: ausdrückliche Zustimmung zu record_index; nach Rücksetzen eigener Entwürfe und sauberem Git bleibt dessen Quellenidentität für den ganzen Lauf ausgelassen, auch bei neuer Revision. Fehler bleibt im Bericht.',
             },
             budget_tokens: {
               type: 'integer',
@@ -92,14 +101,47 @@ export default {
                 source_revision: { type: 'string' },
                 wiki_path: { type: 'string' },
                 status: { type: 'string', enum: ['ingested', 'blocked'] },
+                preparation_id: {
+                  type: ['string', 'null'],
+                  description:
+                    'Für ingested erforderlich: Kennung aus wiki_ingest_transaction prepare/apply/validate',
+                },
                 commit: { type: ['string', 'null'] },
                 changed_pages: { type: 'array', items: { type: 'string' } },
                 content: { type: ['string', 'null'] },
                 contradictions: { type: ['string', 'null'] },
                 extraction_limits: { type: ['string', 'null'] },
                 source_unmodified: { type: 'boolean' },
-                blocker: { type: ['string', 'null'] },
+                blocker: {
+                  type: ['string', 'null'],
+                  minLength: 1,
+                  description:
+                    'Immer angeben: bei blocked konkreter Fehler mit fehlgeschlagenem Vorgang; bei ingested null. Fehler nur in content oder extraction_limits ersetzen dieses Feld nicht.',
+                },
               },
+              required: [
+                'adapter',
+                'source_key',
+                'source_path',
+                'source_revision',
+                'wiki_path',
+                'status',
+                'blocker',
+              ],
+              additionalProperties: false,
+            },
+            source: {
+              type: 'object',
+              description:
+                'Für verify_batch: geplante Quellenidentität unverändert aus next_batch. Prüft Publisher-Belege; ein Paperless-Generationswechsel bei gleichem Schlüssel/Revision ist kein Quellenwechsel.',
+              properties: {
+                adapter: { type: 'string' },
+                source_key: { type: 'string' },
+                source_path: { type: 'string' },
+                source_revision: { type: 'string' },
+                wiki_path: { type: 'string' },
+              },
+              required: ['adapter', 'source_key', 'source_path', 'source_revision', 'wiki_path'],
               additionalProperties: false,
             },
             offset: { type: 'integer', minimum: 0, description: 'Listenposition (Standard: 0)' },
@@ -112,7 +154,8 @@ export default {
             record_index: {
               type: 'integer',
               minimum: 0,
-              description: 'Position der Datensatzzeile für operation read',
+              description:
+                'Position der Datensatzzeile für read oder des bestätigten Fehlers für skip_blocked',
             },
             report: {
               type: 'boolean',
@@ -198,6 +241,7 @@ export default {
                 final_status: run.final_status,
                 unfinished: run.unfinished,
                 report: run.report,
+                recovery: run.recovery ?? { skipped_records: [] },
               }
               break
             }
@@ -212,6 +256,15 @@ export default {
               })
               break
             }
+            case 'skip_blocked': {
+              result = await skipBlockedSource({
+                root,
+                runId: args.run_id,
+                recordIndex: args.record_index,
+                confirmed: args.confirmed,
+              })
+              break
+            }
             case 'record': {
               result = await writeRecord({ root, runId: args.run_id, record: args.record })
               break
@@ -222,6 +275,16 @@ export default {
                 runId: args.run_id,
                 offset: args.offset,
                 limit: args.limit,
+              })
+              break
+            }
+            case 'verify_batch': {
+              result = await verifyBatchResult({
+                root,
+                runId: args.run_id,
+                source: args.source,
+                sourceRoot: SOURCE_ROOT,
+                wikiRoot: '/knowledge/wiki',
               })
               break
             }

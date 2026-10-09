@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Ingestion report instructions now require concrete thematic findings with
+  evidence locations, changes against the previous wiki, and justified omissions
+  in the private per-source records. Compact chat summaries remain unchanged;
+  run-report links are explicitly distinguished from existing wiki source pages.
+  Journal schemas, size budgets, and access permissions are unchanged.
+
 ### Added
 
 - OpenChamber is now the default chat interface, with a release-built locked
@@ -54,6 +62,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `docs/audio.md`.
 
 ### Changed
+
+- Temporarily ignore blocked Dependabot updates for the chat runtime's
+  `simple-git` and `@simple-git/argv-parser` dependencies pending upstream
+  compatibility with the patched major. Security alerts stay open; #168 tracks
+  the accepted risk and removal criteria. Runtime dependencies are unchanged.
 
 - `/ingest-new` now bounds model context during bulk ingestion (#152): a narrow
   orchestrator plans batches against a documented working-context budget and

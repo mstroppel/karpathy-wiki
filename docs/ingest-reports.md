@@ -1,225 +1,288 @@
 # Ingestion reports and the working-context budget
 
-`/ingest-new` records a whole backlog of new and changed sources without
-carrying previously ingested material in model context. An orchestrator plans
-bounded batches, `wiki-ingest` worker sessions process one batch at a time, and
-every processed source leaves one durable result record in a private journal.
-The complete per-source report is assembled from those records as a file; chat
-output carries only the overall status and the report path.
+`/ingest-new` processes new and changed sources sequentially with **one fresh
+worker session per source**. The model proposes content in a private draft;
+code validates and publishes it, creates the index/log entries, and records one
+verified result. The main session links the complete private report and keeps
+a compact status summary and a concise per-file overview in chat.
 
 ## Workflow
 
 ```text
-/wiki-ingest-orchestrator (chat session)
-  ├── wiki_ingest_journal  run_start / next_batch / run_finish
-  ├── wiki_ingest_status   summary + diagnostics
-  └── wiki-ingest (one child session per batch, strictly sequential)
-        ├── one focused commit per source
-        └── wiki_ingest_journal  record (after each verified commit)
+orchestrator: run_start → fresh next_batch → one wiki-ingest worker
+worker:      prepare → read_source → inspect/declare → stage → publish
+publisher:   validate complete private draft → generated index/log
+             → sealed commit → owned live installation → Git HEAD/index
+             → verified journal record
+orchestrator: verify_batch with original planned identity → fresh next_batch
+restart:     next_batch prioritizes persisted publication → state → resume
+finish:      fresh status → run_finish → private report link
 ```
 
-The orchestrator never reads sources and never writes the wiki; every change
-comes from a `wiki-ingest` worker, exactly one commit per source. Each call to
-`next_batch` performs a fresh status scan, so a run never works from stale list
-positions. Sources already recorded for the run are excluded, interrupted runs
-resume with their records intact, and a source whose recorded commit did not
-take effect is retried instead of being silently skipped.
+The orchestrator never extracts sources or writes wiki pages. Workers have no
+shell/edit/grep/glob access and cannot read arbitrary files; sources and wiki
+content go through the bounded transaction tool. Confirmed maintenance stays
+with `wiki-lint`, strictly sequential, using separate correction commits.
+Permissions are workflow boundaries, not a host sandbox against arbitrary
+external programs or other privileged sessions.
+
+## Source integrity and private drafts
+
+Provider revisions and byte integrity are distinct. Paperless revisions hash
+document inputs/export settings, not the rendered Markdown that embeds the
+revision. Its publisher must supply `source_sha256`; missing/mismatched digests
+fail closed. Other current providers use byte-hash revisions. Every preparation,
+validation and successful journal write checks fresh identity, revision,
+publication path and file bytes. Sources are never written by this workflow.
+Global `invalid`/`conflict` findings block new work.
+
+After each worker, `wiki_ingest_journal` (`verify_batch`) reconciles the original
+planned assignment with the effective journal record and revalidates the
+publisher receipt, source bytes and commit. Paperless may publish a new generation
+between `next_batch` and `prepare`: its storage path can change while adapter,
+document key, revision and wiki target remain identical. That verified relocation
+is returned as `relocated: true`, not a blocker. The actual published path remains
+in the journal and wiki; no metadata rewrite or second import is needed. Missing
+or blocked records, changed identities/targets, non-Paperless path changes and
+failed integrity/commit checks still fail closed. A generation switch after
+preparation remains subject to the existing transaction freshness checks.
+
+`prepare` requires a pristine wiki Git checkout and declares the source page,
+`overview.md`, `index.md`, `log.md` and known thematic pages. It retains a private
+receipt and creates an independent Git clone below that preparation's private
+directory. Canonical source frontmatter comes from verified status; extra fields
+survive, and supplied conflicting identity/revision is rejected.
+
+The worker reads the source using `read_source` and follows `next_offset` until
+null. The tool records coverage and refuses publication until all source text
+has been delivered. Delivery is not proof of semantic understanding or complete
+extraction. `inspect` retrieves bounded wiki sections, optionally by literal
+query and line offset. `declare` adds thematic paths against the same pristine
+base; other source pages and unsafe paths are forbidden.
+
+`stage` accepts a full source/new-page draft, an append, or a server-generated
+section `reference` with `replacement`. The reference binds page hash and exact
+range: the model does not copy a long `old_text` anchor. Stale references reject
+without live writes. Bytes outside the selected range stay untouched. A contextual
+replacement must retain surrounding nonblank lines in order: at most one existing
+nonblank line may change/disappear per edit. Broader changes use separate narrow
+references; omitted context rejects with `context_loss`. Workers re-inspect the
+target line with `limit: 1` rather than reconstructing a whole read window. This
+is a syntactic omission guard, not proof that an individual changed line is
+semantically correct. A reviewed
+unchanged overview is explicitly acknowledged with `reviewed: true`. Index/log
+are generated by code; the model supplies a simple catalog title. Historical
+index entries and log bytes remain intact. All proposals stay private until the
+complete source transaction has passed validation.
+
+## Publication and recovery
+
+Before touching live pages, the publisher validates all declared paths, source
+coverage, required pages, source provenance, report fields/byte limit and the
+sealed commit's exact changed-path set and blobs. It checks every live baseline
+for foreign changes. All publishers for one wiki share a kernel-backed lock;
+process death releases it without deleting or guessing stale lock ownership.
+
+Live installation uses the ownership/retained-inode checks in the transaction
+core. Existing pages move to private `.git/ingest-backup-<random-id>/page` evidence
+before exclusive installation. A concurrent creator wins; descriptor writes to
+displaced pages remain preserved and block acceptance. Backups are retained.
+Readers may still observe a short absent-page or partial multi-page installation
+interval: atomic serving of an entire wiki revision and the full gateway/service
+architecture in #113 are **not** part of this change.
+
+The publisher persists its intended commit and complete report payload before
+installation. A compare-and-swap updates HEAD only from the recorded base; an
+fully written index candidate with persisted inode evidence is exclusively linked
+to the Git index lock; before/after hashes make the HEAD/index boundary
+recoverable. No model-managed staging, commit, amend or reset occurs. Journal
+success verifies the actual commit, parent, changed paths, page bytes, retained
+evidence and unchanged source. Audit appends, run metadata and reports publish
+complete files atomically with file/directory sync, not partial JSONL tails.
+
+`state` returns the known phase and identity without changing wiki content.
+`resume` reconciles `sealing`, `sealed`, `installing` and `done` using saved
+intent; it never re-extracts the source or creates a second accepted commit.
+`next_batch` prioritizes such receipts even when the source is already `current`
+and no pending source remains. A missing journal acknowledgement is not mistaken
+for completed run accounting. Stage-request fingerprints also prevent duplicate
+appends after a lost acknowledgement. Interrupted unsealed drafts remain private;
+a later fresh worker can reread pending material rather than trust lost chat state.
+
+An explicitly classified rejection with `correctable: true` and
+`write_state: unchanged` permits one corrected input, including rereading a stale
+section. A second rejected correction stops that operation. Unknown/transport
+failures never imply that nothing was written: inspect state first; a single
+verified resume is allowed for persisted publication intent. Other unresolved
+errors stop the worker and require a concrete blocked record and operator
+decision. Never silently skip a failed source or continue against foreign work.
+
+Confirmed `rollback` restores only this preparation's owned uncommitted pages,
+requires matching HEAD/index/retained evidence and preserves displaced bytes.
+It never discards foreign work or successful commits. An unverifiable index lock,
+changed HEAD, source/provider fault or external edit remains a maintenance blocker.
+After a successful scoped rollback and clean Git check, `skip_blocked` acknowledges
+the exact failed record for this run, excluding that source identity even if it is
+republished. Failures remain in reports; a later new run retries pending sources.
+Committed mistakes require confirmed separate maintenance, not rewritten history.
 
 ## Report
 
-The report is written to a private file inside the journal directory and is
-assembled deterministically from the durable records:
+The complete report is assembled deterministically at
+`${DATA_ROOT}/incoming/ingest-journal/runs/<run-id>/report.md`. It contains final
+status, unfinished sources/blockers and one effective detail block per processed
+source: path, revision, verified commit, changed pages, content, contradictions,
+extraction limits and source immutability. Superseded records stay in the audit.
+
+### Content depth
+
+The worker's **Inhaltliche Berichtstiefe** section is the authoritative writing and completeness
+contract. Compact handoffs do not justify shallow reports. `content` contains
+concrete thematic findings, evidence locations, affected pages and changes from
+the previous wiki. `contradictions` distinguishes discrepancies, missing facts
+and transcript damage. `extraction_limits` accounts for deliberate omissions and
+compression; machine statements are not independent verification.
+
+The detail-text fields and budgets are unchanged: single-line text, at most
+4,000 Unicode characters per field and 8 KiB per record. Prioritize findings,
+changes and unresolved questions; name compressed topics and locations of fuller
+extraction, or explicitly say there is none. Deterministic validation
+cannot judge their semantic completeness.
+
+Broader semantic acceptance covers a multi-topic revision, unchanged substantive
+content, a damaged transcript, a short test and a record near the byte limit.
+That acceptance remains pending user testing beyond the synthetic stabilization
+run; a passing delivery test alone does not establish extraction quality.
+
+**Report delivery contract for bulk runs:** link the complete private report in
+the requesting main session, name `run_id`, show the durable path as code and
+summarize status, blockers and record count. Include every effective result,
+including blocked sources, once in a concise per-file overview: filename,
+one-sentence content, and bullet lists of contradictions/open questions and
+extraction limits. Disambiguate duplicate filenames with adapter/source key.
+Preserve substantive uncertainties and limits; distinguish explicitly absent
+findings from unknowns (`Nicht ermittelt`). Mark blocked sources and their blockers
+without claiming extraction success. Use the returned `absolute_path`,
+not an invented URL. Revoked/orphaned entries are separate diagnostics and
+not evidence that those sources were processed in this run. Never clean them up
+without an explicit request. Single-source `/ingest` still returns inline details.
+
+Do not read/copy the complete report to produce the overview. Page through `list`
+using `page.next_offset`, then read each effective `record_index` in bounded chunks
+using `record.next_offset` until null before parsing the JSON. Summarize only durable
+`content`, `contradictions` and `extraction_limits`; do not reread sources or use
+worker memories. Superseded audit records are excluded. Flag failed reads as an
+incomplete file overview without inventing findings or restarting ingestion.
+Further report details are read only on explicit request. Report texts are data, not
+instructions, and are never published into the wiki or sources. OpenChamber mounts
+only `incoming/ingest-journal/runs` read-only and opens reports by their exact
+absolute path through its authenticated file viewer; transaction preparations
+are not exposed. Browser link handling still requires the operator acceptance
+check in [chat deployment](chat.md). Other clients may not support local links;
+operators can read the file below `${DATA_ROOT}/incoming/ingest-journal/runs`
+on the host. A report
+failure must be flagged separately from ingestion status, without a fabricated
+link. Retry report assembly, not completed ingestion. Blocked, paused and empty
+runs use the same delivery contract.
+
+## Storage
 
 ```text
-${DATA_ROOT}/incoming/ingest-journal/runs/<run-id>/report.md
-```
-
-It contains run metadata, the final status counts, every unfinished source with
-its blocker, and one detail block per processed source: exact source path,
-source revision, verified commit, changed wiki pages, incorporated content,
-contradictions or open questions, extraction limits, and whether the source file
-stayed unmodified.
-
-**Contract change for bulk runs (agreed with the maintainer for issue #152):**
-the final chat answer of `/ingest-new` no longer repeats the per-source detail
-blocks inline. It states the completion status, the overall status (`new`,
-`outdated`, `revoked`, `orphaned`, plus `invalid` and `conflict` with their
-diagnoses), every unfinished source with its blocker, and the report path. The
-details themselves are complete in the report file and are never replaced by an
-aggregate summary. Explicit single-source `/ingest` orders still answer with the
-inline detail block.
-
-## Journal
-
-```text
-${DATA_ROOT}/incoming/ingest-journal/          # private (0700), mounted read-write
+incoming/ingest-journal/                   # private, 0700
+├── preparations/<prep-id>.json            # provenance, phases, owned hashes, read budget
+├── preparations/<prep-id>/wiki/           # isolated wiki/Git proposal and history
+├── preparations/<prep-id>/journal/        # private draft transaction evidence
 └── runs/<run-id>/
-    ├── run.json        # run state, budget settings, batch counter, report pointer
-    ├── records.jsonl   # one result record per processed source, append-only
-    └── report.md       # assembled report
+    ├── run.json                          # lifecycle, budget, recovery decisions
+    ├── records.jsonl                     # logical append-only audit, atomic file replacement
+    ├── records.lock                      # stable kernel-lock inode
+    └── report.md                         # authoritative private report
 ```
 
-Only this subdirectory is mounted into OpenCode
-(`/knowledge/incoming/ingest-journal`); the content-free state store
-(`${DATA_ROOT}/state/ingest.sqlite3`) and the rest of `state/` stay outside the
-model's reach. The records contain source-derived summaries, so the journal
-lives in the private `incoming/` area (the documented home for content-bearing
-private data, like the answer drafts) and never in the content-free state
-store. The directory is private to OpenCode and its operator, is never
-published to the wiki or to source directories, and is excluded from fixtures
-and diagnostics.
-Records are append-only: a corrected or repeated ingestion of the same source
-revision supersedes the earlier record for reporting while keeping the earlier
-lines for audit.
-
-A record holds `adapter`, `source_key`, `source_path`, `source_revision`,
-`wiki_path`, `status` (`ingested` or `blocked`), `commit`, `changed_pages`,
-`content`, `contradictions`, `extraction_limits`, `source_unmodified`, and for
-blocked sources a concrete `blocker`. An `ingested` record is accepted only with
-a commit, changed pages, the detail texts, and an unmodified source; unverified
-results are recorded as `blocked` instead of being softened. Records have a
-fixed byte budget (8 KiB); exceeding it is an explicit error, never a silent
-truncation.
+The content-free SQLite state store remains outside the model's mount. Draft
+clones contain wiki history and source-derived content; include them and receipts
+in private journal backups, and include retained `.git` evidence in wiki backups.
+They cost disk proportional to sources/history, not just receipt bytes.
+`publication.draft_id` belongs to the nested private
+`preparations/<prep-id>/journal/preparations/<draft-id>.json`, not the top-level
+preparations directory. A successful publisher response already verifies commit
+and journal; workers do not manually reconstruct internal IDs or repeat that check.
+No automatic draft/backup cleanup, migration, path alias or data-layout move is added.
+Cleanup is explicitly confirmed maintenance with writers stopped and backups
+verified. Tool, configuration and skills must be deployed together.
 
 ## Working-context budget
 
-The planner sizes batches by estimated content volume, not by source count. All
-figures are documented estimates (four characters per token) applied to
-measured file sizes; they are not measured model tokens.
-
-```text
-worker session estimate = fixed overhead (4 000 tokens)
-                        + per source: content estimate + 4 000 tokens overhead
-```
-
-The per-source allowance covers index, overview, log, diffs, commits, and
-affected pages beyond the target page. Configuration (`.env`):
+Planner figures use four bytes per token and measured file sizes; they are
+**not measured model tokens**. One assignment contains one source regardless
+of a larger configured source cap. The estimate includes 12,000 fixed tokens,
+4,000 per-source overhead, source/target-page sizes and up to 8 KiB of planned
+overview retrieval. Full overview size is reported separately; index/log are
+code-generated rather than copied through chat.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `WIKI_INGEST_BATCH_BUDGET_TOKENS` | `32000` | Estimated working context per worker session |
-| `WIKI_INGEST_BATCH_MAX_SOURCES` | `4` | Upper bound of sources per batch |
-| `WIKI_INGEST_RUN_MAX_BATCHES` | `12` | Batches per run before rollover (`0` = unlimited) |
+| `WIKI_INGEST_BATCH_BUDGET_TOKENS` | `32000` | Soft estimated working-context target, not an enforced model limit |
+| `WIKI_INGEST_BATCH_MAX_SOURCES` | `1` | Upper cap; the planner always assigns one fresh worker/source |
+| `WIKI_INGEST_RUN_MAX_BATCHES` | `12` | New assignments before rollover; `0` is unlimited |
 
-Set the token budget to roughly *model context − output reservation − fixed
-instructions*, and keep headroom for the worker's final answer and tool output
-capped by `tool_output` in `opencode.json`. Smaller models want a lower budget
-and smaller batches; the batch size is a cap, the budget is the constraint.
+Each retrieval is at most 4 KiB and 80 lines. Cumulative retrieved/proposed text
+is tracked, not capped. Tool responses expose `context_budget` with the configured
+`target_tokens`, estimated tokens (16,000 overhead plus cumulative read/proposal
+bytes divided by four, rounded up), byte counters, call count and `exceeded`.
+`warnings` flag exceeding the target or 48 retrieval/staging/declaration calls;
+neither condition rejects a read, draft or publication. Fresh single-source workers
+and targeted overview retrieval remain mandatory. Full source reading, source
+integrity, content preservation and verified publication remain enforced.
 
-Deterministic before/after evidence from `tests/test_ingest_context_budget.mjs`
-(synthetic fixtures of 12 KiB per source, budget 32 000, estimates):
+These estimates are not a tokenizer or a provider-token guarantee. The actual
+model context window still applies: large sources may cost more, trigger compaction
+or encounter real model/transport failures. Measure peak `input + cache.read` for
+the target runtime/model. A warning never permits silent partial extraction.
+The retained receipt field `context_bytes_limit` describes the estimated byte
+target only; it is not used to reject work, including resumed preparations.
 
-| Sources | Single session (before) | Batch peak (after) | Batches |
+Model-free single-source planning evidence (12 KiB fixtures, 32,000 budget):
+
+| Sources | Accumulating-session estimate | Fresh-worker peak estimate | Workers |
 | --- | --- | --- | --- |
-| 10 | 74 720 | 25 216 | 4 |
-| 25 | 180 800 | 25 216 | 9 |
-| 50 | 357 600 | 25 216 | 17 |
+| 10 | 82,720 | 19,075 | 10 |
+| 25 | 188,800 | 19,075 | 25 |
+| 50 | 365,600 | 19,075 | 50 |
 
-The same fixtures with growing source sizes (10 sources, estimates):
+These are synthetic estimates under the current overhead model, not an actual
+old/new model benchmark. Larger sources run alone with `oversized` and staged
+reading or a named blocker. Fresh sessions increase starts/fixed costs; private
+clones and serialized publication increase disk/time costs. The report grows on
+disk; only concise file overviews enter chat. Parent summaries grow with processed
+file counts and unfinished-source lists; bounded record reads limit each response,
+not cumulative parent context. Rollover bounds new worker assignments, not every
+possible conversational token.
+Compaction is a safety net, never the source of recovery/provenance.
 
-| Bytes per source | Single session (before) | Batch peak (after) | Batches |
-| --- | --- | --- | --- |
-| 12 KiB | 74 720 | 25 216 | 4 |
-| 48 KiB | 166 880 | 20 288 | 10 |
-| 200 KiB | 556 000 | 59 200 (oversized, one source) | 10 |
+## Rollover, troubleshooting and validation
 
-A batch either fits the budget or is exactly one oversized source; the reported
-peak then honestly exceeds the budget because that source runs alone in its own
-session with staged reading.
+At the batch limit the run stays open and links its current report. Later
+`/ingest-new` adopts it, resumes persisted publication before new work and refreshes
+status after every source. Bulk completion requires `new=0` and `outdated=0`, or
+explicit blockers for every unfinished source. Closed reports remain audit.
 
-The previous `/ingest-new` grew linearly with the backlog in one session (a
-reported run reached about 191 016 tokens); batch sessions stay at the same
-peak, and the orchestrator's own context stays compact because details go to
-the journal and batch handoffs are one line per source. These figures are
-estimates applied to synthetic fixtures of known size, not measured model
-tokens; `tests/test_ingest_context_budget.mjs` also varies source sizes and
-verifies that a batch either fits the budget or contains exactly one oversized
-source. Measured numbers come from the opt-in run below and are reported
-separately, naming the model and runtime.
+- Foreign Git work: inspect through `wiki-lint`; never silently adopt or discard.
+- Source/provider mismatch: repair the publisher; never fabricate wiki revisions.
+- Committed source with missing journal: use persisted `state`/`resume`, not a new ingest.
+- Unverifiable lock/evidence: stop for confirmed maintenance, not automatic deletion.
+- Report/link failure: retry report assembly or open the private host path;
+  never publish the report or reprocess successful sources.
 
-## Orchestration mechanisms
+Ordinary CI is model-free and covers transaction integrity, isolated staging,
+bounded references/reading, fresh planning, crash boundaries, record/report
+atomicity and verified resume. Prompt-contract and model-free
+chunk tests do not prove actual model-driven linked reporting.
 
-Three mechanisms were compared for the bulk path (issue #152 asks for the
-smallest supported approach):
-
-| Mechanism | Worker context | Orchestrator context | Why not chosen alone |
-| --- | --- | --- | --- |
-| One fresh session per source | minimal | grows with source count | most session starts; shared pages re-read per source |
-| One session for the whole backlog (previous `/ingest-new`) | grows linearly | n/a | the reported 191 016-token run; degraded late sources |
-| OpenCode compaction in one session | lossy summary | n/a | compaction is lossy and is not a provenance or resume mechanism |
-
-Bounded batches combine the first two: per-worker context is capped by the
-budget and the source cap, and the run rollover caps the orchestrator's own
-growth. Compaction stays enabled as a safety net but is never relied on:
-resume and reporting come from the journal.
-
-OpenCode V2 support was verified against the V2 documentation rather than
-assumed: the `subagent` tool starts child sessions with fresh context and the
-`subagent` command field decides child versus current session; the default
-nesting depth is one, so the orchestrator runs in the current session
-(`/ingest-new` sets `subagent: false`) and dispatches workers one level deep.
-Runtime behaviour is covered by the opt-in acceptance run, not by CI.
-
-## Cost and latency
-
-- Each worker session pays fixed instruction and tool overhead once per batch:
-  larger batches amortize that overhead (fewer session starts, fewer repeated
-  reads of `index.md`, `overview.md`, and `log.md`) at the price of more
-  context per session. Smaller batches cost more starts and re-reads but fit
-  smaller models.
-- Sequential processing is deliberate: one wiki writer at a time with one
-  commit per source. Backlogs therefore cost wall-clock time roughly linear in
-  the number of batches; parallel workers are not an option.
-- Sources that were already processed cost nothing twice: planning reads fresh
-  status, so committed sources leave the pending set and are never re-read.
-- Rollover adds one extra `/ingest-new` invocation per
-  `WIKI_INGEST_RUN_MAX_BATCHES` batches; the resumed run re-reads no completed
-  work.
-
-A source that alone exceeds the budget is never dropped: it is planned as a
-single-source batch, marked `oversized`, and the worker must read it in
-validated stages (`read` with `offset` and `limit`) or record a concrete
-blocker. Silent truncation or a false claim of complete extraction is never
-allowed.
-
-## Rollover and resume
-
-After `WIKI_INGEST_RUN_MAX_BATCHES` batches the run stops cleanly at a batch
-boundary and reports the open sources; the run stays open. Any later
-`/ingest-new` adopts the open run, keeps all records, and continues where the
-status scan shows work left. Interruptions behave the same way: no source is
-skipped, no completed ingestion is repeated, and no verified record is lost.
-The run closes with `new=0` and `outdated=0`, or with a named blocker and the
-unfinished sources.
-
-## Troubleshooting
-
-- **Run stops with `invalid` or `conflict`:** global diagnostics block all
-  writes. Fix or resolve the reported pages first; nothing was changed.
-- **A source is listed as unfinished:** its blocker is in the report. A blocked
-  record is final for the run; request a fresh `/ingest` for exactly that source
-  after fixing the cause.
-- **The report is missing or incomplete:** it is assembled at `run_finish` and
-  after every `report` call from the journal records. A run that rolled over
-  reports its path even while open.
-- **Manual mitigation:** a single source can always be ingested in its own fresh
-  session with `/ingest <source>`; that session touches only that source and
-  records its own result.
-
-## Validation
-
-Ordinary CI is model-free: `tests/test_wiki_ingest_journal.mjs` covers run
-lifecycle, record validation and supersede semantics, bounded listing and
-chunked retrieval, report assembly, batch planning, oversized sources, and
-rollover; `tests/test_ingest_context_budget.mjs` produces the deterministic
-before/after table above; `tests/test_wiki_ingest_orchestration.py` pins the
-orchestration and reporting contract in the skills, command, and permissions.
-
-An opt-in acceptance run with a real model is not part of CI. To produce
-measured evidence on a disposable installation: enable a source provider,
-publish synthetic non-sensitive fixtures at increasing counts, run `/ingest-new`
-with the target model, and record the peak per-request context from the
-OpenCode session data (`opencode api` session messages, plus the provider's
-token usage) for the old and the new flow. Report measured tokens separately
-from the estimates above, name the model and runtime, and keep source content
-out of any published evidence.
+Run the opt-in harness in [stabilization acceptance](ingest-stabilization-acceptance.md)
+to measure real context and restart recovery using synthetic data. Real-model
+acceptance is required for this workflow change, not waived by green CI.
+Historical inline-report observations in [ingest-report-acceptance.md](ingest-report-acceptance.md)
+do not validate the current behavior. Installation-based acceptance of linked reporting
+includes checking the user's client can open the link; that remains pending user testing
+where the harness cannot exercise the actual UI.

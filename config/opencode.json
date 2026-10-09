@@ -1,4 +1,5 @@
 {
+  "$schema": "https://opencode.ai/config.json",
   "update": "disable",
   "share": "disabled",
   "snapshots": false,
@@ -14,6 +15,11 @@
       "system": "Bearbeite ausschließlich Einleseaufträge für das Wiki. Delegiere nicht erneut. Lade einmal den Skill wiki-ingest, befolge ihn vollständig und führe den Auftrag selbst aus.",
       "permissions": [
         {
+          "action": "wiki_ingest_transaction",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
           "action": "subagent",
           "resource": "*",
           "effect": "deny"
@@ -21,15 +27,70 @@
         {
           "action": "shell",
           "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "edit",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "read",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "read",
+          "resource": "AGENTS.md",
           "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "/knowledge/wiki/AGENTS.md",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "/etc/opencode/skills/wiki-ingest/*",
+          "effect": "allow"
+        },
+        {
+          "action": "grep",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "glob",
+          "resource": "*",
+          "effect": "deny"
         }
       ]
     },
     "wiki-ingest-orchestrator": {
       "description": "Orchestriert die Aufnahme neuer und geänderter Quellen in kontextbegrenzten Batches.",
       "mode": "all",
-      "system": "Orchestriere ausschließlich Einleseaufträge für das Wiki. Delegiere nicht erneut und lies Quellen nicht selbst ein. Lade einmal den Skill wiki-ingest-orchestrator, befolge ihn vollständig und führe den Auftrag selbst aus. Änderungen am Wiki führt ausschließlich der Subagent wiki-ingest aus.",
+      "system": "Orchestriere Einleseaufträge und ihre bestätigte Bereinigung. Lade wiki-ingest-orchestrator. Delegiere Einlesen an wiki-ingest, lesende Git-Prüfung und bestätigte Wartung an wiki-lint, stets sequenziell. Lies Quellen nicht selbst ein und ändere das Wiki nicht selbst.",
       "permissions": [
+        {
+          "action": "read",
+          "resource": "/knowledge/incoming/ingest-journal/**",
+          "effect": "deny"
+        },
+        {
+          "action": "wiki_ingest_transaction",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "grep",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "glob",
+          "resource": "*",
+          "effect": "deny"
+        },
         {
           "action": "edit",
           "resource": "*",
@@ -59,6 +120,11 @@
           "action": "subagent",
           "resource": "wiki-ingest",
           "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "wiki-lint",
+          "effect": "allow"
         }
       ]
     },
@@ -84,6 +150,11 @@
       "mode": "subagent",
       "system": "Bearbeite ausschließlich ausdrücklich angeforderte wissenschaftliche Analysen. Delegiere nicht erneut. Lade einmal den Skill wiki-analysis, befolge ihn vollständig und führe den Auftrag selbst aus.",
       "permissions": [
+        {
+          "action": "wiki_ingest_transaction",
+          "resource": "*",
+          "effect": "deny"
+        },
         {
           "action": "edit",
           "resource": "*",
@@ -111,6 +182,11 @@
       "mode": "subagent",
       "system": "Bearbeite ausschließlich Aufträge, eine fertige Analyse als Wiki-Seite zu speichern. Delegiere nicht erneut. Lade einmal den Skill wiki-analysis-save, befolge ihn vollständig und führe den Auftrag selbst aus.",
       "permissions": [
+        {
+          "action": "wiki_ingest_transaction",
+          "resource": "*",
+          "effect": "deny"
+        },
         {
           "action": "subagent",
           "resource": "*",
@@ -140,7 +216,7 @@
       "description": "Alle neuen und geänderten Quellen einlesen",
       "agent": "wiki-ingest-orchestrator",
       "subagent": false,
-      "template": "Lade den Skill wiki-ingest-orchestrator und orchestriere die Aufnahme aller neuen und geänderten Quellen unter /knowledge/sources in geplanten Batches. Bearbeite Quellen ausschließlich über den Subagenten wiki-ingest, streng sequenziell und mit genau einem Commit je Quelle; halte die Ergebnisdatensätze in wiki_ingest_journal fest. Beende den Auftrag erst nach einer abschließenden Statusprüfung mit new=0 und outdated=0 oder benenne einen konkreten Blocker und die offenen Quellen. Gib in der Abschlussantwort den Gesamtstatus, die offenen Quellen mit ihren Blockern und den Pfad zum vollständigen Bericht an. Die Detailblöcke je Quelle stehen vollständig im Bericht; ersetze sie nicht durch eine reine Sammelzusammenfassung und erfinde keine Details."
+      "template": "Lade den Skill wiki-ingest-orchestrator und orchestriere die Aufnahme aller neuen und geänderten Quellen unter /knowledge/sources in geplanten Batches. Bearbeite Quellen ausschließlich über den Subagenten wiki-ingest, streng sequenziell und mit genau einem Commit je Quelle; halte die Ergebnisdatensätze in wiki_ingest_journal fest. Beende den Ingest erst nach einer abschließenden Statusprüfung mit new=0 und outdated=0 oder benenne einen konkreten Blocker und die offenen Quellen. Führe anschließend die Berichtsphase des Skills aus, auch bei blockierten oder pausierten Läufen: Verlinke den vollständigen privaten Bericht und halte diese Hauptsession mit einer kurzen Zusammenfassung kompakt. Nenne Gesamtstatus, offene Quellen mit Blockern, Anzahl der Ergebnisdatensätze, run_id und den dauerhaften Berichtspfad. Ergänze für jede bearbeitete Datei eine kurze Dateiübersicht: Name, Inhalt in einem Satz, Widersprüche/offene Fragen als Bulletpoint-Liste und Extraktionsgrenzen als Bulletpoint-Liste. Lies dafür nur die effektiven Journaldatensätze begrenzt gemäß Berichtsphase; den vollständigen Bericht und weitere Details nur auf ausdrückliche Nachfrage. Kennzeichne eine unvollständige Berichtserstellung oder Dateiübersicht ausdrücklich und erfinde keine Details."
     },
     "lint": {
       "description": "Wiki prüfen",
@@ -287,6 +363,11 @@
       "action": "wiki_ingest_status",
       "resource": "*",
       "effect": "allow"
+    },
+    {
+      "action": "wiki_ingest_transaction",
+      "resource": "*",
+      "effect": "deny"
     },
     {
       "action": "wiki_ingest_journal",

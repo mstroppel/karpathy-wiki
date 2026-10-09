@@ -139,8 +139,9 @@ class IngestPackageTests(unittest.TestCase):
                 pins[name] = set(re.findall(r"--hash=sha256:([0-9a-f]{64})", line))
         self.assertIn("faster_whisper", pins)
         # These native dependencies need distinct amd64 and arm64 wheels on
-        # CPython 3.12. Catch missing pins and single-architecture lock updates;
-        # actual wheel compatibility/digests are verified with pip download.
+        # CPython 3.14 (the speech stage base). Catch missing pins and
+        # single-architecture lock updates; actual wheel compatibility/digests
+        # are verified with pip download.
         for name in (
             "ctranslate2",
             "av",
@@ -318,6 +319,18 @@ class PackageLockTests(unittest.TestCase):
 
 
 class DependabotCoverageTests(unittest.TestCase):
+    def test_chat_security_exception_is_scoped_to_blocked_dependencies(self):
+        blocks = read(DEPENDABOT).split("- package-ecosystem:")[1:]
+        chat = next(block for block in blocks if "directory: /openchamber\n" in block)
+        ignored = re.findall(r"dependency-name: [\"']?([^\s\"']+)", chat)
+        self.assertEqual(ignored, ["simple-git", "@simple-git/argv-parser"])
+        self.assertIn("#168", chat)
+        self.assertIn("chat-runtime:", chat)
+        for block in blocks:
+            if block != chat:
+                self.assertNotIn("dependency-name: simple-git", block)
+                self.assertNotIn("@simple-git/argv-parser", block)
+
     def test_all_package_sources_are_covered(self):
         config = read(DEPENDABOT)
         for ecosystem, directory in (

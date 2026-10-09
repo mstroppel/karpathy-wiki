@@ -4,6 +4,52 @@
   "description": "Conformance cases for provider manifest validation, executed by the Python core (ingest/tests/test_manifest.py) and the JavaScript scanner tests (tests/test_contract_fixtures.mjs).",
   "cases": [
     {
+      "name": "invalid sanitized byte digest",
+      "valid": false,
+      "manifest": {
+        "contract": "karpathy-wiki-provider-manifest",
+        "version": 1,
+        "source": "notes",
+        "generated_at": 1760000000,
+        "items": [
+          {
+            "source_key": "note",
+            "source_path": "note.md",
+            "wiki_path": "notes/note.md",
+            "source_revision": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "source_sha256": "not-a-sha256",
+            "frontmatter": {
+              "source_revision": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+            },
+            "claim": { "source_path": "note.md" }
+          }
+        ]
+      }
+    },
+    {
+      "name": "null sanitized byte digest is invalid",
+      "valid": false,
+      "manifest": {
+        "contract": "karpathy-wiki-provider-manifest",
+        "version": 1,
+        "source": "notes",
+        "generated_at": 1760000000,
+        "items": [
+          {
+            "source_key": "note",
+            "source_path": "note.md",
+            "wiki_path": "notes/note.md",
+            "source_revision": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "source_sha256": null,
+            "frontmatter": {
+              "source_revision": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+            },
+            "claim": { "source_path": "note.md" }
+          }
+        ]
+      }
+    },
+    {
       "name": "minimal valid manifest",
       "valid": true,
       "manifest": {
@@ -41,6 +87,7 @@
             "source_path": "0000-0999/document-42.md",
             "wiki_path": "0000-0999/paperless-42.md",
             "source_revision": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "source_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
             "frontmatter": {
               "paperless_id": 42,
               "source_revision": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"

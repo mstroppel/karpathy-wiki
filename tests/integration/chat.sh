@@ -44,6 +44,17 @@ docker run --rm --network none --user 0:0 --entrypoint /bin/sh \
   --mount "type=volume,src=$home,dst=/settings" \
   "$OPENCODE_SMOKE_IMAGE" -c 'chown 1000:1000 /settings'
 
+# Synthetic, distinct run reports and an unrelated wiki page catch wrong-file delivery.
+docker run --rm --network none --user 1000:1000 --entrypoint /bin/sh \
+  --mount "type=volume,src=$data,dst=/knowledge" \
+  "$OPENCODE_SMOKE_IMAGE" -c '
+    mkdir -p /knowledge/incoming/ingest-journal/runs/run-smoke-a /knowledge/incoming/ingest-journal/runs/run-smoke-b
+    printf "# Synthetic report A\n" > /knowledge/incoming/ingest-journal/runs/run-smoke-a/report.md
+    printf "# Synthetic report B\n" > /knowledge/incoming/ingest-journal/runs/run-smoke-b/report.md
+    printf "# Unrelated wiki page\n" > /knowledge/wiki/unrelated.md
+    chmod 0600 /knowledge/incoming/ingest-journal/runs/run-smoke-*/report.md
+  '
+
 docker run -d --name "$backend" --network "$network" --network-alias opencode \
   --user 1000:1000 --cap-drop ALL --security-opt no-new-privileges:true \
   -e OPENCODE_PASSWORD -e OPENCODE_CONFIG=/etc/opencode/opencode.json \
@@ -52,6 +63,7 @@ docker run -d --name "$backend" --network "$network" --network-alias opencode \
   --mount "type=volume,src=$data,dst=/knowledge/wiki,volume-subpath=wiki" \
   --mount "type=volume,src=$data,dst=/knowledge/sources,volume-subpath=sources,readonly" \
   --mount "type=volume,src=$data,dst=/knowledge/incoming/answers,volume-subpath=incoming/answers" \
+  --mount "type=volume,src=$data,dst=/knowledge/incoming/ingest-journal,volume-subpath=incoming/ingest-journal" \
   --mount "type=volume,src=$data,dst=/home/opencode/.local/share/opencode,volume-subpath=opencode/data" \
   -w /knowledge/wiki "$OPENCODE_SMOKE_IMAGE" \
   serve --hostname 0.0.0.0 --port 4096 >/dev/null
@@ -64,6 +76,7 @@ docker run -d --name "$frontend" --network "$network" \
   -e OPENCHAMBER_OPENCODE_CWD=/knowledge/wiki \
   -e OPENCODE_PASSWORD -e OPENCHAMBER_UI_PASSWORD \
   --mount "type=volume,src=$data,dst=/knowledge/wiki,volume-subpath=wiki,readonly" \
+  --mount "type=volume,src=$data,dst=/knowledge/incoming/ingest-journal/runs,volume-subpath=incoming/ingest-journal/runs,readonly" \
   --mount "type=volume,src=$home,dst=/home/openchamber/.config/openchamber" \
   -w /knowledge/wiki "$OPENCHAMBER_SMOKE_IMAGE" >/dev/null
 
@@ -85,11 +98,15 @@ if docker exec "$frontend" sh -c 'touch /knowledge/wiki/.smoke-write' >/dev/null
   printf 'openchamber-smoke: frontend can write the wiki\n' >&2
   exit 1
 fi
+if docker exec "$frontend" sh -c 'echo overwrite > /knowledge/incoming/ingest-journal/runs/run-smoke-a/report.md' >/dev/null 2>&1; then
+  printf 'openchamber-smoke: frontend can write reports\n' >&2
+  exit 1
+fi
 if docker exec "$backend" sh -c 'touch /knowledge/sources/.smoke-write' >/dev/null 2>&1; then
   printf 'openchamber-smoke: backend can write sources\n' >&2
   exit 1
 fi
-docker exec "$frontend" sh -c 'test ! -e /knowledge/sources && test ! -e /knowledge/incoming && test ! -e /var/run/docker.sock && test ! -e /home/opencode'
+docker exec "$frontend" sh -c 'test ! -e /knowledge/sources && test ! -e /knowledge/incoming/answers && test ! -e /knowledge/incoming/audio && test ! -e /knowledge/incoming/ingest-journal/preparations && test ! -e /var/run/docker.sock && test ! -e /home/opencode'
 docker exec "$backend" sh -c 'test -w /knowledge/wiki/index.md'
 processes=$(docker top "$frontend" -eo pid,args)
 if printf '%s\n' "$processes" | grep -E '(^|[ /])opencode serve' >/dev/null; then

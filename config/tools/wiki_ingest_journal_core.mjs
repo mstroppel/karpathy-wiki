@@ -1,6 +1,15 @@
 import { randomBytes } from 'node:crypto'
-import { appendFile, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, stat } from 'node:fs/promises'
 import path from 'node:path'
+import { withIngestLock, writeIngestFile } from './wiki_ingest_storage.mjs'
+import {
+  PREPARATION_RE,
+  assertCleanIngestWiki,
+  assertIngestRolledBack,
+  confinedIngestPath,
+  pendingIngestPublications,
+  verifyIngestCommit,
+} from './wiki_ingest_transaction_core.mjs'
 
 import {
   RESULT_NAMES,
@@ -34,10 +43,10 @@ export const COMMIT_RE = /^[0-9a-f]{7,40}$/
 // content. Operators raise the budget for larger models; see
 // docs/ingest-reports.md.
 export const CHARS_PER_TOKEN = 4
-export const WORKER_FIXED_OVERHEAD_TOKENS = 4000
+export const WORKER_FIXED_OVERHEAD_TOKENS = 12000
 export const PER_SOURCE_OVERHEAD_TOKENS = 4000
 export const DEFAULT_BUDGET_TOKENS = 32000
-export const DEFAULT_MAX_SOURCES_PER_BATCH = 4
+export const DEFAULT_MAX_SOURCES_PER_BATCH = 1
 export const DEFAULT_MAX_BATCHES_PER_RUN = 12
 
 // One source of truth for budget field limits: core validation and the tool
@@ -200,13 +209,14 @@ function runFileView(run) {
     final_status: run.final_status,
     unfinished: run.unfinished,
     report: run.report,
+    recovery: run.recovery,
   }
 }
 
 async function writeRunFile(root, run) {
   const directory = runDirectory(root, run.run_id)
   await mkdir(directory, { recursive: true })
-  await writeFile(path.join(directory, RUN_FILENAME), `${JSON.stringify(run, null, 2)}\n`, 'utf8')
+  await writeIngestFile(path.join(directory, RUN_FILENAME), `${JSON.stringify(run, null, 2)}\n`)
   return run
 }
 
@@ -233,8 +243,8 @@ export function estimateTokensFromBytes(bytes) {
   return Math.ceil(bytes / CHARS_PER_TOKEN)
 }
 
-export function estimateSourceTokens({ sourceBytes = 0, wikiBytes = 0 }) {
-  return estimateTokensFromBytes(sourceBytes + wikiBytes) + PER_SOURCE_OVERHEAD_TOKENS
+export function estimateSourceTokens({ sourceBytes = 0, wikiBytes = 0, sharedBytes = 0 }) {
+  return estimateTokensFromBytes(sourceBytes + wikiBytes + sharedBytes) + PER_SOURCE_OVERHEAD_TOKENS
 }
 
 async function listRunIds(root) {
@@ -307,7 +317,7 @@ export async function loadRun({ root, runId }) {
   }
 }
 
-function normalizeRecord(record) {
+export function normalizeRecord(record) {
   if (record === null || typeof record !== 'object' || Array.isArray(record)) {
     throw new Error('record muss ein Objekt sein')
   }
@@ -322,6 +332,7 @@ function normalizeRecord(record) {
     source_revision: record.source_revision,
     wiki_path: checkAbsolutePath(record.wiki_path, 'wiki_path'),
     status,
+    preparation_id: record.preparation_id ?? null,
     commit: null,
     changed_pages: [],
     content: checkText(record.content, 'content', { required: false }) ?? null,
@@ -367,6 +378,9 @@ function normalizeRecord(record) {
       throw new Error('source_unmodified muss für status ingested bestätigt sein')
     }
     if (normalized.blocker !== null) throw new Error('blocker ist mit status ingested unvereinbar')
+    if (!PREPARATION_RE.test(normalized.preparation_id)) {
+      throw new Error('preparation_id fehlt oder ist ungültig für status ingested')
+    }
   } else {
     if (normalized.blocker === null) throw new Error('blocker fehlt für status blocked')
   }
@@ -375,7 +389,17 @@ function normalizeRecord(record) {
 
 // Append one per-source result record. Records are append-only; a later write
 // for the same source identity supersedes the earlier one for reporting.
-export async function writeRecord({ root, runId, record, now = Date.now() }) {
+export async function writeRecord({
+  root,
+  runId,
+  record,
+  now = Date.now(),
+  sourceRoot,
+  wikiRoot,
+  verify = verifyIngestCommit,
+}) {
+  const directory = runDirectory(root, runId)
+  await confinedIngestPath(root, path.relative(root, path.join(directory, RUN_FILENAME)))
   const run = checkRunContract(await readRunFile(root, runId), runId)
   if (run.state !== 'running') {
     throw new Error(
@@ -383,23 +407,61 @@ export async function writeRecord({ root, runId, record, now = Date.now() }) {
     )
   }
   const normalized = { ...normalizeRecord(record), recorded_at: nowIso(now) }
-  const line = JSON.stringify(normalized)
-  const bytes = Buffer.byteLength(line, 'utf8')
+  let line = JSON.stringify(normalized)
+  let bytes = Buffer.byteLength(line, 'utf8')
   if (bytes > RECORD_MAX_BYTES) {
     throw new Error(
       `Datensatz ist ${bytes} Bytes groß und überschreitet das Budget von ${RECORD_MAX_BYTES} Bytes; kürze die Detailtexte, statt Inhalte still zu verlieren`,
     )
   }
-  const directory = runDirectory(root, runId)
-  await mkdir(directory, { recursive: true })
-  await appendFile(path.join(directory, RECORDS_FILENAME), `${line}\n`, 'utf8')
-  const records = await readRecordLines(root, runId)
-  await writeRunFile(root, { ...runFileView(run), updated_at: nowIso(now) })
-  return {
-    record_index: records.length - 1,
-    bytes,
-    counts: recordCounts(effectiveRecords(records)),
+  if (normalized.status === 'ingested') {
+    const verified = await verify({
+      root,
+      record: normalized,
+      ...(sourceRoot === undefined ? {} : { sourceRoot }),
+      ...(wikiRoot === undefined ? {} : { wikiRoot }),
+    })
+    normalized.commit = verified.commit
+    normalized.source_unmodified = verified.source_unmodified
+    line = JSON.stringify(normalized)
+    bytes = Buffer.byteLength(line, 'utf8')
+    if (bytes > RECORD_MAX_BYTES) {
+      throw new Error(
+        `Verifizierter Datensatz überschreitet das Budget von ${RECORD_MAX_BYTES} Bytes`,
+      )
+    }
   }
+  const recordPath = await confinedIngestPath(
+    root,
+    path.relative(root, path.join(directory, RECORDS_FILENAME)),
+    true,
+  )
+  const lockPath = await confinedIngestPath(
+    root,
+    path.relative(root, path.join(directory, 'records.lock')),
+    true,
+  )
+  return withIngestLock(lockPath, async () => {
+    const latest = checkRunContract(await readRunFile(root, runId), runId)
+    if (latest.state !== 'running') throw new Error(`Lauf ${runId} ist bereits abgeschlossen`)
+    const records = await readRecordLines(root, runId)
+    // Preserve all earlier audit records, publishing only a complete new file.
+    const earlier = await readFile(recordPath, 'utf8').catch((error) => {
+      if (error.code === 'ENOENT') return ''
+      throw error
+    })
+    await writeIngestFile(
+      recordPath,
+      earlier + (earlier && !earlier.endsWith('\n') ? '\n' : '') + `${line}\n`,
+    )
+    records.push(normalized)
+    await writeRunFile(root, { ...runFileView(latest), updated_at: nowIso(now) })
+    return {
+      record_index: records.length - 1,
+      bytes,
+      counts: recordCounts(effectiveRecords(records)),
+    }
+  })
 }
 
 function compactRecord(record) {
@@ -414,6 +476,55 @@ function compactRecord(record) {
     ...(record.blocker === null ? {} : { blocker: record.blocker }),
     writes: record.writes,
   }
+}
+
+// Reconcile the planned assignment with publisher evidence, not a model's
+// interpretation of a generation-specific locator. This is read-only and
+// retains the publisher's actual path in both the result and the journal.
+export async function verifyBatchResult({
+  root,
+  runId,
+  source,
+  sourceRoot,
+  wikiRoot,
+  verify = verifyIngestCommit,
+}) {
+  if (!source || typeof source !== 'object' || Array.isArray(source))
+    throw new Error('source muss die geplante Quellenidentität enthalten')
+  const adapter = checkText(source.adapter, 'adapter')
+  if (!ADAPTER_RE.test(adapter)) throw new Error('adapter ist ungültig')
+  const sourceKey = checkText(source.source_key, 'source_key')
+  if (!REVISION_RE.test(source.source_revision))
+    throw new Error('source_revision ist kein SHA-256-Hash')
+  const plannedPath = checkAbsolutePath(source.source_path, 'source_path')
+  const wikiPath = checkAbsolutePath(source.wiki_path, 'wiki_path')
+  const { effective } = await loadRun({ root, runId })
+  const key = recordKey({ adapter, source_key: sourceKey, source_revision: source.source_revision })
+  const record = effective.find((item) => recordKey(item) === key)
+  if (!record) throw new Error('Kein Ergebnisdatensatz für die geplante Quellenidentität')
+  if (record.status !== 'ingested') throw new Error('Quelle blockiert')
+  if (record.wiki_path !== wikiPath) throw new Error('Datensatz wiki_path weicht vom Auftrag ab')
+  const relocated = record.source_path !== plannedPath
+  if (relocated && adapter !== 'paperless')
+    throw new Error('Datensatz source_path weicht vom Auftrag ab')
+  // The receipt pins actual manifest path and bytes. Key/revision agreement
+  // alone never authorizes a relocation or an unverified success record.
+  const verified = await verify({
+    root,
+    record,
+    ...(sourceRoot === undefined ? {} : { sourceRoot }),
+    ...(wikiRoot === undefined ? {} : { wikiRoot }),
+  })
+  const result = {
+    ...compactRecord(record),
+    commit: verified.commit,
+    verified: true,
+    planned_source_path: plannedPath,
+    relocated,
+  }
+  if (Buffer.byteLength(JSON.stringify(result), 'utf8') > JOURNAL_OUTPUT_BUDGET_BYTES)
+    throw new Error('Batch-Ergebnis überschreitet das Ausgabebudget')
+  return result
 }
 
 // Bounded listing of the effective records, shrunk to the response budget so
@@ -607,8 +718,8 @@ function normalizeUnfinished(unfinished, blockedRecords) {
   return entries
 }
 
-// Assemble the complete report from the durable records. This is the only
-// place the per-source detail blocks live: sessions never have to carry them.
+// Assemble the authoritative private report from durable records. The orchestrator
+// links it after ingestion (or at rollover); bounded reads are available on request.
 export async function assembleReport({
   root,
   runId,
@@ -627,8 +738,9 @@ export async function assembleReport({
     unfinished === undefined ? run.unfinished : unfinished,
     blockedRecords,
   )
+  const state = completed ? 'completed' : run.state
   const text = renderReport({
-    run,
+    run: { ...run, state },
     records: run.effective,
     counts: run.counts,
     finalStatus: normalizedStatus,
@@ -637,10 +749,10 @@ export async function assembleReport({
   })
   const directory = runDirectory(root, runId)
   await mkdir(directory, { recursive: true })
-  await writeFile(path.join(directory, REPORT_FILENAME), text, 'utf8')
+  await writeIngestFile(path.join(directory, REPORT_FILENAME), text)
   const update = runFileView({
     ...run,
-    state: completed ? 'completed' : run.state,
+    state,
     updated_at: nowIso(stamp),
     final_status: normalizedStatus,
     unfinished: normalizedUnfinished,
@@ -691,6 +803,47 @@ async function fileSize(filePath) {
   }
 }
 
+// A skip is an explicit recovery decision, not a successful ingestion. It only
+// acknowledges this exact record: a later failure stops planning again.
+export async function skipBlockedSource({
+  root,
+  runId,
+  recordIndex,
+  confirmed,
+  wikiRoot = '/knowledge/wiki',
+  now = Date.now(),
+}) {
+  if (confirmed !== true) throw new Error('Auslassen benötigt ausdrückliche Bestätigung')
+  checkInteger(recordIndex, 'record_index', 0, Number.MAX_SAFE_INTEGER)
+  const run = await loadRun({ root, runId })
+  if (run.state !== 'running') throw new Error('Lauf ist bereits abgeschlossen')
+  const record = run.effective.find(
+    (entry) => entry.record_index === recordIndex && entry.status === 'blocked',
+  )
+  if (!record) throw new Error('Kein aktueller blockierter Datensatz an record_index')
+  await assertCleanIngestWiki(wikiRoot)
+  if (record.preparation_id) {
+    await assertIngestRolledBack({ root, wikiRoot, preparationId: record.preparation_id, record })
+  }
+  const skipped = [...new Set([...(run.recovery?.skipped_records ?? []), recordIndex])]
+  await writeRunFile(
+    root,
+    runFileView({
+      ...run,
+      updated_at: nowIso(now),
+      recovery: { skipped_records: skipped },
+    }),
+  )
+  return {
+    run_id: runId,
+    skipped_record: recordIndex,
+    status: 'blocked',
+    recovery_required: run.effective.some(
+      (entry) => entry.status === 'blocked' && !skipped.includes(entry.record_index),
+    ),
+  }
+}
+
 // Plan the next bounded batch: a fresh status scan every call, journal-aware
 // exclusions, and a volume budget instead of a bare source count. One call
 // returns one worker assignment; the batch counter drives run rollover.
@@ -708,9 +861,12 @@ export async function planNextBatch({
   if (run.state !== 'running') throw new Error(`Lauf ${runId} ist bereits abgeschlossen`)
   const budget = {
     budget_tokens: checkBudgetField(budgetTokens ?? run.budget.budget_tokens, 'budget_tokens'),
-    max_sources_per_batch: checkBudgetField(
-      maxSourcesPerBatch ?? run.budget.max_sources_per_batch,
-      'max_sources_per_batch',
+    max_sources_per_batch: Math.min(
+      1,
+      checkBudgetField(
+        maxSourcesPerBatch ?? run.budget.max_sources_per_batch,
+        'max_sources_per_batch',
+      ),
     ),
     fixed_overhead_tokens: run.budget.worker_fixed_overhead_tokens,
     per_source_overhead_tokens: run.budget.per_source_overhead_tokens,
@@ -740,9 +896,44 @@ export async function planNextBatch({
     }
   }
 
+  // A committed source may already be current while its journal acknowledgement
+  // is missing. Reconcile persisted publication intent before planning new work.
+  const pendingPublications =
+    wikiSourceRoot === undefined
+      ? []
+      : await pendingIngestPublications({ root, wikiRoot: path.dirname(wikiSourceRoot), runId })
+  if (pendingPublications.length) {
+    return {
+      ...base,
+      batch: [pendingPublications[0]],
+      remaining: base.pending_total,
+      recovery: true,
+      done: false,
+    }
+  }
+
+  const unacknowledged = run.effective.filter(
+    (record) =>
+      record.status === 'blocked' && !run.recovery?.skipped_records.includes(record.record_index),
+  )
+  if (unacknowledged.length) {
+    return {
+      ...base,
+      batch: [],
+      remaining: base.pending_total,
+      blocked: true,
+      recovery_required: true,
+      reasons: [
+        'Quellenfehler: Reparatur oder bestätigtes Auslassen erforderlich; keine weiteren Batches',
+      ],
+    }
+  }
+
   const excluded = new Set()
+  const skippedSources = new Set()
   for (const record of run.effective) {
-    if (record.status === 'blocked') excluded.add(recordKey(record))
+    if (record.status === 'blocked')
+      skippedSources.add(JSON.stringify([record.adapter, record.source_key]))
     if (record.status === 'ingested') {
       // A record whose source is still pending describes a commit that did not
       // stick: reprocess instead of trusting a stale record.
@@ -757,7 +948,9 @@ export async function planNextBatch({
   }
 
   const open = pendingEntries(status).filter(
-    (item) => !excluded.has(recordKey({ ...item.entry, adapter: item.adapter })),
+    (item) =>
+      !skippedSources.has(JSON.stringify([item.adapter, item.entry.source_key])) &&
+      !excluded.has(recordKey({ ...item.entry, adapter: item.adapter })),
   )
   if (open.length === 0) {
     return {
@@ -780,6 +973,11 @@ export async function planNextBatch({
 
   const batch = []
   let estimateTokens = budget.fixed_overhead_tokens
+  const wikiRoot = wikiSourceRoot === undefined ? null : path.dirname(wikiSourceRoot)
+  const sharedPageBytes = wikiRoot === null ? 0 : await fileSize(path.join(wikiRoot, 'overview.md'))
+  // Only targeted overview slices reach the model; index/log are generated.
+  // Expose the full measured size separately rather than pretending it is zero.
+  const sharedRetrievalBytes = Math.min(sharedPageBytes, 8192)
   let budgetSpent = false
   let remaining = 0
   for (const { adapter, state, entry } of open) {
@@ -789,12 +987,22 @@ export async function planNextBatch({
     }
     const sourceBytes = await fileSize(entry.source_path)
     const wikiBytes = await fileSize(entry.wiki_path)
-    const sourceTokens = estimateSourceTokens({ sourceBytes, wikiBytes })
+    const sourceTokens = estimateSourceTokens({
+      sourceBytes,
+      wikiBytes,
+      sharedBytes: sharedRetrievalBytes,
+    })
     const candidate = {
       ...entry,
       adapter,
       state,
-      estimate: { source_bytes: sourceBytes, wiki_bytes: wikiBytes, tokens: sourceTokens },
+      estimate: {
+        source_bytes: sourceBytes,
+        wiki_bytes: wikiBytes,
+        shared_page_bytes: sharedPageBytes,
+        shared_retrieval_bytes: sharedRetrievalBytes,
+        tokens: sourceTokens,
+      },
     }
     if (batch.length === 0 && estimateTokens + sourceTokens > budget.budget_tokens) {
       // A single oversized source is never silently dropped: it runs alone and

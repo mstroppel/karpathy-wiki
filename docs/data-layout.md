@@ -112,6 +112,32 @@ wiki publication.
 Bulk wiki ingestion records its per-source results in
 `incoming/ingest-journal/runs/<run-id>/`: append-only result records, the run
 state with its working-context budget, and the assembled per-source report.
+`incoming/ingest-journal/preparations/<preparation-id>.json` holds private
+transaction receipts (`0600`): selected source identity, a separate source-byte
+SHA-256, baseline commit and file hashes, and the exact validated changed-page hashes. Include these receipts
+in journal backups so pending commits remain verifiable.
+Receipts also track transaction-owned page hashes, retained-backup hashes, pending
+publication intent and resumable rollback progress (`rollback_started`,
+`rollback_pending`, `rolled_back`). Run metadata records confirmed skipped failure
+indices; the original blocked result records remain in the journal and report.
+Each preparation now also owns `preparations/<preparation-id>/wiki/`, an isolated
+Git clone containing wiki history and proposed changes, and `/journal/`, its
+draft transaction evidence. Receipts retain section references, reading/proposal
+budgets, publication phase, intended commit/report payload and owned index-lock
+identity. Include the entire preparation directory in private backups; clones
+cost disk proportional to history and processed sources. They are not served.
+The model-facing publisher uses a stable `wiki/.git/wiki-ingest-publication.lock`
+inode with a kernel lock released on process exit, rather than stale-file removal.
+Run audit writes similarly use `runs/<run-id>/records.lock`; complete audit,
+run and report files replace private files atomically. An unverifiable
+`wiki/.git/index.lock` requires confirmed maintenance; only a proven owned lock
+can be completed during resume. There is no automatic clone/backup cleanup.
+Wiki pages displaced during publication or confirmed rollback retain their original inode at
+`wiki/.git/ingest-backup-<random-id>/page`, inside an exclusive `0700` directory.
+These private recovery files are outside Git's content tree and public wiki pages;
+include `.git` in wiki backups. They are never automatically removed, since an
+external writer may still hold a descriptor to the displaced inode. Inspect and
+clean them only during explicitly confirmed maintenance with writers stopped.
 These records hold source-derived summaries of processed sources, so they live
 in the private `incoming/` area alongside the answer drafts instead of the
 content-free state store. The directory is private to OpenCode and its operator

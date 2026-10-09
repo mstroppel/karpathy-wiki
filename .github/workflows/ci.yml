@@ -33,7 +33,7 @@ jobs:
           python -m pip install -r requirements-dev.txt
           python -m pip install --no-deps -e ./ingest/core -e ./ingest/webdav -e ./ingest/paperless -e ./ingest/audio -e ./ingest/speech
           scripts/test-python.sh
-          node --test tests/test_wiki_ingest_status.mjs tests/test_contract_fixtures.mjs tests/test_wiki_ingest_journal.mjs tests/test_ingest_context_budget.mjs tests/test_answer_intake.mjs
+          node --test tests/test_wiki_ingest_status.mjs tests/test_contract_fixtures.mjs tests/test_wiki_ingest_journal.mjs tests/test_ingest_context_budget.mjs tests/test_wiki_ingest_transaction.mjs tests/test_answer_intake.mjs
           node --test tests/test_chat_bootstrap.mjs
       - uses: actions/upload-artifact@v7
         with:
