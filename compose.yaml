@@ -244,14 +244,24 @@ services:
       WIKI_INGEST_BATCH_BUDGET_TOKENS: ${WIKI_INGEST_BATCH_BUDGET_TOKENS:-32000}
       WIKI_INGEST_BATCH_MAX_SOURCES: ${WIKI_INGEST_BATCH_MAX_SOURCES:-1}
       WIKI_INGEST_RUN_MAX_BATCHES: ${WIKI_INGEST_RUN_MAX_BATCHES:-12}
+      WIKI_RUNTIME_READ_ONLY: ${WIKI_RUNTIME_READ_ONLY:-false}
       GIT_CONFIG_COUNT: "1"
       GIT_CONFIG_KEY_0: core.hooksPath
       GIT_CONFIG_VALUE_0: /dev/null
     volumes:
       - ${DATA_ROOT:-./data}/sources:/knowledge/sources:ro
-      - ${DATA_ROOT:-./data}/incoming/answers:/knowledge/incoming/answers:rw
-      - ${DATA_ROOT:-./data}/incoming/ingest-journal:/knowledge/incoming/ingest-journal:rw
-      - ${DATA_ROOT:-./data}/wiki:/knowledge/wiki:rw
+      - type: bind
+        source: ${DATA_ROOT:-./data}/incoming/answers
+        target: /knowledge/incoming/answers
+        read_only: ${WIKI_RUNTIME_READ_ONLY:-false}
+      - type: bind
+        source: ${DATA_ROOT:-./data}/incoming/ingest-journal
+        target: /knowledge/incoming/ingest-journal
+        read_only: ${WIKI_RUNTIME_READ_ONLY:-false}
+      - type: bind
+        source: ${DATA_ROOT:-./data}/wiki
+        target: /knowledge/wiki
+        read_only: ${WIKI_RUNTIME_READ_ONLY:-false}
       - ${DATA_ROOT:-./data}/opencode/config:/home/opencode/.config/opencode:rw
       - ${DATA_ROOT:-./data}/opencode/data:/home/opencode/.local/share/opencode:rw
       - ${DATA_ROOT:-./data}/opencode/state:/home/opencode/.local/state:rw
@@ -266,6 +276,10 @@ services:
       start_period: 1m
     extra_hosts:
       - "${PAPERLESS_BLOCKED_HOSTNAME:-paperless.example.invalid}:127.0.0.1"
+    read_only: ${WIKI_RUNTIME_READ_ONLY:-false}
+    tmpfs:
+      - /tmp:exec
+      - /home/opencode/.cache:uid=${PUID:-1000},gid=${PGID:-1000},mode=0700
     cap_drop:
       - ALL
     security_opt:

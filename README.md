@@ -115,6 +115,12 @@ uncommitted drafts before skipping it and continuing with other sources.
 Successful source commits remain intact. See [stabilization acceptance](docs/ingest-stabilization-acceptance.md)
 for the opt-in synthetic real-model/restart test; no production data is mounted.
 
+An optional [kernel-enforced reader mode](docs/runtime-write-isolation.md) prevents
+OpenCode from changing wiki, sources, ingest-journal and answer-inbox data even
+through direct backend APIs. It disables all wiki-authoring commands; a separate
+trusted publisher and automatic ingest are not implemented yet. Manual writing
+remains the default.
+
 ## Analyses
 
 Scientific analyses (`/analysis`) can be saved from the same conversation with
@@ -209,6 +215,7 @@ node --test tests/test_chat_bootstrap.mjs
 docker build --target opencode -t kw-opencode:integration -f opencode/Dockerfile .
 docker build --target openchamber -t kw-openchamber:integration -f opencode/Dockerfile .
 sh tests/integration/chat.sh  # authentication, discovery, native SSE and restart persistence
+sh tests/integration/runtime-write-isolation.sh  # pinned-runtime proof of the reader boundary
 tests/integration/run.sh  # requires Docker; disposable Compose stack test
 ```
 

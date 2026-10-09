@@ -417,7 +417,12 @@ class CommandAndAgentTests(unittest.TestCase):
 class DeploymentTests(unittest.TestCase):
     def test_compose_mounts_the_private_journal_and_passes_the_budget(self):
         text = COMPOSE.read_text(encoding="utf-8")
-        self.assertIn("incoming/ingest-journal:/knowledge/incoming/ingest-journal:rw", text)
+        self.assertIn(
+            "source: ${DATA_ROOT:-./data}/incoming/ingest-journal\n"
+            "        target: /knowledge/incoming/ingest-journal\n"
+            "        read_only: ${WIKI_RUNTIME_READ_ONLY:-false}",
+            text,
+        )
         self.assertNotIn("state:/knowledge/state:rw", text)
         self.assertNotIn("ingest-journal:/knowledge/state", text)
         for variable in (
