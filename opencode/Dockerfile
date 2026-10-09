@@ -45,6 +45,7 @@ COPY opencode/render_analysis.py /usr/local/bin/render-analysis
 COPY config/plugins /etc/opencode/plugins
 COPY config/tools /etc/opencode/tools
 COPY opencode/entrypoint.sh /usr/local/bin/karpathy-wiki-entrypoint
+COPY opencode/runtime_write_isolation.py /usr/local/lib/karpathy-wiki/runtime_write_isolation.py
 RUN chmod 0755 /etc/opencode/init.sh /usr/local/bin/karpathy-wiki-entrypoint /usr/local/bin/render-analysis
 
 ENV HOME=/home/opencode

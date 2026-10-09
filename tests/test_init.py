@@ -1,7 +1,9 @@
 import json
 import os
+import shlex
 import stat
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -20,7 +22,16 @@ class EntrypointTests(unittest.TestCase):
             opencode = bin_dir / "opencode"
             opencode.write_text("#!/bin/sh\nexit 0\n")
             opencode.chmod(0o755)
+            python = bin_dir / "python3"
+            python.write_text(
+                "#!/bin/sh\n"
+                'test "$1" = /usr/local/lib/karpathy-wiki/runtime_write_isolation.py || exit 2\n'
+                f"exec {shlex.quote(sys.executable)} "
+                f"{shlex.quote(str(ROOT / 'opencode/runtime_write_isolation.py'))}\n"
+            )
+            python.chmod(0o755)
             env = {**os.environ, "HOME": str(root), "PATH": f"{bin_dir}:{os.environ['PATH']}"}
+            env["WIKI_RUNTIME_READ_ONLY"] = "false"
             instructions = root / ".config" / "opencode" / "AGENTS.md"
 
             subprocess.run(["sh", str(ENTRYPOINT), "--version"], env=env, check=True)
@@ -31,6 +42,21 @@ class EntrypointTests(unittest.TestCase):
             instructions.write_text("custom instructions\n")
             subprocess.run(["sh", str(ENTRYPOINT), "--version"], env=env, check=True)
             self.assertEqual(instructions.read_text(), "custom instructions\n")
+
+    def test_failed_isolation_check_prevents_setup_and_server_start(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            for name, body in (("python3", "exit 1"), ("opencode", 'touch "$HOME/server-started"')):
+                command = bin_dir / name
+                command.write_text(f"#!/bin/sh\n{body}\n")
+                command.chmod(0o755)
+            env = {**os.environ, "HOME": str(root), "PATH": f"{bin_dir}:{os.environ['PATH']}"}
+            result = subprocess.run(["sh", str(ENTRYPOINT)], env=env, check=False)
+            self.assertEqual(result.returncode, 1)
+            self.assertFalse((root / "server-started").exists())
+            self.assertFalse((root / ".config").exists())
 
 
 class InitTests(unittest.TestCase):

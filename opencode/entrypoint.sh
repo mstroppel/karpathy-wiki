@@ -1,6 +1,8 @@
 #!/bin/sh
 set -eu
 
+python3 /usr/local/lib/karpathy-wiki/runtime_write_isolation.py
+
 mkdir -p "$HOME/.config/opencode/plugins"
 if [ ! -e "$HOME/.config/opencode/AGENTS.md" ] && [ ! -L "$HOME/.config/opencode/AGENTS.md" ]; then
   ln -s /etc/opencode/routing.md "$HOME/.config/opencode/AGENTS.md"

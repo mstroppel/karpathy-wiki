@@ -91,6 +91,12 @@ parsing. If no record is listed, narrow the query to one adapter.
 
 ## Ingestion Runs
 
+`WIKI_RUNTIME_READ_ONLY` defaults to `false` (manual authoring). Set it to `true`
+for the [kernel-enforced reader topology](runtime-write-isolation.md); this
+disables all wiki/journal/answer writes and is not an auto-ingest switch.
+Recreate OpenCode to apply mount changes. A separate trusted publisher is not
+implemented yet.
+
 `/ingest-new` orchestrates bulk wiki ingestion in bounded batches. The batch
 planner sizes each worker session by an estimated token budget, not by a bare
 source count, and stores per-source results in the private journal mounted at

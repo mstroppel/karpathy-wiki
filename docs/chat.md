@@ -48,6 +48,11 @@ OpenCode. The `answers` profile is still required to publish confirmed Q&A.
 Use one active wiki-writing conversation at a time. Do not enable schedules or
 concurrent writer sessions: this stack does not add writer serialization.
 
+The optional [reader-only backend mode](runtime-write-isolation.md) additionally
+prevents all backend wiki, source, journal and answer-inbox writes at the kernel
+boundary. Writing commands above are unavailable in that mode; it is a foundation
+for publisher isolation, not automatic ingestion or a general API sandbox.
+
 The UI wiki mount is read-only. Ingest run records and reports are also mounted
 read-only at `/knowledge/incoming/ingest-journal/runs`, using the same absolute
 paths as OpenCode. Local report links open through OpenChamber's authenticated

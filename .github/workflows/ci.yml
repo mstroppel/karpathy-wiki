@@ -75,6 +75,8 @@ jobs:
         run: |
           docker build --target openchamber -t kw-openchamber:integration -f opencode/Dockerfile .
           sh tests/integration/chat.sh
+      - name: Prove kernel-enforced runtime write isolation
+        run: sh tests/integration/runtime-write-isolation.sh
 
   images:
     name: Images
