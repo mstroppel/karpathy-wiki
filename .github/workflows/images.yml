@@ -21,8 +21,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Configure Docker Hub mirror for daemon builds and builder bootstrap
+        run: sh scripts/setup-ci-docker.sh
       - uses: docker/setup-qemu-action@v4
       - uses: docker/setup-buildx-action@v4
+        with:
+          buildkitd-config: .github/docker/buildkitd.toml
       - name: Validate primary chat before publication
         run: |
           docker build --target opencode -t kw-opencode:integration -f opencode/Dockerfile .
