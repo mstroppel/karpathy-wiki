@@ -285,6 +285,36 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  publisher:
+    image: ghcr.io/mstroppel/karpathy-wiki-publisher:${KARPATHY_WIKI_VERSION:-latest}
+    profiles: ["publisher"]
+    user: "${PUID:-1000}:${PGID:-1000}"
+    init: true
+    restart: unless-stopped
+    network_mode: none
+    environment:
+      WIKI_RUNTIME_READ_ONLY: ${WIKI_RUNTIME_READ_ONLY:-false}
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: core.hooksPath
+      GIT_CONFIG_VALUE_0: /dev/null
+      GIT_CONFIG_NOSYSTEM: "1"
+      GIT_CONFIG_GLOBAL: /dev/null
+    volumes:
+      - ${DATA_ROOT:-./data}/sources:/knowledge/sources:ro
+      - ${DATA_ROOT:-./data}/wiki:/knowledge/wiki:rw
+      - ${DATA_ROOT:-./data}/incoming/ingest-journal:/knowledge/incoming/ingest-journal:rw
+      - ${DATA_ROOT:-./data}/publisher:/knowledge/publisher:rw
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    read_only: true
+    tmpfs:
+      - /tmp:uid=${PUID:-1000},gid=${PGID:-1000},mode=0700,noexec
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
   openchamber:
     image: ghcr.io/mstroppel/karpathy-wiki-openchamber:${KARPATHY_WIKI_VERSION:-latest}
     user: "${PUID:-1000}:${PGID:-1000}"

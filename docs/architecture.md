@@ -34,6 +34,11 @@ settings directory, a read-only wiki mount and read-only ingest run records and
 reports. Private transaction drafts remain backend-only. See [chat deployment](chat.md).
 
 OpenCode reads source directories and writes generated Markdown to `wiki/`.
+In opt-in reader mode it cannot write protected data. The optional
+[trusted publisher](trusted-publisher.md) is a separate, networkless,
+operator-exec-only writer using the same transaction/journal cores. Its private
+queue/ownership is not mounted into OpenCode; chat/automatic routing is pending.
+This boundary is distinct from source-provider SQLite leases.
 SilverBullet serves the wiki space from a read-only mount. Services do not publish host ports; the
 reverse proxy reaches them through `WEBPROXY_NETWORK` using these aliases:
 

@@ -23,7 +23,9 @@ layout, make a backup you can restore.
    ```
 
    Keep the archive outside `DATA_ROOT`. Do not back up just `wiki/*.md` or
-   omit `state/ingest.sqlite3`.
+    omit `state/ingest.sqlite3`. Include the entire private ingest-journal and
+    `publisher/` queue, ownership and replay evidence; do not reset ownership
+    bookkeeping to unblock a restored publisher.
 
 3. Separately save the installation's `.env`, `karpathy-wiki.sh`, any
    `compose.override.yaml`, and every secret file referenced by `.env`

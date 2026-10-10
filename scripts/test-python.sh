@@ -7,7 +7,7 @@ root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$root"
 export COVERAGE_FILE="$root/.coverage"
 python3 -m coverage erase
-sources=$root/ingest/core/src,$root/ingest/webdav/src,$root/ingest/audio/src,$root/ingest/speech/src,$root/ingest/paperless/src,$root/opencode
+sources=$root/ingest/core/src,$root/ingest/webdav/src,$root/ingest/audio/src,$root/ingest/speech/src,$root/ingest/paperless/src,$root/opencode,$root/publisher
 python3 -m coverage run --branch --source="$sources" \
   -m unittest discover -s tests -v
 (cd ingest && python3 -m coverage run --append --branch --source="$sources" \

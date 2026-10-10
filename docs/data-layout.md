@@ -28,6 +28,7 @@ ${DATA_ROOT}/
 │   ├── audio/              # Content-free audio error reports
 │   └── paperless/          # Content-free Paperless error reports
 ├── openchamber/             # Private chat UI settings (not backend sessions)
+├── publisher/               # Operator-only queue, ownership, intents and replay evidence
 └── opencode/
     ├── config/             # OpenCode configuration and generated policy
     ├── data/               # Credentials, sessions, messages, and logs
@@ -104,7 +105,8 @@ any). A publication is counted as completed only when its Git commit is
 recorded. Publisher jobs have a database-enforced exclusive lease: two
 distinct publish jobs cannot hold live leases simultaneously, and an expired
 holder cannot renew or complete its job. The serialized publisher that will
-consume these leases is still planned; these metrics do not imply automatic
+consume these leases is still planned; the operator-only trusted publisher uses
+separate non-expiring admission state. These metrics do not imply automatic
 wiki publication.
 
 ## Wiki ingestion journal
