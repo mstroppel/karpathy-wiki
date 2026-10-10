@@ -79,6 +79,8 @@ jobs:
         run: |
           docker build --target openchamber -t kw-openchamber:integration -f opencode/Dockerfile .
           sh tests/integration/chat.sh
+      - name: Reproduce auto-ingest writer-gate blocker (not release approval)
+        run: sh tests/integration/auto-ingest-runtime.sh
       - name: Prove kernel-enforced runtime write isolation
         run: sh tests/integration/runtime-write-isolation.sh
 
