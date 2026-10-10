@@ -33,6 +33,10 @@ export function manualIngest({ configuration, runtime }) {
         state?.version !== 1 ||
         !['idle', 'running', 'completed', 'operator_action_required'].includes(state.status) ||
         !Array.isArray(state.results) ||
+        !Array.isArray(state.selected) ||
+        !Number.isInteger(state.completed_sources) ||
+        state.completed_sources < 0 ||
+        state.completed_sources > state.selected.length ||
         (state.status !== 'idle' &&
           (!SESSION.test(state.session_id ?? '') || !REQUEST.test(state.request_id ?? '')))
       )
@@ -62,11 +66,25 @@ export function manualIngest({ configuration, runtime }) {
           if (error.code !== 'ENOENT') throw error
         }
         await writeIngestFile(marker, '{"version":1}\n')
-        await save({ version: 1, status: 'idle', results: [], active: null, blocker: null })
+        await save({
+          version: 1,
+          status: 'idle',
+          results: [],
+          selected: [],
+          completed_sources: 0,
+          active: null,
+          blocker: null,
+        })
       }
-      if (state && state.status === 'running') {
+      if (
+        state &&
+        (state.status === 'running' ||
+          (state.status === 'completed' && state.status_delivery_failed))
+      ) {
         state.status = 'operator_action_required'
-        state.blocker = 'interrupted_controller'
+        state.blocker = state.status_delivery_failed
+          ? 'interrupted_summary_admission'
+          : 'interrupted_controller'
         await save(state)
       }
     })
@@ -95,6 +113,8 @@ export function manualIngest({ configuration, runtime }) {
         ...input,
         status: 'running',
         results: [],
+        selected: [],
+        completed_sources: 0,
         active: null,
         blocker: null,
       }
@@ -156,6 +176,7 @@ export function manualIngest({ configuration, runtime }) {
     for (let index = 0; index < state.selected.length; index++) {
       const source = state.selected[index]
       const request = `req-${randomBytes(16).toString('hex')}`
+      state.selected[index] = { ...source, request_id: request }
       state.active = { source, intent: 'enqueue' }
       await save(state)
       const job = await control({
@@ -165,11 +186,14 @@ export function manualIngest({ configuration, runtime }) {
         source,
       })
       state.active = { ...state.active, job_id: job.job_id, intent: 'activate' }
+      state.selected[index].job_id = job.job_id
       await save(state)
       const owner = await control({ operation: 'activate' })
       if (owner.job_id !== job.job_id) throw new Error('foreign_owner')
       state.active.preparation_id = owner.preparation_id
       state.active.run_id = owner.run_id
+      state.selected[index].preparation_id = owner.preparation_id
+      state.selected[index].run_id = owner.run_id
       state.active.intent = 'create_worker'
       await save(state)
       const worker = await runtime.create(state.session_id, session.model)
@@ -217,6 +241,7 @@ export function manualIngest({ configuration, runtime }) {
           const run = await loadRun({ root: configuration.root, runId: result.run_id })
           state.results.push(sourceResult(source, run))
           state.active = null
+          state.completed_sources = index + 1
           await save(state)
           published = true
           break
@@ -229,6 +254,7 @@ export function manualIngest({ configuration, runtime }) {
     if (final.summary.invalid || final.summary.conflict) throw new Error('invalid_source_state')
     state.status = 'completed'
     state.final_status = final.summary
+    state.status_delivery_failed = true
     await save(state)
     await deliverSummary(state)
   }
@@ -262,7 +288,11 @@ export function manualIngest({ configuration, runtime }) {
   function sourceResult(source, run) {
     const record = run.effective[0]
     return {
-      source,
+      source: {
+        adapter: source.adapter,
+        source_key: source.source_key,
+        source_revision: source.source_revision,
+      },
       preparation_id: record.preparation_id,
       source_path: record.source_path,
       commit: record.commit,
@@ -292,6 +322,20 @@ export function manualIngest({ configuration, runtime }) {
         throw new Error('admission_uncertain')
       const runIds = new Set(state.results.map((result) => result.run_id))
       if (state.active) runIds.add(state.active.run_id)
+      const admitted = state.selected.filter((source) => source.request_id)
+      if (admitted.some((source) => !source.run_id || !source.preparation_id))
+        throw new Error('admission_uncertain')
+      if (
+        state.selected
+          .slice(0, state.completed_sources)
+          .some((source) => !source.run_id || !source.preparation_id)
+      )
+        throw new Error('incomplete_selection_evidence')
+      if (new Set(admitted.map((source) => source.run_id)).size !== admitted.length)
+        throw new Error('inconsistent_selection_evidence')
+      for (const source of admitted) runIds.add(source.run_id)
+      if ([...runIds].some((id) => !admitted.some((source) => source.run_id === id)))
+        throw new Error('unattributed_journal_result')
       const journalIds = await readdir(path.join(configuration.root, 'runs')).catch((error) => {
         if (error.code === 'ENOENT' && runIds.size === 0) return []
         throw error
@@ -315,10 +359,9 @@ export function manualIngest({ configuration, runtime }) {
           ...configuration,
           preparationId: record.preparation_id,
         })
-        const source =
-          runId === state.active?.run_id
-            ? state.active.source
-            : state.results.find((result) => result.run_id === runId).source
+        const source = admitted.find((candidate) => candidate.run_id === runId)
+        if (source.preparation_id !== record.preparation_id)
+          throw new Error('conflicting_preparation_evidence')
         if (
           ['adapter', 'source_key', 'source_revision'].some(
             (field) => source[field] !== record[field] || source[field] !== receipt.source[field],
@@ -331,6 +374,11 @@ export function manualIngest({ configuration, runtime }) {
           await verifyIngestCommit({ ...configuration, record })
         } else if (receipt.publication.phase !== 'draft' || receipt.publication.stage_pending)
           throw new Error('uncertain_draft')
+        if (
+          state.selected.indexOf(source) < state.completed_sources &&
+          record.status !== 'ingested'
+        )
+          throw new Error('inconsistent_completed_source')
         const expected = renderReport({
           run,
           records: run.effective,
@@ -356,6 +404,7 @@ export function manualIngest({ configuration, runtime }) {
       state.report_failure = false
       state.final_status = status.summary
       state.resume_verified = true
+      state.status_delivery_failed = true
       await save(state)
       try {
         await deliverSummary(state)

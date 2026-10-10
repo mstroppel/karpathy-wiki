@@ -115,6 +115,8 @@ test('restart keeps a persistent stop and never redispatches', () =>
         session_id: 'ses_main',
         active: null,
         results: [],
+        selected: [],
+        completed_sources: 0,
       }),
     )
     const restarted = manualIngest({
@@ -273,6 +275,7 @@ test('lost summary acknowledgement survives restart; explicit resume delivers ve
     assert.equal(stopped.results.length, 1)
     const verifiedRecord = JSON.stringify(stopped.results[0].record)
     const snapshot = structuredClone(stopped)
+    snapshot.status = 'completed' // Crash while summary admission was in flight.
     snapshot.results[0].record.content = 'Synthetic unverified snapshot detail.'
     await writeFile(path.join(fixture.stateRoot, 'manual.json'), JSON.stringify(snapshot))
     const restarted = manualIngest({
@@ -280,6 +283,8 @@ test('lost summary acknowledgement survives restart; explicit resume delivers ve
       runtime,
     })
     await restarted.initialize()
+    assert.equal((await restarted.status()).status, 'operator_action_required')
+    assert.equal((await restarted.status()).blocker, 'interrupted_summary_admission')
     const reportFile = stopped.results[0].report_path
     const report = await readFile(reportFile, 'utf8')
     await writeFile(reportFile, 'Synthetic corrupt report.\n')
@@ -317,4 +322,28 @@ test('lost summary acknowledgement survives restart; explicit resume delivers ve
     assert.equal((await postCommitRestart.status()).results.length, 1)
     assert.deepEqual(calls, ['create', ...Array(5).fill('generate')])
     assert.equal(await fixture.git('rev-list', '--count', 'HEAD'), '2')
+    // Selection admission evidence must recover files even when results/active
+    // references are missing; losing that evidence too must stop, not omit files.
+    const omitted = { ...stopped, results: [], active: null }
+    await writeFile(path.join(fixture.stateRoot, 'manual.json'), JSON.stringify(omitted))
+    const scopeRecovery = manualIngest({
+      configuration: { ...configuration, bootId: '4'.repeat(32) },
+      runtime,
+    })
+    await scopeRecovery.initialize()
+    assert.equal((await scopeRecovery.resume({ confirmed: true })).summary_admitted, true)
+    assert.equal(notes.length, 4)
+    assert.ok(notes[3][1].includes(verifiedRecord))
+    const missingScope = {
+      ...omitted,
+      selected: omitted.selected.map(({ adapter, source_key, source_revision }) => ({
+        adapter,
+        source_key,
+        source_revision,
+      })),
+    }
+    await writeFile(path.join(fixture.stateRoot, 'manual.json'), JSON.stringify(missingScope))
+    await assert.rejects(scopeRecovery.resume({ confirmed: true }), /incomplete_selection_evidence/)
+    assert.equal(notes.length, 4)
+    assert.equal((await scopeRecovery.status()).status, 'operator_action_required')
   }))

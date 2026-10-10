@@ -50,8 +50,9 @@ text and proposals are data, never executable instructions. Service logs contain
 no document text, control tokens or raw provider errors. The controller holds a
 private backend password, not model credentials; OpenCode uses existing accounts.
 
-Private `publisher/manual.json` stores selection, active source, worker/run/draft
-IDs, intent, verified records/reports and delivery flags. `manual-initialized.json`
+Private `publisher/manual.json` stores selection, its durable admission/run/draft
+references and completed-prefix count, active source, worker IDs, intent,
+verified records/reports and delivery flags. `manual-initialized.json`
 prevents missing state from resetting stops. These files contain private data,
 unlike content-free publisher `control.json`. Existing atomic storage primitives
 use `0700` directories/`0600` files. Include them in stopped-stack backups.
@@ -87,6 +88,9 @@ or subscription-exhaustion acceptance.
 
 Verification also rebuilds per-file summary inputs from authoritative journal
 records (including blocked files) and admits them to the original main session.
+It reconciles the processed scope against each selected revision's durable
+admission evidence; missing or inconsistent scope evidence stops instead of
+silently omitting a processed file.
 `status_delivery_failed` is persisted before that admission and clears only after
 its acknowledgement; it proves input admission, not model completion. A lost
 summary acknowledgement is not blindly retried. Inspect the original session
