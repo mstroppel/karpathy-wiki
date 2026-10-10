@@ -123,8 +123,11 @@ An optional [kernel-enforced reader mode](docs/runtime-write-isolation.md) preve
 OpenCode from changing wiki, sources, ingest-journal and answer-inbox data even
 through direct backend APIs. It disables all chat wiki-authoring commands. An
 opt-in [trusted publisher](docs/trusted-publisher.md) provides an operator-only
-publication/coordination foundation; chat workflow routing and automatic ingest
-are not implemented yet. Manual writing remains the default.
+publication/coordination foundation. An alternative opt-in
+[trusted manual ingest route](docs/manual-ingest.md) connects immediate browser
+`/ingest-new` requests to isolated workers and verified publication in reader mode.
+Other reader-mode chat authoring and automatic ingest remain unimplemented.
+Writable manual operation remains the default.
 
 ## Analyses
 
@@ -218,6 +221,7 @@ scripts/test-python.sh
 node --test tests/test_wiki_ingest_status.mjs tests/test_contract_fixtures.mjs tests/test_wiki_ingest_journal.mjs tests/test_ingest_context_budget.mjs tests/test_wiki_ingest_transaction.mjs tests/test_answer_intake.mjs
 node --test tests/test_chat_bootstrap.mjs
 node --test tests/test_trusted_publisher.mjs
+node --test tests/test_manual_ingest.mjs
 docker build --target opencode -t kw-opencode:integration -f opencode/Dockerfile .
 docker build --target openchamber -t kw-openchamber:integration -f opencode/Dockerfile .
 sh tests/integration/chat.sh  # authentication, discovery, native SSE and restart persistence
@@ -225,6 +229,7 @@ sh tests/integration/auto-ingest-runtime.sh  # negative writer-gate probe, NOT a
 sh tests/integration/runtime-write-isolation.sh  # pinned-runtime proof of the reader boundary
 docker build --target publisher -t kw-publisher:integration -f opencode/Dockerfile .
 sh tests/integration/trusted-publisher.sh  # isolated writer, crash recovery and reader boundary
+sh tests/integration/manual-ingest.sh  # UI-only admission and synthetic worker proposals
 tests/integration/run.sh  # requires Docker; disposable Compose stack test
 ```
 

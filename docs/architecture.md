@@ -37,7 +37,12 @@ OpenCode reads source directories and writes generated Markdown to `wiki/`.
 In opt-in reader mode it cannot write protected data. The optional
 [trusted publisher](trusted-publisher.md) is a separate, networkless,
 operator-exec-only writer using the same transaction/journal cores. Its private
-queue/ownership is not mounted into OpenCode; chat/automatic routing is pending.
+queue/ownership is not mounted into OpenCode. The alternative
+[manual-ingest controller](manual-ingest.md) adds a UI-authenticated internal
+listener and outbound runtime access, while retaining the isolated write authority
+and lifetime lock. Its token is shared only with the UI; worker JSON is fetched
+outbound through tool-free generation, never admitted through a worker endpoint.
+Automatic routing and other reader-mode authoring remain pending.
 This boundary is distinct from source-provider SQLite leases.
 SilverBullet serves the wiki space from a read-only mount. Services do not publish host ports; the
 reverse proxy reaches them through `WEBPROXY_NETWORK` using these aliases:

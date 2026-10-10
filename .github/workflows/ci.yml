@@ -36,6 +36,7 @@ jobs:
           node --test tests/test_wiki_ingest_status.mjs tests/test_contract_fixtures.mjs tests/test_wiki_ingest_journal.mjs tests/test_ingest_context_budget.mjs tests/test_wiki_ingest_transaction.mjs tests/test_answer_intake.mjs
           node --test tests/test_chat_bootstrap.mjs
           node --test tests/test_trusted_publisher.mjs
+          node --test tests/test_manual_ingest.mjs
       - uses: actions/upload-artifact@v7
         with:
           name: python-coverage
@@ -88,6 +89,8 @@ jobs:
         run: |
           docker build --target publisher -t kw-publisher:integration -f opencode/Dockerfile .
           sh tests/integration/trusted-publisher.sh
+      - name: Prove UI-only trusted manual ingest with synthetic model proposals
+        run: sh tests/integration/manual-ingest.sh
 
   images:
     name: Images

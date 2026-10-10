@@ -67,6 +67,9 @@ RUN npm ci --omit=dev --ignore-scripts \
     && npm cache clean --force
 COPY --from=opencode /usr/local/bin/opencode /usr/local/bin/opencode
 COPY openchamber/bootstrap.mjs openchamber/healthcheck.mjs /etc/openchamber/
+COPY openchamber/manual-ingest.mjs /etc/openchamber/
+COPY openchamber/patch-manual-ingest.mjs /etc/openchamber/
+RUN node /etc/openchamber/patch-manual-ingest.mjs /opt/chat/node_modules/@openchamber/web/server/index.js
 COPY openchamber/entrypoint.sh /usr/local/bin/karpathy-wiki-chat
 RUN chmod 0755 /usr/local/bin/karpathy-wiki-chat \
     && install -d -o 1000 -g 1000 /home/openchamber/.config/openchamber /knowledge/wiki

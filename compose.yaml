@@ -315,6 +315,38 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  manual-ingest:
+    image: ghcr.io/mstroppel/karpathy-wiki-publisher:${KARPATHY_WIKI_VERSION:-latest}
+    profiles: ["manual-ingest"]
+    user: "${PUID:-1000}:${PGID:-1000}"
+    init: true
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "/opt/karpathy-wiki/publisher/manual-entrypoint.sh"]
+    environment:
+      WIKI_RUNTIME_READ_ONLY: ${WIKI_RUNTIME_READ_ONLY:-false}
+      WIKI_INGEST_CONTROL_TOKEN: ${WIKI_INGEST_CONTROL_TOKEN:-}
+      OPENCODE_PASSWORD: ${OPENCODE_PASSWORD:?OPENCODE_PASSWORD is required}
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: core.hooksPath
+      GIT_CONFIG_VALUE_0: /dev/null
+      GIT_CONFIG_NOSYSTEM: "1"
+      GIT_CONFIG_GLOBAL: /dev/null
+    volumes:
+      - ${DATA_ROOT:-./data}/sources:/knowledge/sources:ro
+      - ${DATA_ROOT:-./data}/wiki:/knowledge/wiki:rw
+      - ${DATA_ROOT:-./data}/incoming/ingest-journal:/knowledge/incoming/ingest-journal:rw
+      - ${DATA_ROOT:-./data}/publisher:/knowledge/publisher:rw
+    depends_on:
+      opencode:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:uid=${PUID:-1000},gid=${PGID:-1000},mode=0700,noexec
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
   openchamber:
     image: ghcr.io/mstroppel/karpathy-wiki-openchamber:${KARPATHY_WIKI_VERSION:-latest}
     user: "${PUID:-1000}:${PGID:-1000}"
@@ -332,6 +364,9 @@ services:
       OPENCODE_PASSWORD: ${OPENCODE_PASSWORD:?OPENCODE_PASSWORD is required by OpenCode v2}
       OPENCHAMBER_OPENCODE_CWD: /knowledge/wiki
       OPENCHAMBER_RELAY_HOST: "off"
+      WIKI_INGEST_CONTROL_URL: ${WIKI_INGEST_CONTROL_URL:-}
+      WIKI_INGEST_CONTROL_TOKEN: ${WIKI_INGEST_CONTROL_TOKEN:-}
+      WIKI_CHAT_ORIGIN: ${OPENCHAMBER_PUBLIC_URL:-}
       OPENCODE_DISABLE_EXTERNAL_SKILLS: "1"
       OPENCODE_DISABLE_CLAUDE_CODE_SKILLS: "1"
     volumes:
