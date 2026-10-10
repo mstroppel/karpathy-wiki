@@ -130,7 +130,7 @@ docker build --target publisher -t kw-publisher:integration -f opencode/Dockerfi
 sh tests/integration/trusted-publisher.sh
 ```
 
-The disposable proof runs the shipped CLI beside pinned OpenCode 2.0.25 on the
+The disposable proof runs the shipped CLI beside pinned OpenCode 2.0.26 on the
 same backing trees: private staging, executed reader API/shell denials, hard crash
 at persisted install intent, container restart, confirmed verified recovery,
 one commit/journal record/report, exact replay and manual handover. No host data,

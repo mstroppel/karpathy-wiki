@@ -154,6 +154,40 @@ test('manual priority at a complete source boundary; no takeover or lease expiry
   assert.equal((await f.call({ operation: 'activate' })).job_id, auto.job_id)
 })
 
+test('retained completed queue entries stay replayable but are excluded from scheduling', async (t) => {
+  const f = await fixture(t)
+  const completed = []
+  for (let index = 0; index < 12; index++) {
+    const queued = await f.enqueue()
+    completed.push(queued)
+    assert.equal((await f.call({ operation: 'activate' })).job_id, queued.job_id)
+    await f.call({ operation: 'cancel', job_id: queued.job_id, confirmed: true })
+  }
+  const active = await f.enqueue()
+  await f.call({ operation: 'activate' })
+  const automatic = await f.enqueue()
+  const manual = await f.enqueue('manual')
+  const status = await f.call({ operation: 'status' })
+  assert.equal(status.active.job_id, active.job_id)
+  assert.deepEqual(
+    status.queue.map((job) => job.job_id),
+    [manual.job_id, automatic.job_id],
+  )
+  for (const job of completed) {
+    assert.deepEqual(
+      await f.call({
+        operation: 'enqueue',
+        request_id: job.request_id,
+        kind: job.kind,
+        source: job.source,
+      }),
+      job,
+    )
+  }
+  await f.call({ operation: 'cancel', job_id: active.job_id, confirmed: true })
+  assert.equal((await f.call({ operation: 'activate' })).job_id, manual.job_id)
+})
+
 test('admission remains available while an operation holds the writer lock', async (t) => {
   const f = await fixture(t)
   await f.call({ operation: 'status' })

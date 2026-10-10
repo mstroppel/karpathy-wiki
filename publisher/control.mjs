@@ -363,11 +363,12 @@ async function enqueue(opts, input) {
 
 async function queued(opts, state) {
   const jobs = []
+  const finished = new Set(state.finished)
   for (const file of await readdir(path.join(opts.stateRoot, 'queue'))) {
     if (!/^[a-zA-Z0-9_-]{1,100}\.json$/.test(file)) continue
     const job = await readJson(path.join(opts.stateRoot, 'queue', file))
     validateJob(job)
-    if (!state.finished.includes(job.job_id) && state.active?.job_id !== job.job_id) jobs.push(job)
+    if (!finished.has(job.job_id) && state.active?.job_id !== job.job_id) jobs.push(job)
   }
   return jobs.sort(
     (a, b) =>
