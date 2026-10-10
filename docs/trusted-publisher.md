@@ -27,9 +27,10 @@ no runtime configuration/credential mounts. The reader independently checks its
 kernel boundary. Host/admin writers and source providers remain outside coordination;
 do not run `init` concurrently.
 
-**Chat authoring stays disabled in reader mode**: `/ingest-new`, `/analysis-save`,
-confirmed answer saves and model journal/report tools have not been routed through
-this publisher. No scheduler is enabled. Default writable manual mode stays unchanged.
+**This operator-only profile does not route chat authoring.** An alternative
+[manual-ingest profile](manual-ingest.md) routes immediate browser `/ingest-new`;
+`/analysis-save`, answer saves and other authoring remain unsupported in reader
+mode. No scheduler is enabled. Default writable manual mode stays unchanged.
 Stop the publisher before returning OpenCode to writable mode.
 
 ## Private control protocol

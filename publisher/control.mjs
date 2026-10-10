@@ -15,11 +15,12 @@ import {
   loadRun,
   renderReport,
   RUN_ID_RE,
+  writeRecord,
 } from '../config/tools/wiki_ingest_journal_core.mjs'
 import { scanIngestStatus } from '../config/tools/wiki_ingest_status_core.mjs'
 import { withIngestLock, writeIngestFile } from '../config/tools/wiki_ingest_storage.mjs'
 
-const JOB = /^job-[0-9a-f]{32}$/
+export const JOB = /^job-[0-9a-f]{32}$/
 const REQUEST = /^req-[a-zA-Z0-9_-]{1,96}$/
 const MAX_BYTES = 64 * 1024
 const hash = (value) =>
@@ -163,6 +164,45 @@ export async function publisherControl(input, configuration = {}) {
     }
     jobId(input.job_id)
     if (!state.active || state.active.job_id !== input.job_id) throw new Error('stale_owner')
+    if (input.operation === 'block') {
+      object(input, ['operation', 'job_id'])
+      return mutate(opts, state, { operation: 'block' }, async () => {
+        const receipt = await ownedReceipt(opts, state)
+        if (receipt.publication?.phase !== 'draft' || receipt.publication.stage_pending)
+          throw new Error('uncertain_draft')
+        await assertCleanIngestWiki(opts.wikiRoot)
+        const blocker =
+          'Worker failed before publication; private draft retained for operator review.'
+        await writeRecord({
+          root: opts.root,
+          runId: state.active.run_id,
+          record: {
+            ...receipt.source,
+            preparation_id: receipt.preparation_id,
+            status: 'blocked',
+            blocker,
+            content: 'Not determined; no verified publication.',
+            contradictions: 'Not determined.',
+            extraction_limits:
+              'Complete extraction not verified; private read/staging evidence retained.',
+            source_unmodified: false,
+          },
+        })
+        const status = await scanIngestStatus({
+          sourceRoot: opts.sourceRoot,
+          wikiSourceRoot: path.join(opts.wikiRoot, 'sources'),
+        })
+        const report = await finishRun({
+          root: opts.root,
+          runId: state.active.run_id,
+          finalStatus: status.summary,
+          unfinished: [{ source_path: receipt.source.source_path, blocker }],
+        })
+        const result = { status: 'blocked', run_id: state.active.run_id, report }
+        complete(state)
+        return result
+      })
+    }
     if (input.operation === 'cancel') {
       object(input, ['operation', 'job_id', 'confirmed'], ['confirmed'])
       if (input.confirmed !== true) throw new Error('confirmation_required')
@@ -439,7 +479,7 @@ async function loadState(opts) {
   if (state.inflight !== null) {
     if (
       !state.active ||
-      !['prepare', 'propose', 'publish', 'cancel'].includes(state.inflight.operation) ||
+      !['prepare', 'propose', 'publish', 'cancel', 'block'].includes(state.inflight.operation) ||
       !/^[0-9a-f]{32}$/.test(state.inflight.boot_id)
     )
       throw new Error('invalid_state')

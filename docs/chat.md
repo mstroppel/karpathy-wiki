@@ -50,8 +50,10 @@ concurrent writer sessions: this stack does not add writer serialization.
 
 The optional [reader-only backend mode](runtime-write-isolation.md) additionally
 prevents all backend wiki, source, journal and answer-inbox writes at the kernel
-boundary. Writing commands above are unavailable in that mode; it is a foundation
-for publisher isolation, not automatic ingestion or a general API sandbox.
+boundary. Writing commands above are unavailable in that mode unless the separate
+[trusted manual ingest route](manual-ingest.md) is enabled for immediate browser
+`/ingest-new`. Other authoring remains unsupported; this is not automatic ingestion
+or a general API sandbox.
 
 The UI wiki mount is read-only. Ingest run records and reports are also mounted
 read-only at `/knowledge/incoming/ingest-journal/runs`, using the same absolute
