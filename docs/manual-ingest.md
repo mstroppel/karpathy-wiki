@@ -51,11 +51,16 @@ no document text, control tokens or raw provider errors. The controller holds a
 private backend password, not model credentials; OpenCode uses existing accounts.
 
 Private `publisher/manual.json` stores selection, its durable admission/run/draft
-references and completed-prefix count, active source, worker IDs, intent,
-verified records/reports and delivery flags. `manual-initialized.json`
-prevents missing state from resetting stops. These files contain private data,
-unlike content-free publisher `control.json`. Existing atomic storage primitives
-use `0700` directories/`0600` files. Include them in stopped-stack backups.
+references and completed-prefix count, active source, worker IDs, intent and
+delivery flags. It stays content-free like publisher `control.json`: per-file
+records and reports are rebuilt from the private ingest journal for summaries
+and never copied into controller state, status output, or backups of it.
+`manual-initialized.json`
+prevents missing state from resetting stops. Invalid or conflicting durable
+evidence fails closed as `invalid_controller_state` instead of being trusted,
+repaired or overwritten. These files hold private operational data; existing
+atomic storage primitives use `0700` directories/`0600` files. Include them in
+stopped-stack backups.
 No migrations, aliases, data moves, repairs or evidence pruning are added.
 
 ## Stops and explicit verification
@@ -72,7 +77,9 @@ drafts are retained without rollback. Uncertain writes/reporting/admission prese
 stops/ownership and explicitly flag missing reporting. Successful commits remain
 intact; independent sources are not silently skipped. Check authenticated
 `/api/wiki-ingest/status` on the chat origin, especially after a lost browser
-response; do not blindly repeat the command.
+response; do not blindly repeat the command. The route serves only a content-free
+projection (operational status, identifiers/counts, blockers and report paths);
+record/report contents stay in the private journal and its file viewer.
 
 Inspect and clarify failures first. Known interrupted publication uses the
 [publisher's confirmed whole-container restart/recovery](trusted-publisher.md#coordination-and-interruption),

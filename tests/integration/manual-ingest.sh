@@ -103,6 +103,20 @@ docker exec "$seed" node --input-type=module -e 'import { readFile, writeFile } 
 docker exec "$ui" node /tmp/manual_ingest_chat.mjs
 [ "$(docker exec "$seed" git -C /knowledge/wiki rev-list --count HEAD)" -eq "$((baseline + 2))" ]
 docker restart "$writer" >/dev/null
+# docker restart returns once the container started, not once the Node
+# listener accepts connections; poll the writer's authenticated status route.
+attempts=0
+until docker exec "$writer" node --input-type=module -e '
+ const response = await fetch("http://127.0.0.1:4080/status", {
+    headers: { Authorization: `Bearer ${process.env.WIKI_INGEST_CONTROL_TOKEN}` },
+    signal: AbortSignal.timeout(2000),
+  }).catch(() => null);
+  process.exit(response?.status === 200 ? 0 : 1);
+'; do
+    attempts=$((attempts + 1))
+    [ "$attempts" -lt 90 ] || { printf 'manual-ingest writer restart timed out\n' >&2; exit 1; }
+    sleep 1
+done
 docker exec "$ui" node /tmp/manual_ingest_chat.mjs noop
 [ "$(docker exec "$seed" git -C /knowledge/wiki rev-list --count HEAD)" -eq "$((baseline + 2))" ]
 docker exec -i "$reader" sh -c 'cat > /tmp/runtime_write_isolation.py' < "$root/tests/integration/runtime_write_isolation.py"

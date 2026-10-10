@@ -4,6 +4,35 @@ import { readFile } from 'node:fs/promises'
 import { manualIngest } from './manual_ingest.mjs'
 import { manualRuntime } from './manual_runtime.mjs'
 
+// The authenticated status route serves only operational status, identifiers
+// and report paths. Source-derived record/report text never leaves the private
+// journal and its file viewer (docs/data-layout.md).
+function statusProjection(state) {
+  const reference = (entry) => ({
+    source: entry.source,
+    preparation_id: entry.preparation_id,
+    run_id: entry.run_id,
+    status: entry.status,
+    commit: entry.commit,
+    report_path: entry.report_path,
+  })
+  return {
+    status: state.status,
+    session_id: state.session_id ?? null,
+    request_id: state.request_id ?? null,
+    completed_sources: state.completed_sources ?? 0,
+    selected_count: state.selected?.length ?? 0,
+    results: (state.results ?? []).map(reference),
+    failure: state.failure ? reference(state.failure) : null,
+    active: state.active ? { source: state.active.source, intent: state.active.intent } : null,
+    blocker: state.blocker ?? null,
+    report_failure: state.report_failure ?? false,
+    status_delivery_failed: state.status_delivery_failed ?? false,
+    resume_verified: state.resume_verified ?? false,
+    final_status: state.final_status ?? null,
+  }
+}
+
 export function manualServer({ token, driver }) {
   if (!/^[a-f0-9]{64}$/.test(token ?? '')) throw new Error('invalid_control_token')
   return createServer(async (request, response) => {
@@ -20,7 +49,7 @@ export function manualServer({ token, driver }) {
       return send(401, { error: 'unauthorized' })
     try {
       if (request.method === 'GET' && request.url === '/status')
-        return send(200, await driver.status())
+        return send(200, statusProjection(await driver.status()))
       if (request.method !== 'POST' || !['/ingest-new', '/resume'].includes(request.url))
         return send(404, { error: 'not_found' })
       if (request.headers['content-type'] !== 'application/json')

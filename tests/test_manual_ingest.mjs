@@ -7,6 +7,7 @@ import { manualIngest } from '../publisher/manual_ingest.mjs'
 import { publisherFixture, REPORT } from './helpers/publisher-fixture.mjs'
 import { manualRuntime } from '../publisher/manual_runtime.mjs'
 import { manualServer } from '../publisher/manual_server.mjs'
+import { loadRun } from '../config/tools/wiki_ingest_journal_core.mjs'
 
 test('manual trusted driver publishes one source from a fresh deny-all child', async () => {
   const base = await mkdtemp(path.join(os.tmpdir(), 'manual-ingest-'))
@@ -55,6 +56,13 @@ test('manual trusted driver publishes one source from a fresh deny-all child', a
       await readFile(path.join(fixture.wikiRoot, 'sources/webdav/notes.md'), 'utf8'),
       /Synthetic finding/,
     )
+    // Source-derived summaries stay in the private journal; controller state
+    // keeps content-free references and the summary reuses the rebuilt record.
+    const run = await loadRun({ root: fixture.root, runId: state.results[0].run_id })
+    const persisted = await readFile(path.join(fixture.stateRoot, 'manual.json'), 'utf8')
+    assert.ok(!persisted.includes('Finding at line 1.'))
+    assert.ok(!persisted.includes(JSON.stringify(run.effective[0])))
+    assert.ok(notes[0][1].includes(JSON.stringify(run.effective[0])))
   } finally {
     await rm(base, { recursive: true, force: true })
   }
@@ -232,17 +240,21 @@ test('controller HTTP admits only its separate UI token, never arbitrary publica
 })
 
 test('blocked-source notification supplies the authoritative file record and full report', () =>
-  fixtureTest(async ({ driver, runtime }) => {
+  fixtureTest(async ({ driver, configuration, runtime }) => {
     const notes = []
     runtime.note = async (...args) => notes.push(args)
     await driver.submit({ session_id: 'ses_main', request_id: 'req-blocked-overview' })
     await driver.wait()
     const state = await driver.status()
-    assert.equal(state.failure.record.status, 'blocked')
-    assert.equal(state.failure.record.content, 'Not determined; no verified publication.')
+    assert.equal(state.failure.status, 'blocked')
     assert.ok(state.failure.report_path.endsWith('/report.md'))
-    assert.ok(notes[0][1].includes(JSON.stringify(state.failure.record)))
+    const run = await loadRun({ root: configuration.root, runId: state.failure.run_id })
+    const record = run.effective[0]
+    assert.equal(record.status, 'blocked')
+    assert.equal(record.content, 'Not determined; no verified publication.')
+    assert.ok(notes[0][1].includes(JSON.stringify(record)))
     assert.ok(notes[0][1].includes(state.failure.report_path))
+    assert.ok(!JSON.stringify(state).includes('Not determined'))
     assert.match(notes[0][1], /EVERY processed file, including blocked files/)
     assert.match(notes[0][1], /contradictions\/open questions and extraction limits/)
   }))
@@ -273,11 +285,33 @@ test('lost summary acknowledgement survives restart; explicit resume delivers ve
     assert.equal(stopped.report_failure, false)
     assert.equal(notes.length, 1, 'No blind summary retry')
     assert.equal(stopped.results.length, 1)
-    const verifiedRecord = JSON.stringify(stopped.results[0].record)
+    const journal = await loadRun({
+      root: configuration.root,
+      runId: stopped.results[0].run_id,
+    })
+    const verifiedRecord = JSON.stringify(journal.effective[0])
+    const file = path.join(fixture.stateRoot, 'manual.json')
     const snapshot = structuredClone(stopped)
     snapshot.status = 'completed' // Crash while summary admission was in flight.
-    snapshot.results[0].record.content = 'Synthetic unverified snapshot detail.'
-    await writeFile(path.join(fixture.stateRoot, 'manual.json'), JSON.stringify(snapshot))
+    snapshot.blocker = null
+    // A snapshot that smuggles source-derived detail into controller state is
+    // refused outright; nothing trusts, repairs or overwrites it.
+    const smuggled = JSON.stringify({
+      ...snapshot,
+      results: [
+        { ...snapshot.results[0], record: { content: 'Synthetic unverified snapshot detail.' } },
+      ],
+    })
+    await writeFile(file, smuggled)
+    const corrupt = manualIngest({ configuration, runtime })
+    await assert.rejects(corrupt.initialize(), /invalid_controller_state/)
+    await assert.rejects(corrupt.status(), /invalid_controller_state/)
+    await assert.rejects(
+      corrupt.submit({ session_id: 'ses_main', request_id: 'req-smuggled' }),
+      /invalid_controller_state/,
+    )
+    assert.equal(await readFile(file, 'utf8'), smuggled, 'corrupt evidence must stay untouched')
+    await writeFile(file, JSON.stringify(snapshot))
     const restarted = manualIngest({
       configuration: { ...configuration, bootId: '2'.repeat(32) },
       runtime,
@@ -302,9 +336,12 @@ test('lost summary acknowledgement survives restart; explicit resume delivers ve
     const interrupted = {
       ...stopped,
       status: 'running',
+      blocker: null,
       results: [],
       active: {
         source: stopped.results[0].source,
+        intent: 'publish',
+        job_id: stopped.selected[0].job_id,
         preparation_id: stopped.results[0].preparation_id,
         run_id: stopped.results[0].run_id,
       },
@@ -347,3 +384,197 @@ test('lost summary acknowledgement survives restart; explicit resume delivers ve
     assert.equal(notes.length, 4)
     assert.equal((await scopeRecovery.status()).status, 'operator_action_required')
   }))
+
+test('semantically corrupt controller evidence fails closed and is never overwritten', () =>
+  fixtureTest(async ({ driver, fixture, configuration, runtime }) => {
+    const identity = { adapter: 'webdav', source_key: 'notes.md', source_revision: 'a'.repeat(64) }
+    const admitted = {
+      ...identity,
+      request_id: 'req-admitted',
+      job_id: `job-${'b'.repeat(32)}`,
+      preparation_id: `prep-${'c'.repeat(32)}`,
+      run_id: 'run-20260101t000000z-abcdef',
+    }
+    const base = {
+      version: 1,
+      status: 'completed',
+      session_id: 'ses_main',
+      request_id: 'req-base',
+      results: [
+        {
+          source: identity,
+          preparation_id: admitted.preparation_id,
+          run_id: admitted.run_id,
+          status: 'ingested',
+          commit: 'd'.repeat(40),
+          report_path: `/knowledge/incoming/ingest-journal/runs/${admitted.run_id}/report.md`,
+        },
+      ],
+      selected: [admitted],
+      completed_sources: 1,
+      active: null,
+      blocker: null,
+      failure: null,
+      report_failure: false,
+      status_delivery_failed: false,
+      resume_verified: true,
+      final_status: {
+        new: 0,
+        outdated: 0,
+        current: 1,
+        conflict: 0,
+        revoked: 0,
+        orphaned: 0,
+        invalid: 0,
+      },
+    }
+    const file = path.join(fixture.stateRoot, 'manual.json')
+    await writeFile(file, JSON.stringify(base))
+    assert.equal(
+      (await manualIngest({ configuration, runtime }).status()).status,
+      'completed',
+      'consistent evidence must load',
+    )
+    const corrupt = [
+      {
+        name: 'null selection entries with an empty completed run',
+        state: { ...base, selected: [null], results: [], completed_sources: 0 },
+      },
+      {
+        name: 'source-derived content smuggled into controller state',
+        state: {
+          ...base,
+          results: [{ ...base.results[0], record: { content: 'Synthetic smuggled content.' } }],
+        },
+      },
+      {
+        name: 'unattributable result run',
+        state: {
+          ...base,
+          results: [{ ...base.results[0], run_id: 'run-20260101t000000z-000000' }],
+        },
+      },
+      {
+        name: 'completed state with live active evidence',
+        state: {
+          ...base,
+          active: {
+            source: identity,
+            intent: 'publish',
+            job_id: admitted.job_id,
+            preparation_id: admitted.preparation_id,
+            run_id: admitted.run_id,
+          },
+        },
+      },
+      {
+        name: 'idle state with recorded work',
+        state: { ...base, status: 'idle', session_id: undefined, request_id: undefined },
+      },
+      {
+        name: 'completed state with half-admitted selection',
+        state: { ...base, selected: [{ ...identity, request_id: 'req-partial' }] },
+      },
+      {
+        name: 'stop evidence on a completed state',
+        state: { ...base, blocker: 'summary_admission_uncertain' },
+      },
+    ]
+    for (const { name, state } of corrupt) {
+      const written = JSON.stringify(state)
+      await writeFile(file, written)
+      await assert.rejects(
+        manualIngest({ configuration, runtime }).initialize(),
+        /invalid_controller_state/,
+        name,
+      )
+      await assert.rejects(
+        driver.submit({ session_id: 'ses_main', request_id: 'req-corrupt-evidence' }),
+        /invalid_controller_state/,
+        name,
+      )
+      await assert.rejects(driver.resume({ confirmed: true }), /invalid_controller_state/, name)
+      assert.equal(await readFile(file, 'utf8'), written, `${name} must stay untouched`)
+    }
+  }))
+
+test('status route serves only a content-free operational projection', async () => {
+  const token = '1'.repeat(64)
+  const identity = { adapter: 'webdav', source_key: 'notes.md', source_revision: 'a'.repeat(64) }
+  const runId = 'run-20260101t000000z-abcdef'
+  const state = {
+    version: 1,
+    status: 'completed',
+    session_id: 'ses_main',
+    request_id: 'req-status',
+    selected: [
+      {
+        ...identity,
+        request_id: 'req-admitted',
+        job_id: `job-${'b'.repeat(32)}`,
+        preparation_id: `prep-${'c'.repeat(32)}`,
+        run_id: runId,
+      },
+    ],
+    completed_sources: 1,
+    results: [
+      {
+        source: identity,
+        preparation_id: `prep-${'c'.repeat(32)}`,
+        run_id: runId,
+        status: 'ingested',
+        commit: 'd'.repeat(40),
+        report_path: `/knowledge/incoming/ingest-journal/runs/${runId}/report.md`,
+        source_path: '/knowledge/sources/webdav/notes.md',
+        changed_pages: ['webdav/notes.md'],
+        record: { content: 'Synthetic smuggled content.' },
+        report: { path: `runs/${runId}/report.md` },
+      },
+    ],
+    active: null,
+    blocker: null,
+    failure: null,
+    report_failure: false,
+    status_delivery_failed: false,
+    resume_verified: true,
+    final_status: null,
+  }
+  const server = manualServer({ token, driver: { status: async () => state } })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  try {
+    const url = `http://127.0.0.1:${server.address().port}/status`
+    const served = await (
+      await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+    ).json()
+    assert.deepEqual(Object.keys(served).sort(), [
+      'active',
+      'blocker',
+      'completed_sources',
+      'failure',
+      'final_status',
+      'report_failure',
+      'request_id',
+      'results',
+      'resume_verified',
+      'selected_count',
+      'session_id',
+      'status',
+      'status_delivery_failed',
+    ])
+    assert.deepEqual(Object.keys(served.results[0]).sort(), [
+      'commit',
+      'preparation_id',
+      'report_path',
+      'run_id',
+      'source',
+      'status',
+    ])
+    assert.equal(served.results[0].report_path, state.results[0].report_path)
+    assert.equal(served.selected_count, 1)
+    assert.ok(!JSON.stringify(served).includes('Synthetic smuggled content.'))
+    assert.ok(!JSON.stringify(served).includes('source_path'))
+    assert.ok(!JSON.stringify(served).includes('changed_pages'))
+  } finally {
+    await new Promise((resolve) => server.close(resolve))
+  }
+})

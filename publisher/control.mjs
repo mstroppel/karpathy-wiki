@@ -20,7 +20,7 @@ import {
 import { scanIngestStatus } from '../config/tools/wiki_ingest_status_core.mjs'
 import { withIngestLock, writeIngestFile } from '../config/tools/wiki_ingest_storage.mjs'
 
-const JOB = /^job-[0-9a-f]{32}$/
+export const JOB = /^job-[0-9a-f]{32}$/
 const REQUEST = /^req-[a-zA-Z0-9_-]{1,96}$/
 const MAX_BYTES = 64 * 1024
 const hash = (value) =>

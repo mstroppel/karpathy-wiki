@@ -59,10 +59,16 @@ assert.equal(state.status, 'completed', JSON.stringify(state))
 assert.equal(state.results.length, process.argv[2] === 'noop' ? 0 : 1)
 if (state.results.length) {
   assert.equal(state.results[0].status, 'ingested')
-  assert.ok(state.results[0].report.path)
-  const path = `/knowledge/incoming/ingest-journal/${state.results[0].report.path}`
+  assert.deepEqual(Object.keys(state.results[0]).sort(), [
+    'commit',
+    'preparation_id',
+    'report_path',
+    'run_id',
+    'source',
+    'status',
+  ])
   const report = await request(
-    `/api/fs/read?${new URLSearchParams({ path, directory: '/knowledge/wiki', allowOutsideWorkspace: 'true' })}`,
+    `/api/fs/read?${new URLSearchParams({ path: state.results[0].report_path, directory: '/knowledge/wiki', allowOutsideWorkspace: 'true' })}`,
   )
   assert.ok(report.ok)
   assert.match(await report.text(), /Finding at line 1/)
