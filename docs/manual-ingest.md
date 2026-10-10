@@ -85,6 +85,13 @@ delete state to resume. Other authoring, scheduling, retry/quarantine and quota
 controls remain follow-up gates. Synthetic evidence is not real-provider quality
 or subscription-exhaustion acceptance.
 
+Verification also rebuilds per-file summary inputs from authoritative journal
+records (including blocked files) and admits them to the original main session.
+`status_delivery_failed` is persisted before that admission and clears only after
+its acknowledgement; it proves input admission, not model completion. A lost
+summary acknowledgement is not blindly retried. Inspect the original session
+and explicitly request verification again if needed; this never repeats ingestion.
+
 ## Validation
 
 ```sh

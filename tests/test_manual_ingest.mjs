@@ -101,7 +101,7 @@ test('worker failure records a private blocked report; explicit resume verifies 
     await assert.rejects(driver.submit({ session_id: 'ses_main', request_id: 'req-another' }))
     await assert.rejects(driver.resume({ confirmed: false }))
     assert.equal((await driver.resume({ confirmed: true })).verified, true)
-    assert.deepEqual(calls, ['create', 'generate', 'note'])
+    assert.deepEqual(calls, ['create', 'generate', 'note', 'note'])
   }))
 
 test('restart keeps a persistent stop and never redispatches', () =>
@@ -228,3 +228,93 @@ test('controller HTTP admits only its separate UI token, never arbitrary publica
     await new Promise((resolve) => server.close(resolve))
   }
 })
+
+test('blocked-source notification supplies the authoritative file record and full report', () =>
+  fixtureTest(async ({ driver, runtime }) => {
+    const notes = []
+    runtime.note = async (...args) => notes.push(args)
+    await driver.submit({ session_id: 'ses_main', request_id: 'req-blocked-overview' })
+    await driver.wait()
+    const state = await driver.status()
+    assert.equal(state.failure.record.status, 'blocked')
+    assert.equal(state.failure.record.content, 'Not determined; no verified publication.')
+    assert.ok(state.failure.report_path.endsWith('/report.md'))
+    assert.ok(notes[0][1].includes(JSON.stringify(state.failure.record)))
+    assert.ok(notes[0][1].includes(state.failure.report_path))
+    assert.match(notes[0][1], /EVERY processed file, including blocked files/)
+    assert.match(notes[0][1], /contradictions\/open questions and extraction limits/)
+  }))
+
+test('lost summary acknowledgement survives restart; explicit resume delivers verified files without reingest', () =>
+  fixtureTest(async ({ driver, fixture, configuration, runtime, calls }) => {
+    const proposals = [
+      { proposal: { operation: 'read_source', offset: 1, limit: 80 } },
+      { proposal: { operation: 'inspect', page: 'overview.md', offset: 1, limit: 80 } },
+      { proposal: { operation: 'stage', draft: '# Synthetic finding\n\nFinding at line 1.\n' } },
+      { proposal: { operation: 'stage', page: 'overview.md', reviewed: true } },
+      { report: REPORT },
+    ]
+    runtime.generate = async () => {
+      calls.push('generate')
+      return JSON.stringify(proposals.shift())
+    }
+    const notes = []
+    runtime.note = async (...args) => {
+      notes.push(args)
+      if (notes.length === 1) throw new Error('synthetic lost acknowledgement')
+    }
+    await driver.submit({ session_id: 'ses_main', request_id: 'req-summary-loss' })
+    await driver.wait()
+    const stopped = await driver.status()
+    assert.equal(stopped.status, 'operator_action_required')
+    assert.equal(stopped.status_delivery_failed, true)
+    assert.equal(stopped.report_failure, false)
+    assert.equal(notes.length, 1, 'No blind summary retry')
+    assert.equal(stopped.results.length, 1)
+    const verifiedRecord = JSON.stringify(stopped.results[0].record)
+    const snapshot = structuredClone(stopped)
+    snapshot.results[0].record.content = 'Synthetic unverified snapshot detail.'
+    await writeFile(path.join(fixture.stateRoot, 'manual.json'), JSON.stringify(snapshot))
+    const restarted = manualIngest({
+      configuration: { ...configuration, bootId: '2'.repeat(32) },
+      runtime,
+    })
+    await restarted.initialize()
+    const reportFile = stopped.results[0].report_path
+    const report = await readFile(reportFile, 'utf8')
+    await writeFile(reportFile, 'Synthetic corrupt report.\n')
+    await assert.rejects(restarted.resume({ confirmed: true }), /unverified_report/)
+    assert.equal(notes.length, 1, 'No notification using unverified evidence')
+    await writeFile(reportFile, report)
+    assert.equal((await restarted.resume({ confirmed: true })).summary_admitted, true)
+    assert.equal((await restarted.status()).status_delivery_failed, false)
+    assert.equal(notes.length, 2)
+    assert.ok(notes[1][1].includes(verifiedRecord))
+    assert.ok(!notes[1][1].includes('Synthetic unverified snapshot detail.'))
+    assert.deepEqual(calls, ['create', ...Array(5).fill('generate')])
+    assert.equal(await fixture.git('rev-list', '--count', 'HEAD'), '2')
+    // Crash after verified publication but before controller result persistence.
+    const interrupted = {
+      ...stopped,
+      status: 'running',
+      results: [],
+      active: {
+        source: stopped.results[0].source,
+        preparation_id: stopped.results[0].preparation_id,
+        run_id: stopped.results[0].run_id,
+      },
+      status_delivery_failed: false,
+    }
+    await writeFile(path.join(fixture.stateRoot, 'manual.json'), JSON.stringify(interrupted))
+    const postCommitRestart = manualIngest({
+      configuration: { ...configuration, bootId: '3'.repeat(32) },
+      runtime,
+    })
+    await postCommitRestart.initialize()
+    assert.equal((await postCommitRestart.resume({ confirmed: true })).summary_admitted, true)
+    assert.equal(notes.length, 3)
+    assert.ok(notes[2][1].includes(verifiedRecord))
+    assert.equal((await postCommitRestart.status()).results.length, 1)
+    assert.deepEqual(calls, ['create', ...Array(5).fill('generate')])
+    assert.equal(await fixture.git('rev-list', '--count', 'HEAD'), '2')
+  }))
