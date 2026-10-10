@@ -68,8 +68,8 @@ jobs:
 
           verify_ci_and_maybe_merge() {
             local pr_url=$1
+            local head_sha=$2
             local pr_number
-            local head_sha
             local run_info
             local run_id
             local run_status
@@ -78,7 +78,22 @@ jobs:
             local previous_run_id=0
             local attempt=0
             pr_number=$(gh pr view "$pr_url" --json number --jq '.number')
-            head_sha=$(gh pr view "$pr_url" --json headRefOid --jq '.headRefOid')
+            # PR metadata can lag behind a successful push. Never select CI
+            # using that stale head: wait for the commit we actually pushed.
+            while [ "$attempt" -lt 30 ]; do
+              current_head_sha=$(gh pr view "$pr_url" --json headRefOid --jq '.headRefOid')
+              if [ "$current_head_sha" = "$head_sha" ]; then
+                break
+              fi
+              sleep 2
+              attempt=$((attempt + 1))
+            done
+            if [ "$current_head_sha" != "$head_sha" ]; then
+              printf 'PR head did not reach expected commit %s (found %s)\n' \
+                "$head_sha" "$current_head_sha" >&2
+              return 1
+            fi
+            attempt=0
 
             run_info=$(gh run list --workflow ci.yml --branch opencode-update \
               --json databaseId,headSha,status,conclusion,event,displayTitle \
@@ -150,7 +165,7 @@ jobs:
             branch_base=$(git rev-parse FETCH_HEAD^)
             current_base=$(git rev-parse HEAD)
             if [ "$branch_version" = "$latest" ] && [ "$branch_base" = "$current_base" ]; then
-              verify_ci_and_maybe_merge "$existing_pr_url"
+              verify_ci_and_maybe_merge "$existing_pr_url" "$(git rev-parse FETCH_HEAD)"
               printf 'OpenCode update PR already targets %s\n' "$latest"
               exit 0
             fi
@@ -188,4 +203,4 @@ jobs:
             existing_pr_url=$(gh pr list --head opencode-update --state open \
               --repo "$GITHUB_REPOSITORY" --json url --jq '.[0].url // empty')
           fi
-          verify_ci_and_maybe_merge "$existing_pr_url"
+          verify_ci_and_maybe_merge "$existing_pr_url" "$(git rev-parse HEAD)"

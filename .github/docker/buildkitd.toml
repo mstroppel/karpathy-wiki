@@ -1,0 +1,3 @@
+# Keep Docker Hub references and digest verification; fetch cached content first.
+[registry."docker.io"]
+  mirrors = ["mirror.gcr.io"]

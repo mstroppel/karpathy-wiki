@@ -29,7 +29,7 @@ denials were exercised. Only the shell hook has an executed denial control.
 The JSON `hook_evidence` makes this distinction explicit; this probe does not
 validate permission/tool denial behavior during model-driven execution.
 
-On OpenCode 2.0.25 these direct writes bypass the permission, tool and shell
+On OpenCode 2.0.25 and 2.0.26 these direct writes bypass the permission, tool and shell
 guards. The JSON result therefore says `auto_ingest_admissible: false` and the
 human-readable result says `release gate BLOCKED`. Normal exit zero means only
 that this **negative probe reproduced the known blocker**, not that the runtime

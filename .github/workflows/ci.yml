@@ -69,6 +69,10 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
+      - name: Configure Docker Hub mirror for daemon builds
+        # Configure the daemon too: Compose pulls and docker build do not use
+        # the container BuildKit configuration in the images job.
+        run: sh scripts/setup-ci-docker.sh
       - name: Run disposable Compose stack test
         run: tests/integration/run.sh
       - name: Run primary chat integration
@@ -77,6 +81,8 @@ jobs:
           sh tests/integration/chat.sh
       - name: Reproduce auto-ingest writer-gate blocker (not release approval)
         run: sh tests/integration/auto-ingest-runtime.sh
+      - name: Prove kernel-enforced runtime write isolation
+        run: sh tests/integration/runtime-write-isolation.sh
 
   images:
     name: Images
@@ -86,7 +92,11 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v7
+      - name: Configure Docker Hub mirror for builder bootstrap
+        run: sh scripts/setup-ci-docker.sh
       - uses: docker/setup-buildx-action@v4
+        with:
+          buildkitd-config: .github/docker/buildkitd.toml
       - name: Log in to GHCR
         if: >-
           (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||

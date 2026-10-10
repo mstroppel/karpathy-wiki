@@ -4,9 +4,9 @@ FROM debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2
 # these pinned sha512 digests (hex, one per supported target architecture).
 # Digests must be updated together with OPENCODE_VERSION; the scheduled
 # OpenCode update workflow opens a pull request that bumps all three.
-ARG OPENCODE_VERSION=2.0.25
-ARG OPENCODE_SHA512_LINUX_X64=1a5a80435c392be307277da8565ed8c60e6913e372652d9c8e9bb319b9382c09a10eba876eff49561c0b08b2a83cc0127569c7933a63d16e61b3c6af616e0d54
-ARG OPENCODE_SHA512_LINUX_ARM64=edd4956714d04761c63c97ea0e4ab7003c478685e34b5157c452d88f6f675a596eb7b1a37dd1a2e0041095f8d07857aa98edebd05bd0877a247426012f94944b
+ARG OPENCODE_VERSION=2.0.26
+ARG OPENCODE_SHA512_LINUX_X64=508036ff5224f0768de780b8c69ec7f8e1e045fabdf795d48b1ad7fa42e616cf043e7d5f01c9a7dcea2237eddcdd57378c457f2c79a3d02cb548bea75b8c1d1b
+ARG OPENCODE_SHA512_LINUX_ARM64=206df5e88f3056a9dda21cc502858d787f3778c03cb0a40546d31eba4d967e0e0353585a092833009cf7fe06f2b63c21e9b5dd591ed5dc5092adf8e8ada28383
 ARG TARGETARCH
 ARG APP_UID=1000
 ARG APP_GID=100
@@ -45,6 +45,7 @@ COPY opencode/render_analysis.py /usr/local/bin/render-analysis
 COPY config/plugins /etc/opencode/plugins
 COPY config/tools /etc/opencode/tools
 COPY opencode/entrypoint.sh /usr/local/bin/karpathy-wiki-entrypoint
+COPY opencode/runtime_write_isolation.py /usr/local/lib/karpathy-wiki/runtime_write_isolation.py
 RUN chmod 0755 /etc/opencode/init.sh /usr/local/bin/karpathy-wiki-entrypoint /usr/local/bin/render-analysis
 
 ENV HOME=/home/opencode
