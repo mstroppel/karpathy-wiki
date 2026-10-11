@@ -57,6 +57,7 @@ const ERRORS = {
   invalid_prepared_block: 400,
   prepared_block_missing: 404,
   answers_file_exists: 409,
+  unsafe_write_path: 409,
   wiki_public_url_missing: 409,
   busy: 409,
   operator_action_required_or_busy: 409,

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
@@ -528,6 +528,8 @@ test('UI middleware admits only explicit same-origin authoring commands', async 
   assert.equal(calls[2].url, 'http://manual-ingest:4080/resume')
   for (const request of [
     { ...base, body: { name: 'analysis-save', text: 'bitte speichern' } },
+    { ...base, body: { name: 'analysis-save', text: '   ' } },
+    { ...base, body: { name: 'answer-save', text: '\t\n' } },
     { ...base, body: { name: 'answer-save', text: '', files: ['x.md'] } },
     {
       ...base,
@@ -544,11 +546,117 @@ test('UI middleware admits only explicit same-origin authoring commands', async 
     body: { name: 'ingest-new', text: 'mit Argumenten' },
   })
   assert.equal(ingest.body.error, 'explicit_same_origin_ingest_required')
-  assert.equal(calls.length, 3)
+  // ingest-new keeps its documented trim rule for whitespace-only text.
+  await routeRequest(middleware, { ...base, body: { name: 'ingest-new', text: '   ' } })
+  assert.equal(calls[3].url, 'http://manual-ingest:4080/ingest-new')
+  assert.equal(calls.length, 4)
   const unrelated = await routeRequest(middleware, {
     ...base,
     body: { name: 'gap-review', text: '' },
   })
   assert.equal(unrelated.next, true)
-  assert.equal(calls.length, 3)
+  assert.equal(calls.length, 4)
+})
+
+test('symlinked write targets cannot redirect a save out of their tree', async () => {
+  await authoringFixtureTest(
+    async ({ fixture, authoring, base }) => {
+      const outside = path.join(base, 'outside')
+      await mkdir(outside, { recursive: true })
+      await rm(path.join(fixture.wikiRoot, 'analyses'), { recursive: true, force: true })
+      await symlink(outside, path.join(fixture.wikiRoot, 'analyses'))
+      await fixture.git('add', '--', 'analyses')
+      await fixture.git('commit', '-qm', 'tracked analyses symlink')
+      await assert.rejects(
+        authoring.save('analysis', { session_id: 'ses_main', request_id: 'req-symlink' }),
+        new Error('unsafe_write_path'),
+      )
+      assert.equal((await authoring.status()).status, 'idle')
+      assert.deepEqual(await readdir(outside), [])
+      // A symlinked answer draft redirects nothing either.
+      await mkdir(path.join(base, 'incoming/answers'), { recursive: true })
+      await writeFile(path.join(outside, 'fremder-entwurf.md'), 'fremd\n')
+      await symlink(
+        path.join(outside, 'fremder-entwurf.md'),
+        path.join(base, 'incoming/answers/antwort-2026-10-11.md'),
+      )
+      await assert.rejects(
+        authoring.save('answers', { session_id: 'ses_main', request_id: 'req-symlink-answers' }),
+        new Error('unsafe_write_path'),
+      )
+      assert.equal((await authoring.status()).status, 'idle')
+      assert.equal(await readFile(path.join(outside, 'fremder-entwurf.md'), 'utf8'), 'fremd\n')
+    },
+    { texts: [ANALYSIS_BLOCK(), ANSWER_BLOCK()] },
+  )
+})
+
+test('verified resume scans the complete range and adopts an old landed commit', async () => {
+  await authoringFixtureTest(
+    async ({ fixture, authoring }) => {
+      await authoring.save('analysis', { session_id: 'ses_main', request_id: 'req-old' })
+      await authoring.wait()
+      const landed = await authoring.status()
+      assert.equal(landed.status, 'completed')
+      const mine = landed.result.commit
+      const base_commit = (await fixture.git('rev-parse', `${mine}~1`)).trim()
+      // More than the previous 100-commit scan window of foreign commits that
+      // touch the same page must not hide the landed commit from recovery.
+      const page = path.join(fixture.wikiRoot, 'analyses/beispiel-analyse.md')
+      const trees = []
+      for (const content of ['fremd A\n', 'fremd B\n']) {
+        await writeFile(page, content)
+        await fixture.git('add', '--', 'analyses/beispiel-analyse.md')
+        trees.push((await fixture.git('write-tree')).trim())
+      }
+      let head = (await fixture.git('rev-parse', 'HEAD')).trim()
+      for (let index = 0; index < 106; index++) {
+        const commit = (
+          await fixture.git(
+            '-c',
+            'commit.gpgsign=false',
+            'commit-tree',
+            trees[index % 2],
+            '-p',
+            head,
+            '-m',
+            `fremd ${index}`,
+          )
+        ).trim()
+        await fixture.git('update-ref', 'HEAD', commit, head)
+        head = commit
+      }
+      await writeFile(page, 'fremd B\n')
+      await fixture.git('add', '--', 'analyses/beispiel-analyse.md')
+      const rendered = createHash('sha256')
+        .update(
+          await readFile(path.join(fixture.wikiRoot, 'assets/analyses/beispiel-analyse.html')),
+        )
+        .digest('hex')
+      await writeFile(
+        path.join(fixture.stateRoot, 'authoring.json'),
+        JSON.stringify({
+          version: 1,
+          status: 'operator_action_required',
+          session_id: 'ses_main',
+          request_id: 'req-old',
+          kind: 'analysis',
+          target: 'beispiel-analyse',
+          digest: digest(
+            '# Beispiel & Analyse\nErstellt: 2026-10-11\n\nEin **Befund** mit [[concepts/evidenz|Evidenz]].\n',
+          ),
+          rendered,
+          base: base_commit,
+          phase: null,
+          blocker: 'interrupted_authoring',
+          result: null,
+          status_delivery_failed: false,
+        }),
+      )
+      const resumed = await authoring.resume({ confirmed: true })
+      assert.equal(resumed.status, 'completed')
+      assert.equal(resumed.commit, mine)
+    },
+    { texts: [ANALYSIS_BLOCK()] },
+  )
 })

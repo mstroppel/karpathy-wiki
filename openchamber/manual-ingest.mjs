@@ -13,29 +13,35 @@ export function manualIngestMiddleware({ token, origin, url, parseBody, fetcher 
     return parseBody(req, res, () => handle(req, res, next, match))
   }
   async function handle(req, res, next, match) {
-    if (!['ingest-new', 'analysis-save', 'answer-save'].includes(req.body?.name)) return next()
+    const name = req.body?.name
+    const ingest = name === 'ingest-new'
+    if (!['ingest-new', 'analysis-save', 'answer-save'].includes(name)) return next()
     // Never accept cross-origin cookie requests or model/backend Basic auth as
     // operator admission. The preceding upstream gate verifies the UI session.
-    const text = req.body.text?.trim() ?? ''
+    const raw = typeof req.body.text === 'string' ? req.body.text : ''
+    const text = raw.trim()
     const resume = text === 'resume'
+    // `ingest-new` keeps its documented trim rule. Authoring saves require
+    // literally empty text: whitespace is an argument, not an empty command.
+    const badText = ingest ? Boolean(text) && !resume : !(raw === '' || resume)
     const refusal =
-      req.headers.origin !== origin || (text && !resume) || req.body.files?.length
-        ? 'explicit_same_origin_ingest_required'
+      req.headers.origin !== origin || badText || req.body.files?.length
+        ? ingest
+          ? 'explicit_same_origin_ingest_required'
+          : 'explicit_same_origin_authoring_required'
         : null
-    if (refusal && req.body.name === 'ingest-new') return res.status(403).json({ error: refusal })
-    if (refusal) return res.status(403).json({ error: 'explicit_same_origin_authoring_required' })
+    if (refusal) return res.status(403).json({ error: refusal })
     // Authoring saves are consumed entirely by this route: there is no fall
     // through to a direct backend write. The model runtime only prepares
     // content as data; the empty command is the explicit save admission and
     // `resume` explicitly verifies an interrupted save.
-    const route =
-      req.body.name === 'ingest-new'
-        ? resume
-          ? '/resume'
-          : '/ingest-new'
-        : resume
-          ? '/authoring-resume'
-          : `/${req.body.name}`
+    const route = ingest
+      ? resume
+        ? '/resume'
+        : '/ingest-new'
+      : resume
+        ? '/authoring-resume'
+        : `/${name}`
     try {
       const response = await fetcher(`${url}${route}`, {
         method: 'POST',

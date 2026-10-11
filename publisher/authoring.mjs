@@ -5,7 +5,10 @@ import { mkdir, open, readFile, rename, rm } from 'node:fs/promises'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import { publisherControl } from './control.mjs'
-import { assertCleanIngestWiki } from '../config/tools/wiki_ingest_transaction_core.mjs'
+import {
+  assertCleanIngestWiki,
+  confinedIngestPath,
+} from '../config/tools/wiki_ingest_transaction_core.mjs'
 import { withWikiLock } from '../config/tools/wiki_ingest_publication_core.mjs'
 import { withIngestLock } from '../config/tools/wiki_ingest_storage.mjs'
 
@@ -74,6 +77,21 @@ const readExisting = (file) =>
       throw error
     },
   )
+
+// Every read and write target is confined below its configured root: symlinked
+// roots, directories or files (including a tracked symlink planted in the wiki
+// or a symlinked answer draft) can never redirect a save into another tree.
+// The walk starts above the configured root so even a symlinked inbox chain is
+// refused before anything is created.
+const confinedFile = (root, relative) =>
+  confinedIngestPath(
+    path.dirname(root),
+    path.posix.join(path.basename(root), relative),
+    true,
+  ).catch((error) => {
+    if (error.code === 'ENOENT') return null
+    fail('unsafe_write_path')
+  })
 
 // Durable coordination state stays content-free: identifiers, digests and
 // paths only. Content lives in its destination page or inbox file; a state
@@ -487,53 +505,54 @@ export function manualAuthoring({ configuration, runtime }) {
   async function preflight(kind, block) {
     if (kind === 'analysis') {
       publicUrl()
-      insertIndex(
-        await readFile(path.join(opts.wikiRoot, 'index.md'), 'utf8'),
-        block.target,
-        block.title,
-      )
+      const indexFile = await confinedFile(opts.wikiRoot, 'index.md')
+      const pageFile = await confinedFile(opts.wikiRoot, `analyses/${block.target}.md`)
+      const printFile = await confinedFile(opts.wikiRoot, `assets/analyses/${block.target}.html`)
+      if (!indexFile || !pageFile || !printFile) fail('unsafe_write_path')
+      insertIndex((await readFile(indexFile)).toString('utf8'), block.target, block.title)
       await assertCleanIngestWiki(opts.wikiRoot)
       return
     }
-    if ((await readExisting(path.join(opts.answersRoot, `${block.target}.md`))) !== null)
-      fail('answers_file_exists')
+    await mkdir(opts.answersRoot, { recursive: true, mode: 0o700 })
+    const target = await confinedFile(opts.answersRoot, `${block.target}.md`)
+    if (target && (await readExisting(target)) !== null) fail('answers_file_exists')
   }
 
   async function writeAnalysis(state, block) {
     const wikiUrl = publicUrl()
     const page = `analyses/${block.target}.md`
     const print = `assets/analyses/${block.target}.html`
-    const existed = (await readExisting(path.join(opts.wikiRoot, page))) !== null
     return withWikiLock(opts, async () => {
       await assertCleanIngestWiki(opts.wikiRoot)
       const head = (await git('rev-parse', 'HEAD')).trim()
       if (head !== state.base) fail('authoring_uncertain')
       await mkdir(path.join(opts.wikiRoot, 'analyses'), { recursive: true, mode: 0o755 })
       await mkdir(path.join(opts.wikiRoot, 'assets', 'analyses'), { recursive: true, mode: 0o755 })
-      await writeNewFile(path.join(opts.wikiRoot, page), block.content, 0o644)
+      const pageFile = await confinedFile(opts.wikiRoot, page)
+      const printFile = await confinedFile(opts.wikiRoot, print)
+      const indexFile = await confinedFile(opts.wikiRoot, 'index.md')
+      const logFile = await confinedFile(opts.wikiRoot, 'log.md')
+      if (!pageFile || !printFile || !indexFile || !logFile) fail('unsafe_write_path')
+      const existed = (await readExisting(pageFile)) !== null
+      await writeNewFile(pageFile, block.content, 0o644)
       const [command, ...prefix] = [].concat(opts.renderCommand)
       await runFile(command, [...prefix, page, '--wiki-url', wikiUrl], {
         cwd: opts.wikiRoot,
         maxBuffer: 32 * 1024 * 1024,
       })
-      const rendered = await readExisting(path.join(opts.wikiRoot, print))
+      const rendered = await readExisting(printFile)
       if (!rendered) fail('authoring_uncertain')
       state.rendered = SHA(rendered)
       await save(state)
       const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
       const inserted = insertIndex(
-        await readFile(path.join(opts.wikiRoot, 'index.md'), 'utf8'),
+        (await readFile(indexFile)).toString('utf8'),
         block.target,
         block.title,
       )
-      if (inserted.changed)
-        await writeNewFile(path.join(opts.wikiRoot, 'index.md'), inserted.text, 0o644)
-      const log = await readFile(path.join(opts.wikiRoot, 'log.md'), 'utf8')
-      await writeNewFile(
-        path.join(opts.wikiRoot, 'log.md'),
-        log + logEntry(block.target, block.title, now, existed),
-        0o644,
-      )
+      if (inserted.changed) await writeNewFile(indexFile, inserted.text, 0o644)
+      const log = (await readFile(logFile)).toString('utf8')
+      await writeNewFile(logFile, log + logEntry(block.target, block.title, now, existed), 0o644)
       const allowed = [page, print, 'index.md', 'log.md']
       const commit = await commitPages({
         head,
@@ -545,7 +564,7 @@ export function manualAuthoring({ configuration, runtime }) {
         name: block.target,
         commit,
         changed_pages: await changedPages(commit),
-        path: path.join(opts.wikiRoot, page),
+        path: pageFile,
       }
     })
   }
@@ -574,8 +593,8 @@ export function manualAuthoring({ configuration, runtime }) {
       .sort()
 
   async function writeAnswers(state, block) {
-    const target = path.join(opts.answersRoot, `${block.target}.md`)
-    if (!target.startsWith(`${opts.answersRoot}${path.sep}`)) fail('invalid_prepared_block')
+    const target = await confinedFile(opts.answersRoot, `${block.target}.md`)
+    if (!target) fail('unsafe_write_path')
     if ((await readExisting(target)) !== null) fail('answers_file_exists')
     await mkdir(opts.answersRoot, { recursive: true, mode: 0o700 })
     await writeNewFile(target, block.content, 0o644)
@@ -693,11 +712,11 @@ export function manualAuthoring({ configuration, runtime }) {
   }
 
   // Content digests, not commit messages, prove which commit carries the
-  // confirmed content: an operator repair may commit it under any subject.
+  // confirmed content: an operator repair may commit it under any subject. The
+  // path-filtered range is scanned completely; a partial window could miss a
+  // landed commit and wrongly clear the stop.
   async function findCommit(state, page, print) {
-    const hashes = (
-      await git('log', '--format=%H', '-n', '100', `${state.base}..HEAD`, '--', page, print)
-    )
+    const hashes = (await git('log', '--format=%H', `${state.base}..HEAD`, '--', page, print))
       .split('\n')
       .filter(Boolean)
     for (const commit of hashes) {
@@ -710,8 +729,8 @@ export function manualAuthoring({ configuration, runtime }) {
   }
 
   async function resumeAnswers(state) {
-    const target = path.join(opts.answersRoot, `${state.target}.md`)
-    const written = await readExisting(target)
+    const target = await confinedFile(opts.answersRoot, `${state.target}.md`)
+    const written = target ? await readExisting(target) : null
     if (written === null) {
       await save(empty())
       return { verified: true, status: 'idle', request_id: null }
