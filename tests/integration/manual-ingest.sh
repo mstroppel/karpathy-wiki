@@ -91,6 +91,8 @@ until docker exec "$ui" node /etc/openchamber/healthcheck.mjs >/dev/null 2>&1; d
     sleep 1
 done
 docker exec "$reader" python3 -c 'import os; assert "WIKI_INGEST_CONTROL_TOKEN" not in os.environ'
+docker exec -i "$writer" sh -c 'cat > /tmp/controller_fence.mjs' < "$root/tests/integration/controller_fence.mjs"
+docker exec "$writer" node /tmp/controller_fence.mjs
 if docker exec "$writer" python3 /opt/karpathy-wiki/publisher/service.py; then
     printf 'competing lifetime publisher accepted\n' >&2
     exit 1
@@ -104,6 +106,7 @@ docker exec "$ui" node /tmp/manual_ingest_chat.mjs
 docker exec "$seed" node --input-type=module -e 'import { readFile, writeFile } from "node:fs/promises"; import { createHash } from "node:crypto"; const text="Synthetic changed revision, line 1.\n"; await writeFile("/knowledge/sources/webdav/notes.md",text); const file="/knowledge/sources/webdav/manifest.json"; const manifest=JSON.parse(await readFile(file,"utf8")); const revision=createHash("sha256").update(text).digest("hex"); manifest.items[0].source_revision=revision; manifest.items[0].frontmatter.source_revision=revision; await writeFile(file,JSON.stringify(manifest));'
 docker exec "$ui" node /tmp/manual_ingest_chat.mjs
 [ "$(docker exec "$seed" git -C /knowledge/wiki rev-list --count HEAD)" -eq "$((baseline + 2))" ]
+old_boot=$(docker exec "$writer" cat /tmp/publisher-boot-id)
 docker restart "$writer" >/dev/null
 # docker restart returns once the container started, not once the Node
 # listener accepts connections; poll the writer's authenticated status route.
@@ -119,6 +122,15 @@ until docker exec "$writer" node --input-type=module -e '
     [ "$attempts" -lt 90 ] || { printf 'manual-ingest writer restart timed out\n' >&2; exit 1; }
     sleep 1
 done
+new_boot=$(docker exec "$writer" cat /tmp/publisher-boot-id)
+[ "$old_boot" != "$new_boot" ]
+docker exec "$writer" node --input-type=module -e '
+ import { readFile } from "node:fs/promises";
+ import assert from "node:assert/strict";
+ const boot = (await readFile("/tmp/publisher-boot-id", "utf8")).trim();
+ const fence = JSON.parse(await readFile("/knowledge/publisher/controller.json", "utf8"));
+ assert.equal(fence.boot_id, boot);
+'
 docker exec "$ui" node /tmp/manual_ingest_chat.mjs noop
 [ "$(docker exec "$seed" git -C /knowledge/wiki rev-list --count HEAD)" -eq "$((baseline + 2))" ]
 # Trusted authoring channel: the fixture wiki needs the canonical index/log

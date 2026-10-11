@@ -23,6 +23,7 @@ import {
 } from '../config/tools/wiki_ingest_journal_core.mjs'
 import { withIngestLock, writeIngestFile } from '../config/tools/wiki_ingest_storage.mjs'
 import { authoringBusy } from './authoring.mjs'
+import { controllerFence } from './controller_fence.mjs'
 
 const SESSION = /^ses[a-zA-Z0-9_-]{1,100}$/
 const REQUEST = /^req-[a-zA-Z0-9_-]{1,96}$/
@@ -201,6 +202,7 @@ Berichte konkrete Kernaussagen, Zahlen mit Einheiten, Entscheidungen und Änderu
 
 // Called only by the UI-authenticated controller, never installed in OpenCode.
 export function manualIngest({ configuration, runtime }) {
+  const fence = controllerFence(configuration)
   const file = path.join(configuration.stateRoot, 'manual.json')
   const marker = path.join(configuration.stateRoot, 'manual-initialized.json')
   const lock = path.join(configuration.stateRoot, 'manual.lock')
@@ -225,38 +227,40 @@ export function manualIngest({ configuration, runtime }) {
 
   async function initialize() {
     await mkdir(configuration.stateRoot, { recursive: true, mode: 0o700 })
-    await withIngestLock(lock, async () => {
-      const state = await load()
-      if (!state) {
-        try {
-          await readFile(marker)
-          throw new Error('missing_controller_state')
-        } catch (error) {
-          if (error.code !== 'ENOENT') throw error
+    await withIngestLock(lock, () =>
+      fence.initialize(async () => {
+        const state = await load()
+        if (!state) {
+          try {
+            await readFile(marker)
+            throw new Error('missing_controller_state')
+          } catch (error) {
+            if (error.code !== 'ENOENT') throw error
+          }
+          await writeIngestFile(marker, '{"version":1}\n')
+          await save({
+            version: 1,
+            status: 'idle',
+            results: [],
+            selected: [],
+            completed_sources: 0,
+            active: null,
+            blocker: null,
+          })
         }
-        await writeIngestFile(marker, '{"version":1}\n')
-        await save({
-          version: 1,
-          status: 'idle',
-          results: [],
-          selected: [],
-          completed_sources: 0,
-          active: null,
-          blocker: null,
-        })
-      }
-      if (
-        state &&
-        (state.status === 'running' ||
-          (state.status === 'completed' && state.status_delivery_failed))
-      ) {
-        state.status = 'operator_action_required'
-        state.blocker = state.status_delivery_failed
-          ? 'interrupted_summary_admission'
-          : 'interrupted_controller'
-        await save(state)
-      }
-    })
+        if (
+          state &&
+          (state.status === 'running' ||
+            (state.status === 'completed' && state.status_delivery_failed))
+        ) {
+          state.status = 'operator_action_required'
+          state.blocker = state.status_delivery_failed
+            ? 'interrupted_summary_admission'
+            : 'interrupted_controller'
+          await save(state)
+        }
+      }),
+    )
   }
 
   async function submit(input) {
@@ -268,6 +272,7 @@ export function manualIngest({ configuration, runtime }) {
     )
       throw new Error('invalid_input')
     return withIngestLock(lock, async () => {
+      await fence.assert()
       const previous = await load()
       if (!previous) throw new Error('missing_controller_state')
       // Writer ownership is exclusive: an active or stopped authoring save
@@ -292,34 +297,49 @@ export function manualIngest({ configuration, runtime }) {
       }
       // Intent precedes every runtime call. Lost acknowledgement is never retried.
       await save(state)
-      running = execute(state)
-        .catch(async () => {
-          const summaryFailed = state.status_delivery_failed && !state.active
-          state.status = 'operator_action_required'
-          state.blocker = summaryFailed
-            ? 'summary_admission_uncertain'
-            : 'execution_or_publication_uncertain'
-          state.report_failure = !summaryFailed
-          // Only a verified pristine draft may receive a failure record. An
-          // uncertain publisher refuses this operation without clearing its stop.
-          if (state.active?.job_id) {
-            try {
-              const failure = await control({ operation: 'block', job_id: state.active.job_id })
-              const run = await loadRun({ root: configuration.root, runId: failure.run_id })
-              state.failure = sourceResult(state.active.source, run)
-              state.report_failure = false
-            } catch {
-              // Preserve the existing publisher stop/ownership and all evidence.
+      running = fence
+        .run(() =>
+          execute(state).catch(async () => {
+            const summaryFailed = state.status_delivery_failed && !state.active
+            state.status = 'operator_action_required'
+            state.blocker = summaryFailed
+              ? 'summary_admission_uncertain'
+              : 'execution_or_publication_uncertain'
+            state.report_failure = !summaryFailed
+            // Only a verified pristine draft may receive a failure record. An
+            // uncertain publisher refuses this operation without clearing its stop.
+            if (state.active?.job_id) {
+              try {
+                const failure = await control({ operation: 'block', job_id: state.active.job_id })
+                const run = await loadRun({ root: configuration.root, runId: failure.run_id })
+                state.failure = sourceResult(state.active.source, run)
+                state.report_failure = false
+              } catch {
+                // Preserve the existing publisher stop/ownership and all evidence.
+              }
             }
-          }
-          await save(state)
-          if (summaryFailed) return // No blind second admission after a lost summary acknowledgement.
-          try {
-            await deliverSummary(state)
-          } catch {
-            state.status_delivery_failed = true
             await save(state)
-          }
+            if (summaryFailed) return // No blind second admission after a lost summary acknowledgement.
+            try {
+              await deliverSummary(state)
+            } catch {
+              state.status_delivery_failed = true
+              await save(state)
+            }
+          }),
+        )
+        // Failed fence acquisition must not let an old callback write state or
+        // report a source failure. The durable admission remains fail-closed.
+        .catch(async () => {
+          await withIngestLock(lock, async () => {
+            await fence.assert()
+            const current = await load()
+            if (current?.request_id !== state.request_id) return
+            current.status = 'operator_action_required'
+            current.blocker = 'execution_or_publication_uncertain'
+            current.report_failure = true
+            await save(current)
+          }).catch(() => {})
         })
         .finally(() => {
           running = null
@@ -523,118 +543,125 @@ export function manualIngest({ configuration, runtime }) {
     if (!input || Object.keys(input).length !== 1 || input.confirmed !== true)
       throw new Error('confirmation_required')
     return withIngestLock(lock, async () => {
+      await fence.assert()
       const state = await load()
       if (running) throw new Error('busy')
       if (await authoringBusy(configuration.stateRoot)) throw new Error('busy')
       if (!state || state.status !== 'operator_action_required') throw new Error('not_stopped')
-      const publisher = await control({ operation: 'status' })
-      if (publisher.active || publisher.inflight || publisher.stop || publisher.queue.length)
-        throw new Error('publisher_maintenance_required')
-      await assertCleanIngestWiki(configuration.wikiRoot)
-      const status = await scan()
-      if (status.summary.invalid || status.summary.conflict) throw new Error('invalid_source_state')
-      if (state.active && (!state.active.preparation_id || !state.active.run_id))
-        throw new Error('admission_uncertain')
-      const runIds = new Set(state.results.map((result) => result.run_id))
-      if (state.active) runIds.add(state.active.run_id)
-      const admitted = state.selected.filter((source) => source.request_id)
-      if (admitted.some((source) => !source.run_id || !source.preparation_id))
-        throw new Error('admission_uncertain')
-      if (
-        state.selected
-          .slice(0, state.completed_sources)
-          .some((source) => !source.run_id || !source.preparation_id)
-      )
-        throw new Error('incomplete_selection_evidence')
-      if (new Set(admitted.map((source) => source.run_id)).size !== admitted.length)
-        throw new Error('inconsistent_selection_evidence')
-      for (const source of admitted) runIds.add(source.run_id)
-      if ([...runIds].some((id) => !admitted.some((source) => source.run_id === id)))
-        throw new Error('unattributed_journal_result')
-      const journalIds = await readdir(path.join(configuration.root, 'runs')).catch((error) => {
-        if (error.code === 'ENOENT' && runIds.size === 0) return []
-        throw error
-      })
-      for (const id of journalIds) {
+      return fence.run(async () => {
+        const publisher = await control({ operation: 'status' })
+        if (publisher.active || publisher.inflight || publisher.stop || publisher.queue.length)
+          throw new Error('publisher_maintenance_required')
+        await assertCleanIngestWiki(configuration.wikiRoot)
+        const status = await scan()
+        if (status.summary.invalid || status.summary.conflict)
+          throw new Error('invalid_source_state')
+        if (state.active && (!state.active.preparation_id || !state.active.run_id))
+          throw new Error('admission_uncertain')
+        const runIds = new Set(state.results.map((result) => result.run_id))
+        if (state.active) runIds.add(state.active.run_id)
+        const admitted = state.selected.filter((source) => source.request_id)
+        if (admitted.some((source) => !source.run_id || !source.preparation_id))
+          throw new Error('admission_uncertain')
         if (
-          RUN_ID_RE.test(id) &&
-          (await loadRun({ root: configuration.root, runId: id })).state !== 'completed'
+          state.selected
+            .slice(0, state.completed_sources)
+            .some((source) => !source.run_id || !source.preparation_id)
         )
-          throw new Error('unresolved_journal')
-      }
-      const verifiedResults = []
-      for (const runId of runIds) {
-        const run = await loadRun({ root: configuration.root, runId })
-        if (run.state !== 'completed' || !run.report || run.effective.length !== 1)
-          throw new Error('unverified_report')
-        const record = run.effective[0]
-        if (runId === state.active?.run_id && record.preparation_id !== state.active.preparation_id)
-          throw new Error('conflicting_preparation_evidence')
-        const receipt = await loadPreparation({
-          ...configuration,
-          preparationId: record.preparation_id,
+          throw new Error('incomplete_selection_evidence')
+        if (new Set(admitted.map((source) => source.run_id)).size !== admitted.length)
+          throw new Error('inconsistent_selection_evidence')
+        for (const source of admitted) runIds.add(source.run_id)
+        if ([...runIds].some((id) => !admitted.some((source) => source.run_id === id)))
+          throw new Error('unattributed_journal_result')
+        const journalIds = await readdir(path.join(configuration.root, 'runs')).catch((error) => {
+          if (error.code === 'ENOENT' && runIds.size === 0) return []
+          throw error
         })
-        const source = admitted.find((candidate) => candidate.run_id === runId)
-        if (source.preparation_id !== record.preparation_id)
-          throw new Error('conflicting_preparation_evidence')
-        if (
-          ['adapter', 'source_key', 'source_revision'].some(
-            (field) => source[field] !== record[field] || source[field] !== receipt.source[field],
+        for (const id of journalIds) {
+          if (
+            RUN_ID_RE.test(id) &&
+            (await loadRun({ root: configuration.root, runId: id })).state !== 'completed'
           )
-        )
-          throw new Error('conflicting_source_evidence')
-        if (receipt.publication.run_id !== runId) throw new Error('conflicting_receipt')
-        if (record.status === 'ingested') {
-          if (receipt.publication.phase !== 'done') throw new Error('uncertain_publication')
-          await verifyIngestCommit({ ...configuration, record })
-        } else if (receipt.publication.phase !== 'draft' || receipt.publication.stage_pending)
-          throw new Error('uncertain_draft')
-        if (
-          state.selected.indexOf(source) < state.completed_sources &&
-          record.status !== 'ingested'
-        )
-          throw new Error('inconsistent_completed_source')
-        const expected = renderReport({
-          run,
-          records: run.effective,
-          counts: run.counts,
-          finalStatus: run.final_status,
-          unfinished: run.unfinished,
-          now: run.report.assembled_at,
-        })
-        if (
-          (await readFile(
-            await confinedIngestPath(configuration.root, run.report.path),
-            'utf8',
-          )) !== expected
-        )
-          throw new Error('unverified_report')
-        verifiedResults.push(sourceResult(source, run))
-      }
-      state.results = verifiedResults
-      state.failure = null
-      state.active = null
-      state.status = 'completed'
-      state.blocker = null
-      state.report_failure = false
-      state.final_status = status.summary
-      state.resume_verified = true
-      state.status_delivery_failed = true
-      await save(state)
-      try {
-        await deliverSummary(state)
-      } catch {
-        state.status = 'operator_action_required'
-        state.blocker = 'summary_admission_uncertain'
+            throw new Error('unresolved_journal')
+        }
+        const verifiedResults = []
+        for (const runId of runIds) {
+          const run = await loadRun({ root: configuration.root, runId })
+          if (run.state !== 'completed' || !run.report || run.effective.length !== 1)
+            throw new Error('unverified_report')
+          const record = run.effective[0]
+          if (
+            runId === state.active?.run_id &&
+            record.preparation_id !== state.active.preparation_id
+          )
+            throw new Error('conflicting_preparation_evidence')
+          const receipt = await loadPreparation({
+            ...configuration,
+            preparationId: record.preparation_id,
+          })
+          const source = admitted.find((candidate) => candidate.run_id === runId)
+          if (source.preparation_id !== record.preparation_id)
+            throw new Error('conflicting_preparation_evidence')
+          if (
+            ['adapter', 'source_key', 'source_revision'].some(
+              (field) => source[field] !== record[field] || source[field] !== receipt.source[field],
+            )
+          )
+            throw new Error('conflicting_source_evidence')
+          if (receipt.publication.run_id !== runId) throw new Error('conflicting_receipt')
+          if (record.status === 'ingested') {
+            if (receipt.publication.phase !== 'done') throw new Error('uncertain_publication')
+            await verifyIngestCommit({ ...configuration, record })
+          } else if (receipt.publication.phase !== 'draft' || receipt.publication.stage_pending)
+            throw new Error('uncertain_draft')
+          if (
+            state.selected.indexOf(source) < state.completed_sources &&
+            record.status !== 'ingested'
+          )
+            throw new Error('inconsistent_completed_source')
+          const expected = renderReport({
+            run,
+            records: run.effective,
+            counts: run.counts,
+            finalStatus: run.final_status,
+            unfinished: run.unfinished,
+            now: run.report.assembled_at,
+          })
+          if (
+            (await readFile(
+              await confinedIngestPath(configuration.root, run.report.path),
+              'utf8',
+            )) !== expected
+          )
+            throw new Error('unverified_report')
+          verifiedResults.push(sourceResult(source, run))
+        }
+        state.results = verifiedResults
+        state.failure = null
+        state.active = null
+        state.status = 'completed'
+        state.blocker = null
+        state.report_failure = false
+        state.final_status = status.summary
+        state.resume_verified = true
+        state.status_delivery_failed = true
         await save(state)
-        throw new Error('summary_admission_uncertain')
-      }
-      return {
-        verified: true,
-        status: state.status,
-        request_id: state.request_id,
-        summary_admitted: true,
-      }
+        try {
+          await deliverSummary(state)
+        } catch {
+          state.status = 'operator_action_required'
+          state.blocker = 'summary_admission_uncertain'
+          await save(state)
+          throw new Error('summary_admission_uncertain')
+        }
+        return {
+          verified: true,
+          status: state.status,
+          request_id: state.request_id,
+          summary_admitted: true,
+        }
+      })
     })
   }
   return { initialize, submit, resume, status: load, wait: () => running }

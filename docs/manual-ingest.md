@@ -64,6 +64,32 @@ atomic storage primitives use `0700` directories/`0600` files. Include them in
 stopped-stack backups.
 No migrations, aliases, data moves, repairs or evidence pruning are added.
 
+### Controller execution fence
+
+The trusted ingest and authoring routes share a kernel execution lock in addition
+to their short admission lock and the container lifetime lock. It spans all
+awaited worker generation, publication, failure reporting and summary delivery;
+verified recovery uses the same lock. A second process cannot initialize a new
+controller boot while that work is in flight. Lock order is admission, controller
+execution, then publisher/wiki locks; background execution never takes admission
+while holding execution.
+
+Private `publisher/controller.json` records only the current container boot ID;
+`controller-initialized.json` detects lost ownership evidence. Both use `0600`
+files and are included in stopped-stack backups. Admission and recovery from an
+old controller object are refused before mutation after a new boot. Missing,
+corrupt or symlinked evidence fails closed; never delete it to resume. A failed
+execution-lock acquisition persists an operator stop when the caller still owns
+the controller boot, without dispatching or attributing a source failure.
+
+Workers remain proposal-only, deny-all children using transient generation, not
+background authoring agents. The lock is retained until every awaited result and
+failure path finishes. Transport timeout does not prove provider execution ended;
+late provider activity has no trusted publication channel. General shell/PTY or
+session descendants remain kernel-confined by reader mode, not authorized by a
+worker/session ID. This is execution fencing, **not** automatic scheduling or
+manual/automatic priority handover. Those remain release gates for #157.
+
 ## Stops and explicit verification
 
 Intent is durable before each runtime/writer call. Lost acknowledgements are not

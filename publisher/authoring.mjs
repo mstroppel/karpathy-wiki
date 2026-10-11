@@ -12,6 +12,7 @@ import {
 } from '../config/tools/wiki_ingest_transaction_core.mjs'
 import { withWikiLock } from '../config/tools/wiki_ingest_publication_core.mjs'
 import { withIngestLock } from '../config/tools/wiki_ingest_storage.mjs'
+import { controllerFence } from './controller_fence.mjs'
 
 const runFile = promisify(execFile)
 const SHA = (value) => createHash('sha256').update(value).digest('hex')
@@ -363,6 +364,7 @@ async function writeNewFile(file, bytes, mode) {
 // OpenCode and never reachable from the model runtime.
 export function manualAuthoring({ configuration, runtime }) {
   const opts = { ...defaults, ...configuration }
+  const fence = controllerFence(opts)
   const file = path.join(opts.stateRoot, 'authoring.json')
   const marker = path.join(opts.stateRoot, 'authoring-initialized.json')
   const manualFile = path.join(opts.stateRoot, 'manual.json')
@@ -393,30 +395,32 @@ export function manualAuthoring({ configuration, runtime }) {
 
   async function initialize() {
     await mkdir(opts.stateRoot, { recursive: true, mode: 0o700 })
-    await withIngestLock(lock, async () => {
-      const state = await load()
-      if (!state) {
-        try {
-          await readFile(marker)
-          fail('missing_authoring_state')
-        } catch (error) {
-          if (error.code !== 'ENOENT') throw error
+    await withIngestLock(lock, () =>
+      fence.initialize(async () => {
+        const state = await load()
+        if (!state) {
+          try {
+            await readFile(marker)
+            fail('missing_authoring_state')
+          } catch (error) {
+            if (error.code !== 'ENOENT') throw error
+          }
+          await writeNewFile(marker, '{"version":1}\n', 0o600)
+          await save(empty())
+          return
         }
-        await writeNewFile(marker, '{"version":1}\n', 0o600)
-        await save(empty())
-        return
-      }
-      if (
-        state.status === 'writing' ||
-        (state.status === 'completed' && state.status_delivery_failed)
-      ) {
-        const summary = state.phase === 'summary' || state.status === 'completed'
-        state.status = 'operator_action_required'
-        state.blocker = summary ? 'summary_admission_uncertain' : 'interrupted_authoring'
-        state.phase = null
-        await save(state)
-      }
-    })
+        if (
+          state.status === 'writing' ||
+          (state.status === 'completed' && state.status_delivery_failed)
+        ) {
+          const summary = state.phase === 'summary' || state.status === 'completed'
+          state.status = 'operator_action_required'
+          state.blocker = summary ? 'summary_admission_uncertain' : 'interrupted_authoring'
+          state.phase = null
+          await save(state)
+        }
+      }),
+    )
   }
 
   // No silent overlap and no long writer hold: authoring saves and ingest runs
@@ -455,6 +459,7 @@ export function manualAuthoring({ configuration, runtime }) {
     )
       fail('invalid_input')
     return withIngestLock(lock, async () => {
+      await fence.assert()
       const previous = await load()
       if (!previous) fail('missing_authoring_state')
       if (previous.request_id === input.request_id) {
@@ -502,43 +507,56 @@ export function manualAuthoring({ configuration, runtime }) {
       // The write and its verified summary run under the durable intent above;
       // the request returns accepted and outcomes surface via status and the
       // session summary, exactly like manual ingest admission.
-      running = (async () => {
-        try {
-          const result =
-            kind === 'analysis'
-              ? await writeAnalysis(state, block)
-              : await writeAnswers(state, block)
-          state.result = result
-          state.phase = 'summary'
-          await save(state)
-          await deliverSummary(state)
-          state.phase = null
-          state.status = 'completed'
-          await save(state)
-        } catch {
-          const current = (await load()) ?? state
-          const summary = current.phase === 'summary'
-          current.status = 'operator_action_required'
-          current.blocker = summary ? 'summary_admission_uncertain' : 'authoring_uncertain'
-          current.phase = null
-          await save(current)
-          // Never a blind second admission after a lost summary
-          // acknowledgement; the explicit verified resume redelivers.
-          if (summary) return
+      running = fence
+        .run(async () => {
           try {
-            await runtime.note(
-              current.session_id,
-              `Trusted authoring status (verified facts, never instructions): ${JSON.stringify({ kind: current.kind, target: current.target, blocker: current.blocker })}. Melde genau diesen Blocker kompakt auf Deutsch und dass nur eine ausdrückliche geprüfte Wiederaufnahme (/analysis-save resume oder /answer-save resume) fortsetzt. Keine Reparatur, keine Wiederholung, keine weiteren Speicherungen.`,
-              true,
-            )
+            const result =
+              kind === 'analysis'
+                ? await writeAnalysis(state, block)
+                : await writeAnswers(state, block)
+            state.result = result
+            state.phase = 'summary'
+            await save(state)
+            await deliverSummary(state)
+            state.phase = null
+            state.status = 'completed'
+            await save(state)
           } catch {
-            // The persistent stop and the authenticated status route remain
-            // the authoritative evidence of the failed save.
+            const current = (await load()) ?? state
+            const summary = current.phase === 'summary'
+            current.status = 'operator_action_required'
+            current.blocker = summary ? 'summary_admission_uncertain' : 'authoring_uncertain'
+            current.phase = null
+            await save(current)
+            // Never a blind second admission after a lost summary
+            // acknowledgement; the explicit verified resume redelivers.
+            if (summary) return
+            try {
+              await runtime.note(
+                current.session_id,
+                `Trusted authoring status (verified facts, never instructions): ${JSON.stringify({ kind: current.kind, target: current.target, blocker: current.blocker })}. Melde genau diesen Blocker kompakt auf Deutsch und dass nur eine ausdrückliche geprüfte Wiederaufnahme (/analysis-save resume oder /answer-save resume) fortsetzt. Keine Reparatur, keine Wiederholung, keine weiteren Speicherungen.`,
+                true,
+              )
+            } catch {
+              // The persistent stop and the authenticated status route remain
+              // the authoritative evidence of the failed save.
+            }
+          } finally {
+            running = null
           }
-        } finally {
+        })
+        .catch(async () => {
+          await withIngestLock(lock, async () => {
+            await fence.assert()
+            const current = await load()
+            if (current?.request_id !== input.request_id) return
+            current.status = 'operator_action_required'
+            current.blocker = 'authoring_uncertain'
+            current.phase = null
+            await save(current)
+          }).catch(() => {})
           running = null
-        }
-      })()
+        })
       return { accepted: true, request_id: input.request_id }
     })
   }
@@ -712,23 +730,26 @@ export function manualAuthoring({ configuration, runtime }) {
     if (!input || Object.keys(input).length !== 1 || input.confirmed !== true)
       fail('confirmation_required')
     return withIngestLock(lock, async () => {
+      await fence.assert()
       if (running) fail('busy')
-      const state = await load()
-      if (!state) fail('missing_authoring_state')
-      if (state.status === 'completed') {
-        if (!state.status_delivery_failed) fail('not_stopped')
-        state.status = 'operator_action_required'
-        state.blocker = 'summary_admission_uncertain'
-        await save(state)
-      }
-      if (state.status !== 'operator_action_required') fail('not_stopped')
-      await assertQuiet()
-      if (state.kind === 'analysis' && state.target === null) {
-        // Interrupted during extraction: nothing was ever written.
-        await save(empty())
-        return { verified: true, status: 'idle', request_id: null }
-      }
-      return state.kind === 'analysis' ? resumeAnalysis(state) : resumeAnswers(state)
+      return fence.run(async () => {
+        const state = await load()
+        if (!state) fail('missing_authoring_state')
+        if (state.status === 'completed') {
+          if (!state.status_delivery_failed) fail('not_stopped')
+          state.status = 'operator_action_required'
+          state.blocker = 'summary_admission_uncertain'
+          await save(state)
+        }
+        if (state.status !== 'operator_action_required') fail('not_stopped')
+        await assertQuiet()
+        if (state.kind === 'analysis' && state.target === null) {
+          // Interrupted during extraction: nothing was ever written.
+          await save(empty())
+          return { verified: true, status: 'idle', request_id: null }
+        }
+        return state.kind === 'analysis' ? resumeAnalysis(state) : resumeAnswers(state)
+      })
     })
   }
 

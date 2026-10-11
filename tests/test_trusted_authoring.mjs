@@ -132,6 +132,29 @@ test('trusted analysis save writes page, print view, index and exactly one commi
   )
 })
 
+test('new boot fences old authoring saves and verified recovery without changing saved state', async () => {
+  await authoringFixtureTest(
+    async ({ authoring, configuration, fixture }) => {
+      const replacement = manualAuthoring({
+        configuration: { ...configuration, bootId: '2'.repeat(32) },
+        runtime: runtimeFixture([ANALYSIS_BLOCK()]),
+      })
+      await replacement.initialize()
+      const file = path.join(fixture.stateRoot, 'authoring.json')
+      const baseline = await readFile(file, 'utf8')
+      await assert.rejects(
+        authoring.save('analysis', { session_id: 'ses_main', request_id: 'req-stale-authoring' }),
+        /stale_controller/,
+      )
+      await assert.rejects(authoring.resume({ confirmed: true }), /stale_controller/)
+      await assert.rejects(authoring.initialize(), /stale_controller/)
+      assert.equal(await readFile(file, 'utf8'), baseline)
+      assert.equal(await fixture.git('rev-list', '--count', 'HEAD'), '2')
+    },
+    { texts: [ANALYSIS_BLOCK()] },
+  )
+})
+
 test('repeated request admission is idempotent and never commits twice', async () => {
   await authoringFixtureTest(
     async ({ fixture, authoring }) => {
