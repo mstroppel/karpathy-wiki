@@ -177,6 +177,25 @@ test('updating an analysis refreshes its index title without duplicating the ent
   )
 })
 
+test('analysis index title updates preserve replacement-string tokens literally', async () => {
+  const texts = [ANALYSIS_BLOCK()]
+  await authoringFixtureTest(
+    async ({ fixture, authoring }) => {
+      await authoring.save('analysis', { session_id: 'ses_main', request_id: 'req-title-baseline' })
+      await authoring.wait()
+      const title = "Kosten $& $$ $` $' $1 Nutzen"
+      texts[0] = ANALYSIS_BLOCK().replace('Beispiel & Analyse', () => title)
+      await authoring.save('analysis', { session_id: 'ses_main', request_id: 'req-dollar-title' })
+      await authoring.wait()
+      assert.equal((await authoring.status()).status, 'completed')
+      const index = await readFile(path.join(fixture.wikiRoot, 'index.md'), 'utf8')
+      assert.ok(index.includes(`- [[analyses/beispiel-analyse|${title}]]`))
+      assert.equal(index.match(/\[\[analyses\/beispiel-analyse\|/g).length, 1)
+    },
+    { texts },
+  )
+})
+
 test('trusted answer save writes only the private inbox file and reports it unpublished', async () => {
   await authoringFixtureTest(
     async ({ fixture, authoring, notes, base }) => {
@@ -470,6 +489,115 @@ test('recovered saves retain ownership until their summary is successfully deliv
   }
 })
 
+test('summary recovery revalidates destination contents and paths before releasing ownership', async () => {
+  for (const kind of ['analysis', 'answers']) {
+    const runtime = runtimeFixture([kind === 'analysis' ? ANALYSIS_BLOCK() : ANSWER_BLOCK()])
+    let calls = 0
+    runtime.note = async () => {
+      calls++
+      if (calls === 1) throw new Error('lost acknowledgement')
+    }
+    await authoringFixtureTest(
+      async ({ fixture, authoring, base }) => {
+        await authoring.save(kind, { session_id: 'ses_main', request_id: 'req-summary-verify' })
+        await authoring.wait()
+        const stopped = await authoring.status()
+        assert.equal(stopped.blocker, 'summary_admission_uncertain')
+        const file = stopped.result.path
+        const original = await readFile(file)
+        await writeFile(file, 'foreign bytes\n')
+        await assert.rejects(authoring.resume({ confirmed: true }), /manual_maintenance_required/)
+        assert.deepEqual(await authoring.status(), stopped)
+        assert.equal(calls, 1, 'unverified contents must not be redelivered')
+        await rm(file)
+        await assert.rejects(authoring.resume({ confirmed: true }), /manual_maintenance_required/)
+        const outside = path.join(base, 'external-summary-target')
+        await writeFile(outside, original)
+        await symlink(outside, file)
+        await assert.rejects(authoring.resume({ confirmed: true }))
+        assert.deepEqual(await authoring.status(), stopped)
+        assert.equal(calls, 1)
+        await rm(file)
+        await writeFile(file, original)
+        if (kind === 'analysis') {
+          const print = path.join(fixture.wikiRoot, 'assets/analyses/beispiel-analyse.html')
+          const rendered = await readFile(print)
+          await writeFile(print, 'foreign print\n')
+          await assert.rejects(authoring.resume({ confirmed: true }), /manual_maintenance_required/)
+          await writeFile(print, rendered)
+          const overview = path.join(fixture.wikiRoot, 'overview.md')
+          const previous = await readFile(overview)
+          await writeFile(overview, 'foreign overview\n')
+          await assert.rejects(authoring.resume({ confirmed: true }), /manual_maintenance_required/)
+          await writeFile(overview, previous)
+        }
+        const resumed = await authoring.resume({ confirmed: true })
+        assert.equal(resumed.status, 'completed')
+        assert.equal(calls, 2)
+        assert.equal(await authoringBusy(fixture.stateRoot), false)
+      },
+      { runtime },
+    )
+  }
+})
+
+test('analysis recovery clears only when target paths match the pre-save baseline', async () => {
+  for (const existing of [false, true]) {
+    await authoringFixtureTest(async ({ fixture, authoring }) => {
+      const page = path.join(fixture.wikiRoot, 'analyses/beispiel-analyse.md')
+      const print = path.join(fixture.wikiRoot, 'assets/analyses/beispiel-analyse.html')
+      await mkdir(path.dirname(page), { recursive: true })
+      await mkdir(path.dirname(print), { recursive: true })
+      if (existing) {
+        await writeFile(page, 'previous analysis\n')
+        await writeFile(print, 'previous print\n')
+        await fixture.git('add', '--', '.')
+        await fixture.git('commit', '-qm', 'existing targets')
+      }
+      const state = {
+        ...(await authoring.status()),
+        status: 'operator_action_required',
+        blocker: 'interrupted_authoring',
+        kind: 'analysis',
+        session_id: 'ses_main',
+        request_id: 'req-baseline',
+        target: 'beispiel-analyse',
+        digest: 'a'.repeat(64),
+        rendered: 'b'.repeat(64),
+        base: (await fixture.git('rev-parse', 'HEAD')).trim(),
+      }
+      await writeFile(path.join(fixture.stateRoot, 'authoring.json'), JSON.stringify(state))
+      if (!existing) {
+        const exclude = path.join(fixture.wikiRoot, '.git/info/exclude')
+        const previous = await readFile(exclude)
+        await writeFile(exclude, `${previous}\n/analyses/beispiel-analyse.md\n`)
+        await writeFile(page, 'ignored foreign target\n')
+        assert.equal(await fixture.git('status', '--porcelain'), '')
+        await assert.rejects(authoring.resume({ confirmed: true }), /manual_maintenance_required/)
+        assert.deepEqual(await authoring.status(), state)
+        await writeFile(exclude, previous)
+      }
+      await writeFile(page, 'foreign committed partial analysis\n')
+      await fixture.git('add', '--', '.')
+      await fixture.git('commit', '-qm', 'foreign target content')
+      await assert.rejects(authoring.resume({ confirmed: true }), /manual_maintenance_required/)
+      assert.deepEqual(await authoring.status(), state)
+      assert.equal(await authoringBusy(fixture.stateRoot), true)
+      // Explicit operator restoration of the original targets proves no
+      // retained write needs adopting; unrelated committed work is preserved.
+      if (existing) await writeFile(page, 'previous analysis\n')
+      else await rm(page)
+      await fixture.git('add', '--', '.')
+      await fixture.git('commit', '-qm', 'operator restores target baseline')
+      assert.deepEqual(await authoring.resume({ confirmed: true }), {
+        verified: true,
+        status: 'idle',
+        request_id: null,
+      })
+    })
+  }
+})
+
 test('interrupted saves keep a persistent stop and verified resume adopts the landed commit', async () => {
   await authoringFixtureTest(
     async ({ fixture, authoring, configuration }) => {
@@ -572,6 +700,21 @@ test('lost summary delivery is redelivered only by explicit verified resume', as
       assert.equal(state.blocker, 'summary_admission_uncertain')
       assert.equal(state.status_delivery_failed, true)
       assert.equal(await authoringBusy(fixture.stateRoot), true)
+      // A completed snapshot with unacknowledged delivery is not available,
+      // even before startup normalization or on an idempotent request replay.
+      await writeFile(
+        path.join(fixture.stateRoot, 'authoring.json'),
+        JSON.stringify({ ...state, status: 'completed', blocker: null }),
+      )
+      await assert.rejects(
+        authoring.save('answers', { session_id: 'ses_main', request_id: 'req-note' }),
+        /busy/,
+      )
+      await assert.rejects(
+        authoring.save('answers', { session_id: 'ses_main', request_id: 'req-new-note' }),
+        /operator_action_required_or_busy/,
+      )
+      assert.equal(await authoringBusy(fixture.stateRoot), true)
       broken = false
       runtime.note = async (...args) => notes.push(args)
       const resumed = await authoring.resume({ confirmed: true })
@@ -631,6 +774,48 @@ test('extractBlock keeps only the newest prepared block and nothing else', () =>
   assert.equal(block.title, 'Beispiel & Analyse')
   assert.equal(extractBlock([{ type: 'assistant', text: 'ohne Block' }], 'analysis'), null)
   assert.equal(extractBlock(messages, 'answers'), null)
+})
+
+test('malformed newest protocol fences never fall back to an older prepared block', () => {
+  const multiline =
+    '```karpathy-authoring\n' +
+    JSON.stringify(
+      {
+        kind: 'analysis',
+        target: 'latest-preview',
+        content: '# Latest\nErstellt: 2026-10-11\n',
+      },
+      null,
+      2,
+    ) +
+    '\n```'
+  for (const malformed of [
+    multiline,
+    '```karpathy-authoring\n{"kind":"analysis"}',
+    '```karpathy-authoring',
+    '```karpathy-authoring extra\n{}\n```',
+    '```karpathy-authoring\n\n{}\n```',
+  ]) {
+    assert.throws(
+      () =>
+        extractBlock(
+          [
+            { type: 'assistant', text: malformed },
+            { type: 'assistant', text: ANALYSIS_BLOCK('old-preview') },
+          ],
+          'analysis',
+        ),
+      /invalid_prepared_block/,
+    )
+    assert.throws(
+      () =>
+        extractBlock(
+          [{ type: 'assistant', text: ANALYSIS_BLOCK('old-preview') + '\n' + malformed }],
+          'analysis',
+        ),
+      /invalid_prepared_block/,
+    )
+  }
 })
 
 import { manualIngestMiddleware } from '../openchamber/manual-ingest.mjs'
@@ -775,7 +960,7 @@ test('symlinked inbox ancestors are refused before creating any directories', as
   }
 })
 
-test('verified resume scans the complete range and adopts an old landed commit', async () => {
+test('verified resume retains the stop for foreign contents above an old landed commit', async () => {
   await authoringFixtureTest(
     async ({ fixture, authoring }) => {
       await authoring.save('analysis', { session_id: 'ses_main', request_id: 'req-old' })
@@ -837,9 +1022,20 @@ test('verified resume scans the complete range and adopts an old landed commit',
           status_delivery_failed: false,
         }),
       )
+      await assert.rejects(authoring.resume({ confirmed: true }), /manual_maintenance_required/)
+      assert.equal((await authoring.status()).status, 'operator_action_required')
+      assert.equal(await authoringBusy(fixture.stateRoot), true)
+      // A later repair may restore the landed bytes, but merely locating an
+      // old commit is not enough while the current destination remains foreign.
+      await writeFile(
+        page,
+        '# Beispiel & Analyse\nErstellt: 2026-10-11\n\nEin **Befund** mit [[concepts/evidenz|Evidenz]].\n',
+      )
+      await fixture.git('add', '--', 'analyses/beispiel-analyse.md')
+      await fixture.git('commit', '-qm', 'operator restores confirmed content')
       const resumed = await authoring.resume({ confirmed: true })
       assert.equal(resumed.status, 'completed')
-      assert.equal(resumed.commit, mine)
+      assert.equal(resumed.commit, (await fixture.git('rev-parse', 'HEAD')).trim())
     },
     { texts: [ANALYSIS_BLOCK()] },
   )

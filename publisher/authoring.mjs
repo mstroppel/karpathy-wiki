@@ -23,7 +23,7 @@ const DIGEST_RE = /^[0-9a-f]{64}$/
 // The prepared block is exactly one single-line JSON object inside a fence.
 // Single-line JSON keeps the fence unambiguous even for content with code
 // blocks; the fence name never occurs in normal conversation output.
-const FENCE = /```karpathy-authoring\n([^\n]*)\n```/g
+const FENCE = /```karpathy-authoring([^\n]*)(?:\n([\s\S]*?)(\n```|$)|$)/g
 const KINDS = ['analysis', 'answers']
 const STATUSES = ['idle', 'writing', 'completed', 'operator_action_required']
 const PHASES = ['extract', 'writing', 'summary']
@@ -240,7 +240,9 @@ export function extractBlock(messages, kind) {
     for (let position = matches.length - 1; position >= 0; position--) {
       // Blocks of the other save kind are unrelated preparation; malformed
       // blocks of this protocol fail closed instead of being skipped.
-      const block = parseBlock(matches[position][1], kind)
+      const [, header, raw, closing] = matches[position]
+      if (header !== '' || closing !== '\n```' || raw.includes('\n')) fail('invalid_prepared_block')
+      const block = parseBlock(raw, kind)
       if (block) return block
     }
   }
@@ -302,7 +304,7 @@ function insertIndex(index, target, title) {
   const existingAt = section.findIndex((line) => slug(line) === target)
   if (existingAt >= 0) {
     const previous = section[existingAt]
-    section[existingAt] = previous.replace(/\[\[analyses\/[a-z0-9-]+(?:\|[^\]]*)?\]\]/, link)
+    section[existingAt] = previous.replace(/\[\[analyses\/[a-z0-9-]+(?:\|[^\]]*)?\]\]/, () => link)
     return {
       text: [...lines.slice(0, start + 1), ...section, ...lines.slice(end)].join('\n'),
       changed: previous !== section[existingAt],
@@ -366,15 +368,16 @@ export function manualAuthoring({ configuration, runtime }) {
   const lock = path.join(opts.stateRoot, 'manual.lock')
   const control = (input) => publisherControl(input, opts)
   const save = (state) => writeNewFile(file, `${JSON.stringify(validate(state))}\n`, 0o600)
-  const git = async (...args) =>
+  const gitBytes = async (...args) =>
     (
       await runFile('git', ['--no-replace-objects', '--literal-pathspecs', ...args], {
         cwd: opts.wikiRoot,
-        encoding: 'utf8',
+        encoding: 'buffer',
         maxBuffer: 32 * 1024 * 1024,
         env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' },
       })
     ).stdout
+  const git = async (...args) => (await gitBytes(...args)).toString('utf8')
   let running = null
 
   const load = async () => {
@@ -454,11 +457,15 @@ export function manualAuthoring({ configuration, runtime }) {
       if (!previous) fail('missing_authoring_state')
       if (previous.request_id === input.request_id) {
         if (previous.kind !== kind) fail('request_id_conflict')
-        if (previous.status === 'completed') return response(previous)
+        if (previous.status === 'completed' && !previous.status_delivery_failed)
+          return response(previous)
         fail('busy')
       }
       if (running) fail('busy')
-      if (previous.status !== 'idle' && previous.status !== 'completed')
+      if (
+        previous.status_delivery_failed ||
+        (previous.status !== 'idle' && previous.status !== 'completed')
+      )
         fail('operator_action_required_or_busy')
       await assertQuiet()
       // Intent precedes every runtime call. Extraction failures prove that
@@ -702,12 +709,11 @@ export function manualAuthoring({ configuration, runtime }) {
       if (!state) fail('missing_authoring_state')
       if (state.status === 'completed') {
         if (!state.status_delivery_failed) fail('not_stopped')
-        return finish(state, state.result)
+        state.status = 'operator_action_required'
+        state.blocker = 'summary_admission_uncertain'
+        await save(state)
       }
       if (state.status !== 'operator_action_required') fail('not_stopped')
-      if (state.blocker === 'summary_admission_uncertain' && state.result) {
-        return finish(state, state.result)
-      }
       await assertQuiet()
       if (state.kind === 'analysis' && state.target === null) {
         // Interrupted during extraction: nothing was ever written.
@@ -724,13 +730,42 @@ export function manualAuthoring({ configuration, runtime }) {
     const page = `analyses/${state.target}.md`
     const print = `assets/analyses/${state.target}.html`
     const commit =
-      (await git('rev-parse', 'HEAD')).trim() !== state.base
+      state.result?.commit ??
+      ((await git('rev-parse', 'HEAD')).trim() !== state.base
         ? await findCommit(state, page, print)
-        : null
+        : null)
+    const pageFile = await confinedFile(opts.wikiRoot, page)
+    const printFile = await confinedFile(opts.wikiRoot, print)
+    const savedPage = await readExisting(pageFile)
+    const savedPrint = await readExisting(printFile)
     if (!commit) {
+      // A scan miss is not evidence that a write never landed: only unchanged
+      // target paths at the recorded baseline can safely release ownership.
+      await git('diff', '--quiet', state.base, 'HEAD', '--', page, print).catch(() =>
+        fail('manual_maintenance_required'),
+      )
+      const matchesBaseline = async (name, bytes) => {
+        const entry = await git('ls-tree', '-z', state.base, '--', name)
+        if (!entry) return bytes === null
+        if (!/^100(?:644|755) blob [0-9a-f]{40}\t/.test(entry)) return false
+        return (
+          bytes !== null &&
+          SHA(bytes) === SHA(await gitBytes('cat-file', 'blob', `${state.base}:${name}`))
+        )
+      }
+      if (!(await matchesBaseline(page, savedPage)) || !(await matchesBaseline(print, savedPrint)))
+        fail('manual_maintenance_required')
       await save(empty())
       return { verified: true, status: 'idle', request_id: null }
     }
+    if (
+      savedPage === null ||
+      savedPrint === null ||
+      SHA(savedPage) !== state.digest ||
+      SHA(savedPrint) !== state.rendered ||
+      !(await matchesCommit(state, commit, page, print))
+    )
+      fail('manual_maintenance_required')
     return finish(state, {
       kind: 'analysis',
       name: state.target,
@@ -749,18 +784,24 @@ export function manualAuthoring({ configuration, runtime }) {
       .split('\n')
       .filter(Boolean)
     for (const commit of hashes) {
-      const blob = async (name) =>
-        SHA(await git('cat-file', 'blob', `${commit}:${name}`).catch(() => ''))
-      if ((await blob(page)) === state.digest && (await blob(print)) === state.rendered)
-        return commit
+      if (await matchesCommit(state, commit, page, print)) return commit
     }
     return null
+  }
+
+  async function matchesCommit(state, commit, page, print) {
+    const blob = async (name) => {
+      const bytes = await gitBytes('cat-file', 'blob', `${commit}:${name}`).catch(() => null)
+      return bytes === null ? null : SHA(bytes)
+    }
+    return (await blob(page)) === state.digest && (await blob(print)) === state.rendered
   }
 
   async function resumeAnswers(state) {
     const target = await confinedFile(opts.answersRoot, `${state.target}.md`)
     const written = target ? await readExisting(target) : null
     if (written === null) {
+      if (state.result !== null) fail('manual_maintenance_required')
       await save(empty())
       return { verified: true, status: 'idle', request_id: null }
     }
