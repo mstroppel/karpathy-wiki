@@ -97,9 +97,12 @@ disables all wiki/journal/answer writes and is not an auto-ingest switch.
 Recreate OpenCode to apply mount changes. The optional
 [trusted publisher](trusted-publisher.md) provides an operator-only writer;
 the alternative [manual-ingest profile](manual-ingest.md) routes immediate browser
-`/ingest-new` through separate UI-authenticated admission. Configure its
+`/ingest-new`, `/analysis-save` and `/answer-save` through separate
+UI-authenticated admission. Configure its
 `WIKI_INGEST_CONTROL_URL` and separate `WIKI_INGEST_CONTROL_TOKEN` only in the UI
-and controller, never OpenCode. Both are empty/default-off. Other reader-mode
+and controller, never OpenCode. Trusted analysis saves additionally need
+`WIKI_PUBLIC_URL` in the controller environment to derive the public page and
+print-view URLs. Both are empty/default-off. Other reader-mode
 authoring and automatic ingestion remain unsupported.
 
 `/ingest-new` orchestrates bulk wiki ingestion in bounded batches. The batch

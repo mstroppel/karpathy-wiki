@@ -17,6 +17,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The opt-in reader-mode [manual ingest route](docs/manual-ingest.md) now also
+  routes `/analysis-save` and confirmed `/answer-save` writes through its
+  UI-authenticated trusted channel: the model runtime prepares page or answer
+  content as data, the empty browser command admits the save, and the trusted
+  writer performs it with content-free durable state, exclusive writer
+  ownership shared with ingest runs, one focused analysis commit (page, rendered
+  print view, index and log) and explicit verified `resume` recovery. Default
+  writable manual behavior is unchanged; command arguments, `overview.md` links
+  and `/lint`/repair authoring remain unsupported in reader mode. Trusted
+  analysis saves need `WIKI_PUBLIC_URL` in the `manual-ingest` service and the
+  publisher image now ships the deterministic `render-analysis` renderer.
+
 - OpenChamber is now the default chat interface, with a release-built locked
   image, separate browser authentication, persistent UI settings, read-only wiki
   access and backend-aware health checks. OpenCode is private; SilverBullet is

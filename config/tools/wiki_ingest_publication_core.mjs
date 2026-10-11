@@ -51,7 +51,9 @@ async function git(wikiRoot, args, env = {}) {
   ).stdout
 }
 
-async function withWikiLock(opts, action) {
+// Shared kernel serialization boundary for every wiki mutation: ingest
+// publication and trusted authoring saves both run inside it.
+export async function withWikiLock(opts, action) {
   const directory = path.join(opts.wikiRoot, '.git')
   if ((await realpath(directory)) !== directory) throw new Error('Unsicheres Git-Verzeichnis')
   return withIngestLock(path.join(directory, 'wiki-ingest-publication.lock'), action)

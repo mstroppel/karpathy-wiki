@@ -64,11 +64,13 @@ docker run -d --name "$reader" --network "$network" --network-alias opencode \
 docker run -d --name "$writer" --network "$network" --network-alias manual-ingest \
     --read-only --user 1000:1000 --cap-drop ALL --security-opt no-new-privileges:true --init \
     -e OPENCODE_PASSWORD -e WIKI_RUNTIME_READ_ONLY=true -e WIKI_INGEST_CONTROL_TOKEN \
+    -e WIKI_PUBLIC_URL=https://wiki.invalid \
     -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=core.hooksPath -e GIT_CONFIG_VALUE_0=/dev/null \
     --tmpfs /tmp:uid=1000,gid=1000,mode=0700,noexec \
     --mount "type=volume,src=$data,dst=/knowledge/wiki,volume-subpath=wiki" \
     --mount "type=volume,src=$data,dst=/knowledge/sources,volume-subpath=sources,readonly" \
     --mount "type=volume,src=$data,dst=/knowledge/incoming/ingest-journal,volume-subpath=incoming/ingest-journal" \
+    --mount "type=volume,src=$data,dst=/knowledge/incoming/answers,volume-subpath=incoming/answers" \
     --mount "type=volume,src=$data,dst=/knowledge/publisher,volume-subpath=publisher" \
     --entrypoint /bin/sh "$publisher_image" /opt/karpathy-wiki/publisher/manual-entrypoint.sh >/dev/null
 docker run -d --name "$ui" --network "$network" --read-only --user 1000:1000 \
@@ -119,6 +121,21 @@ until docker exec "$writer" node --input-type=module -e '
 done
 docker exec "$ui" node /tmp/manual_ingest_chat.mjs noop
 [ "$(docker exec "$seed" git -C /knowledge/wiki rev-list --count HEAD)" -eq "$((baseline + 2))" ]
+# Trusted authoring channel: the fixture wiki needs the canonical index/log
+# sections before analysis saves can insert their generated entries.
+docker exec "$seed" node --input-type=module -e 'import { writeFile } from "node:fs/promises"; await writeFile("/knowledge/wiki/index.md", "# Synthetic Wiki\n\n## Überblick\n\n- [[overview|Überblick]]\n\n## Analysen\n"); await writeFile("/knowledge/wiki/log.md", "# Wiki-Protokoll\n");'
+docker exec "$seed" git -C /knowledge/wiki add -- .
+docker exec "$seed" git -C /knowledge/wiki -c user.name=Synthetic -c user.email=test@localhost \
+    -c commit.gpgsign=false commit -qm 'analysis baseline'
+authoring_baseline=$(docker exec "$seed" git -C /knowledge/wiki rev-list --count HEAD)
+docker exec -i "$ui" sh -c 'cat > /tmp/manual_authoring_chat.mjs' < "$root/tests/integration/manual_authoring_chat.mjs"
+docker exec "$ui" node /tmp/manual_authoring_chat.mjs
+[ "$(docker exec "$seed" git -C /knowledge/wiki rev-list --count HEAD)" -eq "$((authoring_baseline + 1))" ]
+[ "$(docker exec "$seed" git -C /knowledge/wiki log -1 --pretty=%s)" = "feat(analyses): Integrations-Analyse speichern" ]
+docker exec "$seed" test -f /knowledge/wiki/analyses/integration-analyse.md
+docker exec "$seed" test -f /knowledge/wiki/assets/analyses/integration-analyse.html
+docker exec "$seed" grep -q 'analyses/integration-analyse' /knowledge/wiki/index.md
+docker exec "$writer" grep -q 'END CONFIRMED ANSWERS' /knowledge/incoming/answers/antwort-integration.md
 docker exec -i "$reader" sh -c 'cat > /tmp/runtime_write_isolation.py' < "$root/tests/integration/runtime_write_isolation.py"
 docker exec -i "$reader" sh -c 'cat > /tmp/publisher_reader_probe.py' < "$root/tests/integration/publisher_reader_probe.py"
 docker exec "$reader" python3 /tmp/publisher_reader_probe.py

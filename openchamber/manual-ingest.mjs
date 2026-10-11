@@ -13,18 +13,31 @@ export function manualIngestMiddleware({ token, origin, url, parseBody, fetcher 
     return parseBody(req, res, () => handle(req, res, next, match))
   }
   async function handle(req, res, next, match) {
-    if (req.body?.name !== 'ingest-new') return next()
+    if (!['ingest-new', 'analysis-save', 'answer-save'].includes(req.body?.name)) return next()
     // Never accept cross-origin cookie requests or model/backend Basic auth as
     // operator admission. The preceding upstream gate verifies the UI session.
-    const resume = req.body.text?.trim() === 'resume'
-    if (
-      req.headers.origin !== origin ||
-      (req.body.text?.trim() && !resume) ||
-      req.body.files?.length
-    )
-      return res.status(403).json({ error: 'explicit_same_origin_ingest_required' })
+    const text = req.body.text?.trim() ?? ''
+    const resume = text === 'resume'
+    const refusal =
+      req.headers.origin !== origin || (text && !resume) || req.body.files?.length
+        ? 'explicit_same_origin_ingest_required'
+        : null
+    if (refusal && req.body.name === 'ingest-new') return res.status(403).json({ error: refusal })
+    if (refusal) return res.status(403).json({ error: 'explicit_same_origin_authoring_required' })
+    // Authoring saves are consumed entirely by this route: there is no fall
+    // through to a direct backend write. The model runtime only prepares
+    // content as data; the empty command is the explicit save admission and
+    // `resume` explicitly verifies an interrupted save.
+    const route =
+      req.body.name === 'ingest-new'
+        ? resume
+          ? '/resume'
+          : '/ingest-new'
+        : resume
+          ? '/authoring-resume'
+          : `/${req.body.name}`
     try {
-      const response = await fetcher(`${url}${resume ? '/resume' : '/ingest-new'}`, {
+      const response = await fetcher(`${url}${route}`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(

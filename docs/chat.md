@@ -50,9 +50,11 @@ concurrent writer sessions: this stack does not add writer serialization.
 
 The optional [reader-only backend mode](runtime-write-isolation.md) additionally
 prevents all backend wiki, source, journal and answer-inbox writes at the kernel
-boundary. Writing commands above are unavailable in that mode unless the separate
-[trusted manual ingest route](manual-ingest.md) is enabled for immediate browser
-`/ingest-new`. Other authoring remains unsupported; this is not automatic ingestion
+boundary. With the separate [trusted manual ingest route](manual-ingest.md)
+enabled, immediate browser `/ingest-new`, `/analysis-save` and `/answer-save`
+commands are admitted through the trusted channel and written by it; the runtime
+only prepares content. `/lint` maintenance, repair/rollback and other authoring
+remain unsupported; this is not automatic ingestion
 or a general API sandbox.
 
 The UI wiki mount is read-only. Ingest run records and reports are also mounted
@@ -108,9 +110,14 @@ model/provider budget. Do not use private sources for these checks.
   verify the viewer shows that run's report, not a previously opened wiki page;
   repeat with a second run. Run `/analysis`, then
   `/analysis-save` in the same conversation: verify the saved page and HTML view.
+- [ ] With the manual ingest route in reader mode: prepare an analysis save and
+  admit it with `/analysis-save`; verify page, print view, index/log entries and
+  exactly one focused commit, and that command arguments are refused.
 - [ ] With `answers` enabled, run `/gap-review`: answer and defer questions
   across turns. No answer source may be published before explicit confirmation;
-  after confirmation verify local redaction and normal ingest.
+  after confirmation verify local redaction and normal ingest. In reader mode
+  admit the confirmed save with `/answer-save` and verify only the inbox draft
+  appears, unpublished.
 - [ ] Trigger a harmless permission request with a disposable test agent:
   deny it and verify no operation occurs; approve another and verify it runs
   once. Trigger a native question and verify the response resumes the same turn.

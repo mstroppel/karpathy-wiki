@@ -37,6 +37,7 @@ jobs:
           node --test tests/test_chat_bootstrap.mjs
           node --test tests/test_trusted_publisher.mjs
           node --test tests/test_manual_ingest.mjs
+          node --test tests/test_trusted_authoring.mjs
       - uses: actions/upload-artifact@v7
         with:
           name: python-coverage

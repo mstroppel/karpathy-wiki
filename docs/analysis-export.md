@@ -25,6 +25,16 @@ the save. If the full text cannot be recovered, saving stops instead of
 publishing an incomplete analysis. `/analysis` runs in the current conversation
 and avoids this subagent-result limit.
 
+With the opt-in [manual ingest route](manual-ingest.md) (reader mode), the
+runtime cannot write and `/analysis-save` is a two-step trusted save: ask the
+chat to prepare the save (for example "Speichere diese Analyse im Wiki"), then
+send `/analysis-save` without arguments. The prepared block in the last agent
+message carries the complete page as data; the trusted channel writes page,
+print view, index and log and creates the commit. Command arguments are not
+routed in that mode, and `overview.md` links are not part of the trusted save.
+`/analysis-save resume` explicitly verifies an interrupted save; it never
+repeats one.
+
 The `wiki-analysis-save` skill then performs one focused commit that:
 
 - writes the analysis to `wiki/analyses/<slug>.md`,

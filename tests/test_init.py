@@ -243,6 +243,13 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(rules[("edit", "/knowledge/sources/**")], "deny")
         self.assertEqual(rules[("external_directory", "/knowledge/incoming/answers/**")], "allow")
         self.assertEqual(config["commands"]["gap-review"]["agent"], "build")
+        answer_save = config["commands"]["answer-save"]
+        self.assertEqual(answer_save["agent"], "build")
+        self.assertFalse(answer_save["subagent"])
+        self.assertIn("wiki-gap-review", answer_save["template"])
+        self.assertIn("/knowledge/incoming/answers", answer_save["template"])
+        self.assertIn("niemals unter /knowledge/sources schreiben", answer_save["template"])
+        self.assertIn("ausdrücklich bestätigten Antworten", answer_save["template"])
         self.assertFalse(config["commands"]["gap-review"]["subagent"])
         generic_status = "".join(
             path.read_text().lower()
@@ -329,11 +336,25 @@ class ConfigTests(unittest.TestCase):
         self.assertIn("assets/analyses/", save_skill)
         self.assertIn(".fs/assets/analyses/", save_skill)
         self.assertIn("render-analysis", save_skill)
+        # Reader-mode saves are prepared as a strict authoring block and
+        # admitted only through the trusted channel command.
+        self.assertIn("test -w /knowledge/wiki", save_skill)
+        self.assertIn("karpathy-authoring", save_skill)
+        self.assertIn("Vorbereiten im vertrauenswürdigen Kanal", save_skill)
+        self.assertIn("/analysis-save", save_skill)
+        gap_skill = (skills / "wiki-gap-review" / "SKILL.md").read_text()
+        self.assertIn("karpathy-authoring", gap_skill)
+        self.assertIn("/answer-save", gap_skill)
+        self.assertIn("<!-- END CONFIRMED ANSWERS -->", gap_skill)
         template = (skills / "wiki-analysis-save" / "print-template.html").read_text()
         self.assertIn("{{inhalt}}", template)
         self.assertIn('lang="de"', template)
         dockerfile = (ROOT / "opencode" / "Dockerfile").read_text()
         self.assertIn("COPY config/skills /etc/opencode/skills", dockerfile)
+        # The trusted writer derives print views itself with the same renderer.
+        self.assertIn("COPY opencode/render_analysis.py /usr/local/bin/render-analysis", dockerfile)
+        self.assertIn("python3-markdown python3-bleach", dockerfile)
+        self.assertIn("KARPATHY_WIKI_PRINT_TEMPLATE", dockerfile)
 
     def test_compose_passes_profiles_to_init(self):
         compose = (ROOT / "compose.yaml").read_text()
