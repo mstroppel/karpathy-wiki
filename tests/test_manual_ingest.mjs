@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { spawn } from 'node:child_process'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
@@ -8,6 +9,152 @@ import { publisherFixture, REPORT } from './helpers/publisher-fixture.mjs'
 import { manualRuntime } from '../publisher/manual_runtime.mjs'
 import { manualServer } from '../publisher/manual_server.mjs'
 import { loadRun } from '../config/tools/wiki_ingest_journal_core.mjs'
+import { controllerFence } from '../publisher/controller_fence.mjs'
+
+test('new controller boot fences old admissions, recovery and repeated initialization', () =>
+  fixtureTest(async ({ driver, configuration, runtime, calls, fixture }) => {
+    const restarted = manualIngest({
+      configuration: { ...configuration, bootId: '2'.repeat(32) },
+      runtime,
+    })
+    await restarted.initialize()
+    const baseline = await readFile(path.join(fixture.stateRoot, 'manual.json'), 'utf8')
+    await assert.rejects(
+      driver.submit({ session_id: 'ses_main', request_id: 'req-stale' }),
+      /stale_controller/,
+    )
+    await assert.rejects(driver.resume({ confirmed: true }), /stale_controller/)
+    await assert.rejects(driver.initialize(), /stale_controller/)
+    assert.equal(await readFile(path.join(fixture.stateRoot, 'manual.json'), 'utf8'), baseline)
+    assert.deepEqual(calls, [])
+  }))
+
+test('controller fence survives restart and rejects missing, corrupt and symlinked evidence', () =>
+  fixtureTest(async ({ fixture, configuration }) => {
+    const file = path.join(fixture.stateRoot, 'controller.json')
+    assert.equal((await stat(file)).mode & 0o777, 0o600)
+    assert.equal(
+      (await stat(path.join(fixture.stateRoot, 'controller-initialized.json'))).mode & 0o777,
+      0o600,
+    )
+    const original = await readFile(file, 'utf8')
+    const fence = controllerFence(configuration)
+    for (const bytes of [
+      'null',
+      '[]',
+      '{}',
+      '{"version":1,"boot_id":"invalid"}',
+      '{"version":1,"boot_id":"' + '1'.repeat(32) + '","extra":true}',
+    ]) {
+      await writeFile(file, bytes)
+      await assert.rejects(fence.initialize(() => {}))
+      assert.equal(await readFile(file, 'utf8'), bytes)
+    }
+    await rm(file)
+    await assert.rejects(
+      fence.initialize(() => {}),
+      /invalid_controller_fence/,
+    )
+    const outside = path.join(path.dirname(fixture.stateRoot), 'outside-fence.json')
+    await writeFile(outside, original)
+    await symlink(outside, file)
+    await assert.rejects(
+      fence.initialize(() => {}),
+      /invalid_controller_fence/,
+    )
+    assert.equal(await readFile(outside, 'utf8'), original)
+  }))
+
+test('execution lock refuses cross-process takeover until all awaited work is finished', () =>
+  fixtureTest(async ({ fixture, configuration, driver, calls }) => {
+    const module = new URL('../publisher/controller_fence.mjs', import.meta.url).href
+    const child = spawn(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        `
+      import { controllerFence } from ${JSON.stringify(module)};
+      const fence = controllerFence(JSON.parse(process.argv[1]));
+      await fence.run(async () => {
+        process.stdout.write('held');
+        await new Promise(resolve => process.stdin.once('data', resolve));
+      });
+    `,
+        JSON.stringify(configuration),
+      ],
+      { stdio: ['pipe', 'pipe', 'pipe'] },
+    )
+    const exited = new Promise((resolve) => child.once('close', resolve))
+    try {
+      await new Promise((resolve, reject) => {
+        child.stdout.once('data', resolve)
+        child.once('error', reject)
+        child.once('exit', () => reject(new Error('execution fixture exited before locking')))
+      })
+      const replacement = controllerFence({ ...configuration, bootId: '2'.repeat(32) })
+      await assert.rejects(
+        replacement.initialize(() => {}),
+        /Ingest-Lock/,
+      )
+      assert.equal(
+        JSON.parse(await readFile(path.join(fixture.stateRoot, 'controller.json'), 'utf8')).boot_id,
+        configuration.bootId,
+      )
+      await driver.submit({ session_id: 'ses_main', request_id: 'req-occupied-execution' })
+      await driver.wait()
+      const stopped = await driver.status()
+      assert.equal(stopped.status, 'operator_action_required')
+      assert.equal(stopped.blocker, 'execution_or_publication_uncertain')
+      assert.equal(stopped.report_failure, true)
+      assert.deepEqual(calls, [])
+      child.stdin.end('finish')
+      assert.equal(await exited, 0)
+      await replacement.initialize(() => {})
+      await assert.rejects(
+        controllerFence(configuration).run(() => assert.fail('stale callback ran')),
+        /stale_controller/,
+      )
+    } finally {
+      child.kill()
+      await exited
+    }
+  }))
+
+test('initialization cannot replace ownership during a delayed source worker or failure summary', () =>
+  fixtureTest(async ({ driver, configuration, runtime, fixture }) => {
+    let completeGeneration
+    let started
+    const generating = new Promise((resolve) => {
+      started = resolve
+    })
+    runtime.generate = async () => {
+      started()
+      return new Promise((resolve) => {
+        completeGeneration = resolve
+      })
+    }
+    await driver.submit({ session_id: 'ses_main', request_id: 'req-delayed' })
+    await generating
+    const replacement = manualIngest({
+      configuration: { ...configuration, bootId: '2'.repeat(32) },
+      runtime,
+    })
+    const takeover = replacement.initialize()
+    assert.equal(
+      JSON.parse(await readFile(path.join(fixture.stateRoot, 'controller.json'), 'utf8')).boot_id,
+      configuration.bootId,
+    )
+    completeGeneration('invalid JSON')
+    await driver.wait()
+    await takeover
+    assert.equal((await replacement.status()).status, 'operator_action_required')
+    await assert.rejects(
+      driver.submit({ session_id: 'ses_main', request_id: 'req-late' }),
+      /stale_controller/,
+    )
+    assert.equal(await fixture.git('rev-list', '--count', 'HEAD'), '1')
+  }))
 
 test('manual trusted driver publishes one source from a fresh deny-all child', async () => {
   const base = await mkdtemp(path.join(os.tmpdir(), 'manual-ingest-'))

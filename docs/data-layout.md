@@ -28,7 +28,7 @@ ${DATA_ROOT}/
 │   ├── audio/              # Content-free audio error reports
 │   └── paperless/          # Content-free Paperless error reports
 ├── openchamber/             # Private chat UI settings (not backend sessions)
-├── publisher/               # Trusted queue/ownership/intents; manual-controller and content-free authoring state
+├── publisher/               # Trusted queue/ownership/intents; controller boot fence, manual and authoring state
 └── opencode/
     ├── config/             # OpenCode configuration and generated policy
     ├── data/               # Credentials, sessions, messages, and logs

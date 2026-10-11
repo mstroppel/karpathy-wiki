@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Trusted manual ingest and authoring now share a controller execution fence:
+  an in-flight worker/publication/report prevents controller boot replacement,
+  and an old boot cannot admit or recover writes. Private content-free
+  `controller.json` and its initialization marker must be included in stopped
+  backups. Reader isolation and default writable operation remain unchanged;
+  automatic scheduling and priority handover are still unimplemented.
+
 - Ingestion report instructions now require concrete thematic findings with
   evidence locations, changes against the previous wiki, and justified omissions
   in the private per-source records. Compact chat summaries remain unchanged;
