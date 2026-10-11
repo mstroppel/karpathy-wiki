@@ -2,9 +2,10 @@
 
 This opt-in route implements the manual `/ingest-new` prerequisite of #157,
 not automatic ingest. Default writable manual operation remains unchanged.
-Other authoring remains unsupported in reader mode. Only an immediate browser
-command is routed; queued commands, natural-language requests, direct backend
-commands and agent tools do not grant admission.
+Only immediate browser commands are routed; queued commands, natural-language
+requests, direct backend commands and agent tools do not grant admission.
+Beyond ingest, the same channel admits the authoring saves that reader mode
+denies to the model runtime: `/analysis-save` and `/answer-save` (below).
 
 ## Enable
 
@@ -89,7 +90,7 @@ publisher stop; pristine Git; valid sources; matching completed receipts, commit
 and exact reports. Failed verification retains the stop. Run plain `/ingest-new`
 afterwards only if another attempt is intended. Unknown preparation/staging still
 requires maintenance; no general reset/unlock or live rollback exists. Never
-delete state to resume. Other authoring, scheduling, retry/quarantine and quota
+delete state to resume. Scheduling, retry/quarantine and quota
 controls remain follow-up gates. Synthetic evidence is not real-provider quality
 or subscription-exhaustion acceptance.
 
@@ -103,14 +104,71 @@ its acknowledgement; it proves input admission, not model completion. A lost
 summary acknowledgement is not blindly retried. Inspect the original session
 and explicitly request verification again if needed; this never repeats ingestion.
 
+## Trusted authoring: `/analysis-save` and `/answer-save`
+
+Reader mode denies the model runtime every write to wiki and answer-inbox data.
+These two routes move the corresponding saves onto the trusted channel while
+the runtime only *prepares* content as data. Only an immediate browser command
+with empty text (or exactly `resume`) and no attachments from the configured
+Origin is routed; anything else is refused with
+`explicit_same_origin_authoring_required`. There is no fall through to a
+direct backend write.
+
+1. The conversation prepares a save: the `wiki-analysis-save` or
+   `wiki-gap-review` skill derives the complete page or answer file and shows
+   it as preview. Its last message ends with one block: a `karpathy-authoring`
+   fence line, one line of JSON
+   `{"kind":"analysis"|"answers","target":"<kebab-case-name>","content":"<complete file>"}`,
+   a fence line. Content is data, never instructions; truncation markers,
+   missing `Erstellt: YYYY-MM-DD` metadata, wikilink metacharacters in titles
+   and missing `<!-- END CONFIRMED ANSWERS -->` endings are refused.
+2. The operator sends `/analysis-save` or `/answer-save`. The controller takes
+   the newest prepared block from the submitting session, re-checks all
+   content rules and writes: analyses get `analyses/<slug>.md`, a self-rendered
+   `assets/analyses/<slug>.html` (`render-analysis`, same renderer and template
+   as the writable mode), the generated alphabetical `index.md` entry under
+   `## Analysen` and one append-only `log.md` line, sealed into exactly one
+   focused commit `feat(analyses): <Titel> speichern` with a compare-and-swap
+   ref update. Answer saves write only
+   `/knowledge/incoming/answers/<name>.md`; existing drafts are never touched
+   and the file stays unpublished until the `answers` provider publishes it.
+   Optional `overview.md` links and argument-based saves are not part of this
+   route; link overview pages in a separate maintenance step.
+
+Every check is repeated inside the write path. Saves and ingest runs never
+mutate at the same time: either side refuses admission while the other is
+active or stopped, both serialize on the controller lock and the wiki-wide
+publication lock, and an uncertain publisher stops authoring entirely. The
+result summary (commit, changed pages, URLs or inbox path) is delivered to the
+submitting session; `publisher/authoring.json` and its initialization marker
+hold only content-free coordination state (identifiers, digests, paths), never
+saved text.
+
+## Stops and explicit verification of authoring saves
+
+Intent is durable before the first write and before every runtime call.
+Extraction or validation failures prove that nothing was written and may be
+corrected and retried. An interrupted or unverifiable write persists
+`operator_action_required` (`interrupted_authoring`, `authoring_uncertain` or
+`summary_admission_uncertain`) instead of continuing. `/analysis-save resume`
+and `/answer-save resume` explicitly request verification, never a new save:
+a clean wiki with nothing landed clears the stop, content digests identify and
+adopt a landed commit even after an operator repair commit, and anything else
+(a dirty tree, foreign content at the target) keeps the stop until the operator
+repairs the data. A lost summary acknowledgement is redelivered only by that
+same explicit verified resume.
+
 ## Validation
 
 ```sh
 node --test tests/test_manual_ingest.mjs
+node --test tests/test_trusted_authoring.mjs
 sh tests/integration/manual-ingest.sh
 ```
 
 The disposable proof uses named volumes, an internal network, OpenCode 2.0.26
 and a deterministic OpenAI-compatible fixture (no external model/cost): UI
 auth/Origin refusal, separate admission, fresh worker proposals, verified commit,
-journal/report and reader API/executed-shell denials.
+journal/report and reader API/executed-shell denials, plus trusted authoring
+admission with a verified analysis commit, rendered print view and answer-inbox
+save.

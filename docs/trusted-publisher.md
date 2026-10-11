@@ -28,9 +28,10 @@ kernel boundary. Host/admin writers and source providers remain outside coordina
 do not run `init` concurrently.
 
 **This operator-only profile does not route chat authoring.** An alternative
-[manual-ingest profile](manual-ingest.md) routes immediate browser `/ingest-new`;
-`/analysis-save`, answer saves and other authoring remain unsupported in reader
-mode. No scheduler is enabled. Default writable manual mode stays unchanged.
+[manual-ingest profile](manual-ingest.md) routes immediate browser `/ingest-new`,
+`/analysis-save` and `/answer-save`; `/lint` maintenance, repair/rollback and
+other authoring remain unsupported in reader mode. No scheduler is enabled.
+Default writable manual mode stays unchanged.
 Stop the publisher before returning OpenCode to writable mode.
 
 ## Private control protocol

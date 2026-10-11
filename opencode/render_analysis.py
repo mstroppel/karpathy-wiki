@@ -3,6 +3,7 @@
 
 import argparse
 import html
+import os
 import re
 from datetime import date
 from pathlib import Path
@@ -14,7 +15,12 @@ import markdown
 from markdown.extensions import Extension
 from markdown.inlinepatterns import InlineProcessor
 
-TEMPLATE = Path("/etc/opencode/skills/wiki-analysis-save/print-template.html")
+TEMPLATE = Path(
+    os.environ.get(
+        "KARPATHY_WIKI_PRINT_TEMPLATE",
+        "/etc/opencode/skills/wiki-analysis-save/print-template.html",
+    )
+)
 SLUG = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")
 DATE = re.compile(r"Erstellt: (\d{4}-\d{2}-\d{2})\Z")
 WIKILINK = r"(?<!!)\[\[([^\]\n|]+)(?:\|([^\]\n]+))?\]\]"

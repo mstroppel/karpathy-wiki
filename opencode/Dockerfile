@@ -79,13 +79,18 @@ WORKDIR /knowledge/wiki
 ENTRYPOINT ["karpathy-wiki-chat"]
 
 # Trusted writer only: no OpenCode, chat, npm packages, model credentials or API.
+# The deterministic analysis renderer ships here so the trusted channel derives
+# print views itself instead of trusting runtime-produced artifacts.
 FROM node:26-bookworm-slim@sha256:662933cf47f013bc8e4beb31a6116448427a82057ba7c42c97e4c5ba766504c2 AS publisher
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git python3 \
+    && apt-get install -y --no-install-recommends git python3 python3-markdown python3-bleach \
     && rm -rf /var/lib/apt/lists/*
 COPY config/tools /opt/karpathy-wiki/config/tools
 COPY publisher /opt/karpathy-wiki/publisher
-RUN chmod 0755 /opt/karpathy-wiki/publisher/entrypoint.sh
+COPY opencode/render_analysis.py /usr/local/bin/render-analysis
+COPY config/skills/wiki-analysis-save/print-template.html /opt/karpathy-wiki/print-template.html
+ENV KARPATHY_WIKI_PRINT_TEMPLATE=/opt/karpathy-wiki/print-template.html
+RUN chmod 0755 /opt/karpathy-wiki/publisher/entrypoint.sh /usr/local/bin/render-analysis
 USER 1000:1000
 WORKDIR /knowledge/wiki
 ENTRYPOINT ["/opt/karpathy-wiki/publisher/entrypoint.sh"]

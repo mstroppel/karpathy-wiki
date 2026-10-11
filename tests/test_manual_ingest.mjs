@@ -214,6 +214,15 @@ test('controller HTTP admits only its separate UI token, never arbitrary publica
       },
       status: async () => ({ status: 'idle' }),
     },
+    authoring: {
+      save: async () => {
+        throw new Error('unexpected')
+      },
+      resume: async () => {
+        throw new Error('unexpected')
+      },
+      status: async () => ({ status: 'idle' }),
+    },
   })
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
   try {
@@ -539,7 +548,33 @@ test('status route serves only a content-free operational projection', async () 
     resume_verified: true,
     final_status: null,
   }
-  const server = manualServer({ token, driver: { status: async () => state } })
+  const server = manualServer({
+    token,
+    driver: { status: async () => state },
+    authoring: {
+      status: async () => ({
+        version: 1,
+        status: 'completed',
+        session_id: 'ses_main',
+        request_id: 'req-authoring',
+        kind: 'analysis',
+        target: 'beispiel',
+        digest: 'e'.repeat(64),
+        rendered: 'f'.repeat(64),
+        base: 'a'.repeat(40),
+        phase: null,
+        blocker: null,
+        result: {
+          kind: 'analysis',
+          name: 'beispiel',
+          commit: 'd'.repeat(40),
+          changed_pages: ['analyses/beispiel.md'],
+          path: '/knowledge/wiki/analyses/beispiel.md',
+        },
+        status_delivery_failed: false,
+      }),
+    },
+  })
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
   try {
     const url = `http://127.0.0.1:${server.address().port}/status`
@@ -548,6 +583,7 @@ test('status route serves only a content-free operational projection', async () 
     ).json()
     assert.deepEqual(Object.keys(served).sort(), [
       'active',
+      'authoring',
       'blocker',
       'completed_sources',
       'failure',
@@ -561,6 +597,16 @@ test('status route serves only a content-free operational projection', async () 
       'status',
       'status_delivery_failed',
     ])
+    assert.deepEqual(Object.keys(served.authoring).sort(), [
+      'blocker',
+      'kind',
+      'phase',
+      'request_id',
+      'result',
+      'status',
+      'status_delivery_failed',
+      'target',
+    ])
     assert.deepEqual(Object.keys(served.results[0]).sort(), [
       'commit',
       'preparation_id',
@@ -572,8 +618,41 @@ test('status route serves only a content-free operational projection', async () 
     assert.equal(served.results[0].report_path, state.results[0].report_path)
     assert.equal(served.selected_count, 1)
     assert.ok(!JSON.stringify(served).includes('Synthetic smuggled content.'))
-    assert.ok(!JSON.stringify(served).includes('source_path'))
-    assert.ok(!JSON.stringify(served).includes('changed_pages'))
+    assert.ok(!JSON.stringify(served.results).includes('source_path'))
+    assert.ok(!JSON.stringify(served.results).includes('changed_pages'))
+  } finally {
+    await new Promise((resolve) => server.close(resolve))
+  }
+})
+
+test('authoring resume exposes the content-free maintenance blocker without leaking unknown errors', async () => {
+  const token = '1'.repeat(64)
+  let blocker = 'manual_maintenance_required'
+  const server = manualServer({
+    token,
+    driver: {},
+    authoring: {
+      resume: async () => {
+        throw new Error(blocker)
+      },
+    },
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  try {
+    const url = `http://127.0.0.1:${server.address().port}/authoring-resume`
+    const request = () =>
+      fetch(url, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmed: true }),
+      })
+    const maintenance = await request()
+    assert.equal(maintenance.status, 409)
+    assert.deepEqual(await maintenance.json(), { error: 'manual_maintenance_required' })
+    blocker = 'synthetic private internal details'
+    const unknown = await request()
+    assert.equal(unknown.status, 409)
+    assert.deepEqual(await unknown.json(), { error: 'operator_action_required_or_invalid_input' })
   } finally {
     await new Promise((resolve) => server.close(resolve))
   }

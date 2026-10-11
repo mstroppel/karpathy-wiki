@@ -325,6 +325,7 @@ services:
     environment:
       WIKI_RUNTIME_READ_ONLY: ${WIKI_RUNTIME_READ_ONLY:-false}
       WIKI_INGEST_CONTROL_TOKEN: ${WIKI_INGEST_CONTROL_TOKEN:-}
+      WIKI_PUBLIC_URL: ${WIKI_PUBLIC_URL:-}
       OPENCODE_PASSWORD: ${OPENCODE_PASSWORD:?OPENCODE_PASSWORD is required}
       GIT_CONFIG_COUNT: "1"
       GIT_CONFIG_KEY_0: core.hooksPath
@@ -335,6 +336,7 @@ services:
       - ${DATA_ROOT:-./data}/sources:/knowledge/sources:ro
       - ${DATA_ROOT:-./data}/wiki:/knowledge/wiki:rw
       - ${DATA_ROOT:-./data}/incoming/ingest-journal:/knowledge/incoming/ingest-journal:rw
+      - ${DATA_ROOT:-./data}/incoming/answers:/knowledge/incoming/answers:rw
       - ${DATA_ROOT:-./data}/publisher:/knowledge/publisher:rw
     depends_on:
       opencode:

@@ -13,18 +13,37 @@ export function manualIngestMiddleware({ token, origin, url, parseBody, fetcher 
     return parseBody(req, res, () => handle(req, res, next, match))
   }
   async function handle(req, res, next, match) {
-    if (req.body?.name !== 'ingest-new') return next()
+    const name = req.body?.name
+    const ingest = name === 'ingest-new'
+    if (!['ingest-new', 'analysis-save', 'answer-save'].includes(name)) return next()
     // Never accept cross-origin cookie requests or model/backend Basic auth as
     // operator admission. The preceding upstream gate verifies the UI session.
-    const resume = req.body.text?.trim() === 'resume'
-    if (
-      req.headers.origin !== origin ||
-      (req.body.text?.trim() && !resume) ||
-      req.body.files?.length
-    )
-      return res.status(403).json({ error: 'explicit_same_origin_ingest_required' })
+    const raw = typeof req.body.text === 'string' ? req.body.text : ''
+    const text = raw.trim()
+    const resume = text === 'resume'
+    // `ingest-new` keeps its documented trim rule. Authoring saves require
+    // literally empty text: whitespace is an argument, not an empty command.
+    const badText = ingest ? Boolean(text) && !resume : !(raw === '' || resume)
+    const refusal =
+      req.headers.origin !== origin || badText || req.body.files?.length
+        ? ingest
+          ? 'explicit_same_origin_ingest_required'
+          : 'explicit_same_origin_authoring_required'
+        : null
+    if (refusal) return res.status(403).json({ error: refusal })
+    // Authoring saves are consumed entirely by this route: there is no fall
+    // through to a direct backend write. The model runtime only prepares
+    // content as data; the empty command is the explicit save admission and
+    // `resume` explicitly verifies an interrupted save.
+    const route = ingest
+      ? resume
+        ? '/resume'
+        : '/ingest-new'
+      : resume
+        ? '/authoring-resume'
+        : `/${name}`
     try {
-      const response = await fetcher(`${url}${resume ? '/resume' : '/ingest-new'}`, {
+      const response = await fetcher(`${url}${route}`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(

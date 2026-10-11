@@ -1,4 +1,5 @@
 import importlib.util
+import os
 import subprocess
 import sys
 import tempfile
@@ -74,33 +75,42 @@ und [[concepts/evidenz|Evidenz]] sowie [[entities/person]].
             (wiki / "AGENTS.md").write_text("# Test Wiki\n")
             source = wiki / "analyses" / "example.md"
             source.write_text("# Title\nErstellt: 2026-09-27\n\nFirst version\n")
-            # The installed script reads its template from the image. Exercise the
-            # CLI with a temporary copy pointing to the repository's template.
-            runner = wiki / "renderer.py"
-            runner.write_text(
-                SCRIPT.read_text().replace(
-                    'Path("/etc/opencode/skills/wiki-analysis-save/print-template.html")',
-                    f"Path({str(ROOT / 'config/skills/wiki-analysis-save/print-template.html')!r})",
-                )
-            )
+            # The installed script reads its template from the image unless
+            # KARPATHY_WIKI_PRINT_TEMPLATE points at one.
             command = [
                 sys.executable,
-                str(runner),
+                str(SCRIPT),
                 "analyses/example.md",
                 "--wiki-url",
                 "https://wiki.example.org",
             ]
-            subprocess.run(command, cwd=wiki, check=True, capture_output=True)
+            environment = {
+                **os.environ,
+                "KARPATHY_WIKI_PRINT_TEMPLATE": str(
+                    ROOT / "config/skills/wiki-analysis-save/print-template.html"
+                ),
+            }
+            subprocess.run(command, cwd=wiki, check=True, capture_output=True, env=environment)
             output = wiki / "assets" / "analyses" / "example.html"
             self.assertIn("First version", output.read_text())
             source.write_text("# Title\nErstellt: 2026-09-27\n\nUpdated version\n")
-            subprocess.run(command, cwd=wiki, check=True, capture_output=True)
+            subprocess.run(command, cwd=wiki, check=True, capture_output=True, env=environment)
             self.assertIn("Updated version", output.read_text())
             self.assertNotIn("First version", output.read_text())
             invalid = subprocess.run(
-                command[:2] + ["analyses/../AGENTS.md", *command[3:]], cwd=wiki, capture_output=True
+                command[:2] + ["analyses/../AGENTS.md", *command[3:]],
+                cwd=wiki,
+                capture_output=True,
+                env=environment,
             )
             self.assertNotEqual(invalid.returncode, 0)
+            missing_template = subprocess.run(
+                command,
+                cwd=wiki,
+                capture_output=True,
+                env={**os.environ, "KARPATHY_WIKI_PRINT_TEMPLATE": str(wiki / "absent.html")},
+            )
+            self.assertNotEqual(missing_template.returncode, 0)
 
 
 if __name__ == "__main__":

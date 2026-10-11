@@ -16,6 +16,7 @@ export function manualRuntime({ url, password, fetcher = fetch }) {
   }
   return {
     session: (id) => request(`/api/session/${id}`),
+    messages: (id) => request(`/api/session/${id}/message`),
     create: (parentID, model) =>
       request('/api/session', {
         parentID,

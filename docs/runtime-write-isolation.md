@@ -38,12 +38,14 @@ Compose mounts. This changes no stored data layout and performs no migration.
 ## Supported behavior and boundary
 
 In reader mode, model questions, file reads and private session state remain
-available, but `/ingest-new`, `/analysis-save`, journal/report writes and saving
-confirmed `/gap-review` answers cannot work. Do not enable automated ingest here
-yet: the [operator-only trusted publisher](trusted-publisher.md) provides a separate
-write boundary, but model/chat authoring has not been routed through it.
-The existing publisher core reports a generic lock failure when its kernel lock
-write is denied; that is not evidence of another active writer.
+available. Direct `/ingest-new`, `/analysis-save`, journal/report writes and
+saving confirmed `/gap-review` answers are denied to the runtime: with the
+[manual-ingest profile](manual-ingest.md) those writes are admitted through the
+UI-authenticated trusted channel instead (`/ingest-new`, `/analysis-save`,
+`/answer-save`). Without that profile they cannot work at all. Do not enable
+automated ingest here yet. The existing publisher core reports a generic lock
+failure when its kernel lock write is denied; that is not evidence of another
+active writer.
 
 Authenticated API/configuration access is **not** sandboxed in general. Runtime
 secrets and sessions remain within the backend's existing authority. The guarantee

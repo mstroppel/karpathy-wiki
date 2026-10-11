@@ -121,12 +121,13 @@ model-free negative probe and the known blocker to plugin-only writer coordinati
 
 An optional [kernel-enforced reader mode](docs/runtime-write-isolation.md) prevents
 OpenCode from changing wiki, sources, ingest-journal and answer-inbox data even
-through direct backend APIs. It disables all chat wiki-authoring commands. An
-opt-in [trusted publisher](docs/trusted-publisher.md) provides an operator-only
+through direct backend APIs. An opt-in
+[trusted publisher](docs/trusted-publisher.md) provides an operator-only
 publication/coordination foundation. An alternative opt-in
 [trusted manual ingest route](docs/manual-ingest.md) connects immediate browser
-`/ingest-new` requests to isolated workers and verified publication in reader mode.
-Other reader-mode chat authoring and automatic ingest remain unimplemented.
+`/ingest-new`, `/analysis-save` and `/answer-save` requests to isolated workers,
+trusted writes and verified publication in reader mode. Other reader-mode chat
+authoring and automatic ingest remain unimplemented.
 Writable manual operation remains the default.
 
 ## Analyses
@@ -135,15 +136,18 @@ Scientific analyses (`/analysis`) can be saved from the same conversation with
 `/analysis-save` (no arguments required): the analysis is added to the wiki index
 and log as a linked page at `WIKI_PUBLIC_URL/analyses/<slug>`
 and a print-optimized HTML view at `WIKI_PUBLIC_URL/.fs/assets/analyses/<slug>.html`,
-from which the browser's print dialog produces a shareable PDF. See
-[analysis export](docs/analysis-export.md).
+from which the browser's print dialog produces a shareable PDF. In the opt-in
+reader-mode [manual ingest route](docs/manual-ingest.md) the save is prepared in
+the chat and admitted by sending `/analysis-save`, which the trusted channel
+writes and commits. See [analysis export](docs/analysis-export.md).
 
 ## Interactive gap review
 
 Run `/gap-review` in OpenCode to review unsupported claims, contradictions,
 missing information, and stale syntheses. Answer or defer its numbered
 questions across turns. Only after you confirm the proposed answers does
-OpenCode save a Markdown Q&A draft to the local answer inbox; that local save
+OpenCode save a Markdown Q&A draft to the local answer inbox (`/answer-save`
+admits that save through the trusted channel in reader mode); that local save
 works without the `answers` profile. Enable the profile for publication: the
 provider locally redacts and publishes the draft as a tracked source, which
 the normal wiki ingest flow uses to update the wiki. See
@@ -222,6 +226,7 @@ node --test tests/test_wiki_ingest_status.mjs tests/test_contract_fixtures.mjs t
 node --test tests/test_chat_bootstrap.mjs
 node --test tests/test_trusted_publisher.mjs
 node --test tests/test_manual_ingest.mjs
+node --test tests/test_trusted_authoring.mjs
 docker build --target opencode -t kw-opencode:integration -f opencode/Dockerfile .
 docker build --target openchamber -t kw-openchamber:integration -f opencode/Dockerfile .
 sh tests/integration/chat.sh  # authentication, discovery, native SSE and restart persistence
@@ -229,7 +234,7 @@ sh tests/integration/auto-ingest-runtime.sh  # negative writer-gate probe, NOT a
 sh tests/integration/runtime-write-isolation.sh  # pinned-runtime proof of the reader boundary
 docker build --target publisher -t kw-publisher:integration -f opencode/Dockerfile .
 sh tests/integration/trusted-publisher.sh  # isolated writer, crash recovery and reader boundary
-sh tests/integration/manual-ingest.sh  # UI-only admission and synthetic worker proposals
+sh tests/integration/manual-ingest.sh  # UI-only admission, synthetic worker proposals and trusted authoring saves
 tests/integration/run.sh  # requires Docker; disposable Compose stack test
 ```
 

@@ -49,6 +49,15 @@ inhaltliche Änderungen brauchen eine neue Vorschau und Bestätigung.
    `<!-- END CONFIRMED ANSWERS -->` ab. Erst nach erfolgreichem Schreiben ist
    die Antwort **lokal gespeichert**, noch nicht veröffentlicht oder übernommen.
    Bei Schreibfehler: genaue Fehlermeldung nennen, Gesprächsstand behalten.
+   Ohne Schreibzugriff auf `/knowledge/incoming/answers` (Read-only-Laufzeit)
+   ist dieser Schritt eine Vorbereitung für den vertrauenswürdigen Kanal:
+   fertige die Eingangsdatei vollständig aus, zeige sie als Vorschau, weise auf
+   die Bestätigung durch `/answer-save` hin und gib als Abschluss deiner
+   Antwort genau einen Block aus drei Zeilen aus: eine Fence-Zeile mit der
+   Kennung `karpathy-authoring`, eine Zeile mit dem einzeiligen JSON-Objekt
+   `{"kind":"answers","target":"<name>","content":"<vollständige Datei>"}`,
+   eine Fence-Zeile. Erst der Befehl `/answer-save` des Nutzers speichert die
+   Datei im Eingang; du speicherst dann nichts nach.
 2. **Veröffentlichung prüfen.** Der laufende Anbieter `answers-ingest`
    (`COMPOSE_PROFILES=answers`, ggf. ergänzen) ist für die Veröffentlichung
    erforderlich, nicht für Schritt 1. Er redigiert lokal nach Deny-Liste;
@@ -69,6 +78,9 @@ inhaltliche Änderungen brauchen eine neue Vorschau und Bestätigung.
    Konflikten in betroffene Seiten, `index.md`, `overview.md` und `log.md`
    übernehmen. Ein bloßes „ingeste die Antworten“ ist kein vollständiger
    Delegationsauftrag. Bei Importfehler nenne Blocker und offene Fragen.
+   Ohne Schreibzugriff (Read-only-Laufzeit) importiert ausschließlich
+   `/ingest-new` alle dann ausstehenden Revisionen; die gezielte
+   Einzelquellen-Übernahme bleibt der beschreibbaren Betriebsart vorbehalten.
 4. **Übernahme belegen.** Prüfe erneut genau diese Quelle mit
    `include_current: true`. Erfolg nur bei `current` für die übergebene Revision
    und gemeldetem Commit. Ist sie bei einer Fortsetzung bereits `current`,

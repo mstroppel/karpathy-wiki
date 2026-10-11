@@ -6,8 +6,29 @@ createServer(async (req, res) => {
   for await (const chunk of req) chunks.push(chunk)
   const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
   const prompt = JSON.stringify(body.messages ?? [])
+  const latest = JSON.stringify((body.messages ?? []).at(-1) ?? {})
   let answer = 'Synthetic verified manual ingest summary.'
-  if (prompt.includes('Privater Auftrag und Codeantworten')) {
+  if (latest.includes('Vorbereite den Analyseblock')) {
+    answer =
+      'Vorschau: gespeicherte Analyse.\n```karpathy-authoring\n' +
+      JSON.stringify({
+        kind: 'analysis',
+        target: 'integration-analyse',
+        content:
+          '# Integrations-Analyse\nErstellt: 2026-10-11\n\nEin **Befund** aus der Integration.\n',
+      }) +
+      '\n```'
+  } else if (latest.includes('Vorbereite den Antwortblock')) {
+    answer =
+      'Vorschau: bestätigte Antworten.\n```karpathy-authoring\n' +
+      JSON.stringify({
+        kind: 'answers',
+        target: 'antwort-integration',
+        content:
+          '# Bestätigte Antworten\n\n- Frage 1: Antwort aus der Integration.\n\n<!-- END CONFIRMED ANSWERS -->\n',
+      }) +
+      '\n```'
+  } else if (prompt.includes('Privater Auftrag und Codeantworten')) {
     let output
     if (!prompt.includes('Vorschlag:'))
       output = { proposal: { operation: 'read_source', offset: 1, limit: 80 } }

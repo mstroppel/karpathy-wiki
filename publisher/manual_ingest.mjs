@@ -22,6 +22,7 @@ import {
   RUN_ID_RE,
 } from '../config/tools/wiki_ingest_journal_core.mjs'
 import { withIngestLock, writeIngestFile } from '../config/tools/wiki_ingest_storage.mjs'
+import { authoringBusy } from './authoring.mjs'
 
 const SESSION = /^ses[a-zA-Z0-9_-]{1,100}$/
 const REQUEST = /^req-[a-zA-Z0-9_-]{1,96}$/
@@ -122,7 +123,7 @@ const attributable = (state, entry) => {
   )
 }
 
-function validate(state) {
+export function validate(state) {
   const invalid = () => {
     throw new Error('invalid_controller_state')
   }
@@ -269,6 +270,9 @@ export function manualIngest({ configuration, runtime }) {
     return withIngestLock(lock, async () => {
       const previous = await load()
       if (!previous) throw new Error('missing_controller_state')
+      // Writer ownership is exclusive: an active or stopped authoring save
+      // blocks ingest admission and the other way round.
+      if (await authoringBusy(configuration.stateRoot)) throw new Error('busy')
       if (previous?.request_id === input.request_id) {
         if (previous.session_id !== input.session_id) throw new Error('request_id_conflict')
         return { accepted: true, request_id: input.request_id }
@@ -521,6 +525,7 @@ export function manualIngest({ configuration, runtime }) {
     return withIngestLock(lock, async () => {
       const state = await load()
       if (running) throw new Error('busy')
+      if (await authoringBusy(configuration.stateRoot)) throw new Error('busy')
       if (!state || state.status !== 'operator_action_required') throw new Error('not_stopped')
       const publisher = await control({ operation: 'status' })
       if (publisher.active || publisher.inflight || publisher.stop || publisher.queue.length)
