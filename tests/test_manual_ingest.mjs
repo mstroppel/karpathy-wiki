@@ -624,3 +624,36 @@ test('status route serves only a content-free operational projection', async () 
     await new Promise((resolve) => server.close(resolve))
   }
 })
+
+test('authoring resume exposes the content-free maintenance blocker without leaking unknown errors', async () => {
+  const token = '1'.repeat(64)
+  let blocker = 'manual_maintenance_required'
+  const server = manualServer({
+    token,
+    driver: {},
+    authoring: {
+      resume: async () => {
+        throw new Error(blocker)
+      },
+    },
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  try {
+    const url = `http://127.0.0.1:${server.address().port}/authoring-resume`
+    const request = () =>
+      fetch(url, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmed: true }),
+      })
+    const maintenance = await request()
+    assert.equal(maintenance.status, 409)
+    assert.deepEqual(await maintenance.json(), { error: 'manual_maintenance_required' })
+    blocker = 'synthetic private internal details'
+    const unknown = await request()
+    assert.equal(unknown.status, 409)
+    assert.deepEqual(await unknown.json(), { error: 'operator_action_required_or_invalid_input' })
+  } finally {
+    await new Promise((resolve) => server.close(resolve))
+  }
+})

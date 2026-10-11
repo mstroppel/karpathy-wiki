@@ -123,7 +123,7 @@ const attributable = (state, entry) => {
   )
 }
 
-function validate(state) {
+export function validate(state) {
   const invalid = () => {
     throw new Error('invalid_controller_state')
   }

@@ -62,6 +62,7 @@ const ERRORS = {
   busy: 409,
   operator_action_required_or_busy: 409,
   publisher_maintenance_required: 409,
+  manual_maintenance_required: 409,
   confirmation_required: 409,
   not_stopped: 409,
   request_id_conflict: 409,

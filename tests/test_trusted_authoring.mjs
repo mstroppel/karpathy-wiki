@@ -5,6 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 import { authoringBusy, extractBlock, manualAuthoring } from '../publisher/authoring.mjs'
+import { manualIngest } from '../publisher/manual_ingest.mjs'
 import { publisherFixture } from './helpers/publisher-fixture.mjs'
 
 // Deterministic renderer stand-in: the real render-analysis contract is
@@ -148,6 +149,34 @@ test('repeated request admission is idempotent and never commits twice', async (
   )
 })
 
+test('updating an analysis refreshes its index title without duplicating the entry', async () => {
+  const texts = [ANALYSIS_BLOCK()]
+  await authoringFixtureTest(
+    async ({ fixture, authoring }) => {
+      await authoring.save('analysis', { session_id: 'ses_main', request_id: 'req-original' })
+      await authoring.wait()
+      texts[0] = ANALYSIS_BLOCK().replace('Beispiel & Analyse', 'Neuer Titel')
+      await authoring.save('analysis', { session_id: 'ses_main', request_id: 'req-title' })
+      await authoring.wait()
+      const state = await authoring.status()
+      assert.equal(state.status, 'completed')
+      assert.ok(state.result.changed_pages.includes('index.md'))
+      const index = await readFile(path.join(fixture.wikiRoot, 'index.md'), 'utf8')
+      assert.match(index, /- \[\[analyses\/beispiel-analyse\|Neuer Titel\]\]/)
+      assert.equal(index.match(/\[\[analyses\/beispiel-analyse\|/g).length, 1)
+      assert.ok(!index.includes('Beispiel & Analyse'))
+      // A same-title update must neither duplicate nor rewrite the index.
+      await authoring.save('analysis', { session_id: 'ses_main', request_id: 'req-same-title' })
+      await authoring.wait()
+      assert.equal((await authoring.status()).status, 'completed')
+      assert.ok(!(await authoring.status()).result.changed_pages.includes('index.md'))
+      assert.equal(await readFile(path.join(fixture.wikiRoot, 'index.md'), 'utf8'), index)
+      assert.equal(await fixture.git('rev-list', '--count', 'HEAD'), '5')
+    },
+    { texts },
+  )
+})
+
 test('trusted answer save writes only the private inbox file and reports it unpublished', async () => {
   await authoringFixtureTest(
     async ({ fixture, authoring, notes, base }) => {
@@ -282,18 +311,23 @@ test('authoring and ingest admission are mutually exclusive and fail closed', as
   await authoringFixtureTest(
     async ({ fixture, authoring, configuration }) => {
       assert.equal(await authoringBusy(fixture.stateRoot), false)
+      const driver = manualIngest({ configuration, runtime: runtimeFixture([]) })
+      await driver.initialize()
+      const idle = await driver.status()
       await writeFile(
         path.join(fixture.stateRoot, 'manual.json'),
-        JSON.stringify({ version: 1, status: 'running' }),
+        JSON.stringify({
+          ...idle,
+          status: 'running',
+          session_id: 'ses_main',
+          request_id: 'req-run',
+        }),
       )
       await assert.rejects(
         authoring.save('answers', { session_id: 'ses_main', request_id: 'req-busy' }),
         new Error('busy'),
       )
-      await writeFile(
-        path.join(fixture.stateRoot, 'manual.json'),
-        JSON.stringify({ version: 1, status: 'idle' }),
-      )
+      await writeFile(path.join(fixture.stateRoot, 'manual.json'), JSON.stringify(idle))
       await writeFile(
         path.join(fixture.stateRoot, 'authoring.json'),
         JSON.stringify({ version: 1, status: 'writing' }),
@@ -310,6 +344,130 @@ test('authoring and ingest admission are mutually exclusive and fail closed', as
     },
     { texts: [ANSWER_BLOCK()] },
   )
+})
+
+test('authoring validates all manual evidence before treating idle or completed as quiet', async () => {
+  await authoringFixtureTest(
+    async ({ fixture, authoring, configuration }) => {
+      const driver = manualIngest({ configuration, runtime: runtimeFixture([]) })
+      await driver.initialize()
+      const idle = await driver.status()
+      const file = path.join(fixture.stateRoot, 'manual.json')
+      const before = await readFile(path.join(fixture.stateRoot, 'authoring.json'), 'utf8')
+      const completed = {
+        ...idle,
+        status: 'completed',
+        session_id: 'ses_main',
+        request_id: 'req-completed',
+      }
+      for (const corrupt of [
+        null,
+        { version: 1, status: 'idle' },
+        { ...idle, selected: [null] },
+        { ...idle, blocker: 'summary_admission_uncertain' },
+        { ...completed, active: { intent: 'publish' } },
+        { ...completed, results: [{}] },
+        { ...completed, unknown: 'untrusted' },
+      ]) {
+        const written = JSON.stringify(corrupt)
+        await writeFile(file, written)
+        await assert.rejects(
+          authoring.save('answers', { session_id: 'ses_main', request_id: 'req-invalid-manual' }),
+          /invalid_controller_state/,
+        )
+        assert.equal(await readFile(file, 'utf8'), written)
+        assert.equal(await readFile(path.join(fixture.stateRoot, 'authoring.json'), 'utf8'), before)
+      }
+      await writeFile(file, JSON.stringify({ ...completed, status_delivery_failed: true }))
+      await assert.rejects(
+        authoring.save('answers', { session_id: 'ses_main', request_id: 'req-pending-summary' }),
+        /busy/,
+      )
+      // Fully validated quiet states remain admissible.
+      for (const [state, target] of [
+        [idle, 'idle'],
+        [completed, 'completed'],
+      ]) {
+        await writeFile(file, JSON.stringify(state))
+        const saver = manualAuthoring({
+          configuration,
+          runtime: runtimeFixture([ANSWER_BLOCK(target)]),
+        })
+        await saver.save('answers', { session_id: 'ses_main', request_id: `req-${target}` })
+        await saver.wait()
+        assert.equal((await saver.status()).status, 'completed')
+      }
+    },
+    { texts: [ANSWER_BLOCK()] },
+  )
+})
+
+test('recovered saves retain ownership until their summary is successfully delivered', async () => {
+  for (const kind of ['analysis', 'answers']) {
+    const notes = []
+    let broken = false
+    let saver
+    const runtime = runtimeFixture([kind === 'analysis' ? ANALYSIS_BLOCK() : ANSWER_BLOCK()], notes)
+    runtime.note = async (...args) => {
+      if (broken) {
+        assert.equal((await saver.status()).status, 'operator_action_required')
+        throw new Error('runtime_request_failed')
+      }
+      notes.push(args)
+    }
+    await authoringFixtureTest(
+      async ({ fixture, authoring, configuration }) => {
+        saver = authoring
+        const driver = manualIngest({ configuration, runtime })
+        await driver.initialize()
+        await saver.save(kind, { session_id: 'ses_main', request_id: 'req-landed' })
+        await saver.wait()
+        const landed = await saver.status()
+        assert.equal(landed.status, 'completed')
+        const file = path.join(fixture.stateRoot, 'authoring.json')
+        await writeFile(
+          file,
+          JSON.stringify({
+            ...landed,
+            status: 'operator_action_required',
+            blocker: 'interrupted_authoring',
+            result: null,
+          }),
+        )
+        broken = true
+        await assert.rejects(saver.resume({ confirmed: true }), /runtime_request_failed/)
+        const stopped = await saver.status()
+        assert.equal(stopped.status, 'operator_action_required')
+        assert.equal(stopped.blocker, 'summary_admission_uncertain')
+        assert.equal(stopped.status_delivery_failed, true)
+        assert.deepEqual(stopped.result, landed.result)
+        assert.equal(await authoringBusy(fixture.stateRoot), true)
+        await assert.rejects(
+          saver.save(kind, { session_id: 'ses_main', request_id: 'req-overwrite' }),
+          /operator_action_required_or_busy/,
+        )
+        await assert.rejects(
+          driver.submit({ session_id: 'ses_main', request_id: 'req-ingest' }),
+          /busy/,
+        )
+        // A further failed explicit resume still preserves the exact evidence.
+        await assert.rejects(saver.resume({ confirmed: true }), /runtime_request_failed/)
+        assert.deepEqual(await saver.status(), stopped)
+        broken = false
+        const resumed = await saver.resume({ confirmed: true })
+        assert.equal(resumed.status, 'completed')
+        assert.deepEqual((await saver.status()).result, landed.result)
+        assert.equal((await saver.status()).status_delivery_failed, false)
+        assert.equal(await authoringBusy(fixture.stateRoot), false)
+        assert.equal(notes.length, 2)
+        assert.equal(
+          await fixture.git('rev-list', '--count', 'HEAD'),
+          kind === 'analysis' ? '3' : '2',
+        )
+      },
+      { runtime },
+    )
+  }
 })
 
 test('interrupted saves keep a persistent stop and verified resume adopts the landed commit', async () => {
@@ -589,6 +747,32 @@ test('symlinked write targets cannot redirect a save out of their tree', async (
     },
     { texts: [ANALYSIS_BLOCK(), ANSWER_BLOCK()] },
   )
+})
+
+test('symlinked inbox ancestors are refused before creating any directories', async () => {
+  for (const ancestor of ['incoming', 'incoming/answers']) {
+    await authoringFixtureTest(
+      async ({ configuration, base }) => {
+        const outside = path.join(base, 'outside')
+        await mkdir(outside)
+        const isolated = path.join(base, 'isolated')
+        await mkdir(isolated)
+        if (ancestor === 'incoming/answers') await mkdir(path.join(isolated, 'incoming'))
+        await symlink(outside, path.join(isolated, ancestor))
+        const authoring = manualAuthoring({
+          configuration: { ...configuration, answersRoot: path.join(isolated, 'incoming/answers') },
+          runtime: runtimeFixture([ANSWER_BLOCK()]),
+        })
+        await assert.rejects(
+          authoring.save('answers', { session_id: 'ses_main', request_id: 'req-inbox-parent' }),
+          new Error('unsafe_write_path'),
+        )
+        assert.deepEqual(await readdir(outside), [])
+        assert.equal((await authoring.status()).status, 'idle')
+      },
+      { texts: [ANSWER_BLOCK()] },
+    )
+  }
 })
 
 test('verified resume scans the complete range and adopts an old landed commit', async () => {

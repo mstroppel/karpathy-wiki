@@ -1,10 +1,11 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { constants } from 'node:fs'
-import { mkdir, open, readFile, rename, rm } from 'node:fs/promises'
+import { lstat, mkdir, open, readFile, rename, rm } from 'node:fs/promises'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import { publisherControl } from './control.mjs'
+import { validate as validateManualState } from './manual_ingest.mjs'
 import {
   assertCleanIngestWiki,
   confinedIngestPath,
@@ -81,17 +82,37 @@ const readExisting = (file) =>
 // Every read and write target is confined below its configured root: symlinked
 // roots, directories or files (including a tracked symlink planted in the wiki
 // or a symlinked answer draft) can never redirect a save into another tree.
-// The walk starts above the configured root so even a symlinked inbox chain is
-// refused before anything is created.
-const confinedFile = (root, relative) =>
-  confinedIngestPath(
-    path.dirname(root),
-    path.posix.join(path.basename(root), relative),
+// Start at the filesystem root so missing configured ancestors can be checked
+// without creating them; even a symlinked inbox chain is refused first.
+const confinedFile = (root, relative) => {
+  const absolute = path.resolve(root)
+  const filesystemRoot = path.parse(absolute).root
+  return confinedIngestPath(
+    filesystemRoot,
+    path.posix.join(path.relative(filesystemRoot, absolute), relative),
     true,
-  ).catch((error) => {
-    if (error.code === 'ENOENT') return null
+  ).catch(() => {
     fail('unsafe_write_path')
   })
+}
+
+// Create missing directories one component at a time, checking existing and
+// newly created components without following symlinks. Never recursive mkdir
+// through an unchecked configured parent.
+async function ensureDirectory(directory, mode) {
+  const absolute = path.resolve(directory)
+  let current = path.parse(absolute).root
+  for (const part of path.relative(current, absolute).split(path.sep)) {
+    current = path.join(current, part)
+    try {
+      await mkdir(current, { mode })
+    } catch (error) {
+      if (error.code !== 'EEXIST') fail('unsafe_write_path')
+    }
+    const info = await lstat(current)
+    if (info.isSymbolicLink() || !info.isDirectory()) fail('unsafe_write_path')
+  }
+}
 
 // Durable coordination state stays content-free: identifiers, digests and
 // paths only. Content lives in its destination page or inbox file; a state
@@ -277,7 +298,16 @@ function insertIndex(index, target, title) {
   if (end < 0) end = lines.length
   const section = lines.slice(start + 1, end)
   const slug = (line) => /\[\[analyses\/([a-z0-9-]+)(?:\|[^\]]*)?\]\]/.exec(line)?.[1] ?? null
-  if (section.some((line) => slug(line) === target)) return { text: index, changed: false }
+  const link = `[[analyses/${target}|${title}]]`
+  const existingAt = section.findIndex((line) => slug(line) === target)
+  if (existingAt >= 0) {
+    const previous = section[existingAt]
+    section[existingAt] = previous.replace(/\[\[analyses\/[a-z0-9-]+(?:\|[^\]]*)?\]\]/, link)
+    return {
+      text: [...lines.slice(0, start + 1), ...section, ...lines.slice(end)].join('\n'),
+      changed: previous !== section[existingAt],
+    }
+  }
   const position = section.findIndex((line) => {
     const existing = slug(line)
     return existing !== null && existing > target
@@ -287,7 +317,7 @@ function insertIndex(index, target, title) {
     insertAt = section.length
     while (insertAt > 0 && section[insertAt - 1].trim() === '') insertAt--
   }
-  section.splice(insertAt, 0, `- [[analyses/${target}|${title}]]`)
+  section.splice(insertAt, 0, `- ${link}`)
   return {
     text: [...lines.slice(0, start + 1), ...section, ...lines.slice(end)].join('\n'),
     changed: true,
@@ -387,10 +417,15 @@ export function manualAuthoring({ configuration, runtime }) {
   // No silent overlap and no long writer hold: authoring saves and ingest runs
   // never mutate at the same time, and an uncertain publisher stops both.
   async function assertQuiet() {
-    const manual = JSON.parse((await readExisting(manualFile)) ?? 'null')
-    if (manual === null) {
+    const bytes = await readExisting(manualFile)
+    if (bytes === null) {
       if ((await readExisting(manualMarker)) !== null) fail('missing_controller_state')
-    } else if (!['idle', 'completed'].includes(manual.status)) fail('busy')
+    } else {
+      const manual = JSON.parse(bytes)
+      validateManualState(manual)
+      if (!['idle', 'completed'].includes(manual.status) || manual.status_delivery_failed)
+        fail('busy')
+    }
     const publisher = await control({ operation: 'status' })
     if (publisher.active || publisher.inflight || publisher.stop || publisher.queue.length)
       fail('publisher_maintenance_required')
@@ -513,7 +548,6 @@ export function manualAuthoring({ configuration, runtime }) {
       await assertCleanIngestWiki(opts.wikiRoot)
       return
     }
-    await mkdir(opts.answersRoot, { recursive: true, mode: 0o700 })
     const target = await confinedFile(opts.answersRoot, `${block.target}.md`)
     if (target && (await readExisting(target)) !== null) fail('answers_file_exists')
   }
@@ -526,8 +560,8 @@ export function manualAuthoring({ configuration, runtime }) {
       await assertCleanIngestWiki(opts.wikiRoot)
       const head = (await git('rev-parse', 'HEAD')).trim()
       if (head !== state.base) fail('authoring_uncertain')
-      await mkdir(path.join(opts.wikiRoot, 'analyses'), { recursive: true, mode: 0o755 })
-      await mkdir(path.join(opts.wikiRoot, 'assets', 'analyses'), { recursive: true, mode: 0o755 })
+      await ensureDirectory(path.join(opts.wikiRoot, 'analyses'), 0o755)
+      await ensureDirectory(path.join(opts.wikiRoot, 'assets', 'analyses'), 0o755)
       const pageFile = await confinedFile(opts.wikiRoot, page)
       const printFile = await confinedFile(opts.wikiRoot, print)
       const indexFile = await confinedFile(opts.wikiRoot, 'index.md')
@@ -593,10 +627,10 @@ export function manualAuthoring({ configuration, runtime }) {
       .sort()
 
   async function writeAnswers(state, block) {
+    await ensureDirectory(opts.answersRoot, 0o700)
     const target = await confinedFile(opts.answersRoot, `${block.target}.md`)
     if (!target) fail('unsafe_write_path')
     if ((await readExisting(target)) !== null) fail('answers_file_exists')
-    await mkdir(opts.answersRoot, { recursive: true, mode: 0o700 })
     await writeNewFile(target, block.content, 0o644)
     const written = await readExisting(target)
     if (!written || SHA(written) !== state.digest) fail('authoring_uncertain')
@@ -668,16 +702,11 @@ export function manualAuthoring({ configuration, runtime }) {
       if (!state) fail('missing_authoring_state')
       if (state.status === 'completed') {
         if (!state.status_delivery_failed) fail('not_stopped')
-        await deliverSummary(state)
-        return { verified: true, ...response(state) }
+        return finish(state, state.result)
       }
       if (state.status !== 'operator_action_required') fail('not_stopped')
       if (state.blocker === 'summary_admission_uncertain' && state.result) {
-        await deliverSummary(state)
-        state.status = 'completed'
-        state.blocker = null
-        await save(state)
-        return { verified: true, ...response(state) }
+        return finish(state, state.result)
       }
       await assertQuiet()
       if (state.kind === 'analysis' && state.target === null) {
@@ -747,11 +776,14 @@ export function manualAuthoring({ configuration, runtime }) {
 
   async function finish(state, result) {
     state.result = result
-    state.status = 'completed'
-    state.blocker = null
+    state.status = 'operator_action_required'
+    state.blocker = 'summary_admission_uncertain'
     state.phase = null
     await save(state)
     await deliverSummary(state)
+    state.status = 'completed'
+    state.blocker = null
+    await save(state)
     return { verified: true, ...response(state) }
   }
 
@@ -774,5 +806,5 @@ export async function authoringBusy(stateRoot) {
   } catch {
     return true
   }
-  return !['idle', 'completed'].includes(state.status)
+  return !['idle', 'completed'].includes(state.status) || state.status_delivery_failed
 }
