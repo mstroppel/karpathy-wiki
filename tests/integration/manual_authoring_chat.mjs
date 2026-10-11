@@ -60,8 +60,10 @@ const { data: session } = await created.json()
 // the explicit UI command admits the trusted write.
 assert.ok(
   (
-    await backend(`/api/session/${session.id}/generate`, {
-      prompt: 'Vorbereite den Analyseblock für die Integration.',
+    await backend(`/api/session/${session.id}/synthetic`, {
+      text: 'Vorbereite den Analyseblock für die Integration.',
+      description: 'prepared analysis block',
+      resume: true,
     })
   ).ok,
 )
@@ -93,8 +95,10 @@ for (const body of [
 
 assert.ok(
   (
-    await backend(`/api/session/${session.id}/generate`, {
-      prompt: 'Vorbereite den Antwortblock für die Integration.',
+    await backend(`/api/session/${session.id}/synthetic`, {
+      text: 'Vorbereite den Antwortblock für die Integration.',
+      description: 'prepared answer block',
+      resume: true,
     })
   ).ok,
 )

@@ -6,8 +6,9 @@ createServer(async (req, res) => {
   for await (const chunk of req) chunks.push(chunk)
   const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
   const prompt = JSON.stringify(body.messages ?? [])
+  const latest = JSON.stringify((body.messages ?? []).at(-1) ?? {})
   let answer = 'Synthetic verified manual ingest summary.'
-  if (prompt.includes('Vorbereite den Analyseblock')) {
+  if (latest.includes('Vorbereite den Analyseblock')) {
     answer =
       'Vorschau: gespeicherte Analyse.\n```karpathy-authoring\n' +
       JSON.stringify({
@@ -17,7 +18,7 @@ createServer(async (req, res) => {
           '# Integrations-Analyse\nErstellt: 2026-10-11\n\nEin **Befund** aus der Integration.\n',
       }) +
       '\n```'
-  } else if (prompt.includes('Vorbereite den Antwortblock')) {
+  } else if (latest.includes('Vorbereite den Antwortblock')) {
     answer =
       'Vorschau: bestätigte Antworten.\n```karpathy-authoring\n' +
       JSON.stringify({

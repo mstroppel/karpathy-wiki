@@ -454,9 +454,8 @@ test('restart turns an interrupted write into a persistent operator stop', async
 })
 
 test('extractBlock keeps only the newest prepared block and nothing else', () => {
+  // The runtime lists messages newest first (cursor order `desc`).
   const messages = [
-    { type: 'user', parts: [{ type: 'text', text: ANSWER_BLOCK('alt') }] },
-    { type: 'assistant', parts: [{ type: 'text', text: 'Erst ' + ANALYSIS_BLOCK('erste') }] },
     {
       type: 'assistant',
       content: [
@@ -466,6 +465,8 @@ test('extractBlock keeps only the newest prepared block and nothing else', () =>
         },
       ],
     },
+    { type: 'assistant', parts: [{ type: 'text', text: 'Erst ' + ANALYSIS_BLOCK('erste') }] },
+    { type: 'user', parts: [{ type: 'text', text: ANSWER_BLOCK('alt') }] },
   ]
   const block = extractBlock(messages, 'analysis')
   assert.equal(block.target, 'zweite')

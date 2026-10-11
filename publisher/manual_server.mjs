@@ -118,8 +118,11 @@ export function manualServer({ token, driver, authoring }) {
                 : await authoring.resume(input)
       return send(200, { data: result })
     } catch (error) {
-      return send(ERRORS[error.message] ?? 409, {
-        error: ERRORS[error.message] ?? 'operator_action_required_or_invalid_input',
+      // Known content-free error names pass through as their name with the
+      // matching status; anything else stays a generic refusal.
+      const status = ERRORS[error.message]
+      return send(status ?? 409, {
+        error: status === undefined ? 'operator_action_required_or_invalid_input' : error.message,
       })
     }
   })

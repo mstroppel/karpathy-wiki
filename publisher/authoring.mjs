@@ -187,15 +187,14 @@ function messageText(message) {
 }
 
 // Only the most recent prepared block counts: the operator confirms the
-// preview the agent just showed, never an older draft. Messages arrive in
-// chronological order, so the scan starts at the newest one. Extraction is
-// strict and deterministic; no model turn re-derives confirmed content. Only
-// agent messages carry prepared content; user, tool and synthetic ones never
-// do.
+// preview the agent just showed, never an older draft. The runtime lists
+// messages newest first (its cursor order is `desc`), so the scan starts at
+// index 0 and takes the last block of a message (later text is newer).
+// Extraction is strict and deterministic; no model turn re-derives confirmed
+// content. Only agent messages carry prepared content; user, tool and
+// synthetic ones never do.
 export function extractBlock(messages, kind) {
-  const chronological = messages ?? []
-  for (let index = chronological.length - 1; index >= 0; index--) {
-    const message = chronological[index]
+  for (const message of messages ?? []) {
     const role = message?.type ?? message?.role ?? message?.info?.role ?? message?.info?.type
     if (role !== undefined && role !== 'assistant') continue
     const matches = [...messageText(message).matchAll(FENCE)]
