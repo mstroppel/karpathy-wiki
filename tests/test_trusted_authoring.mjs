@@ -646,6 +646,61 @@ test('interrupted saves keep a persistent stop and verified resume adopts the la
   )
 })
 
+test('publication intent recovers log-only re-saves and distinguishes unpublished candidates', async () => {
+  for (const landed of [true, false]) {
+    await authoringFixtureTest(
+      async ({ fixture, authoring, configuration }) => {
+        await authoring.save('analysis', { session_id: 'ses_main', request_id: 'req-initial' })
+        await authoring.wait()
+        const baselineLog = await readFile(path.join(fixture.wikiRoot, 'log.md'))
+        await authoring.save('analysis', { session_id: 'ses_main', request_id: 'req-identical' })
+        await authoring.wait()
+        const saved = await authoring.status()
+        assert.equal(saved.status, 'completed')
+        assert.deepEqual(saved.result.changed_pages, ['log.md'])
+        const candidate = saved.result.commit
+        if (!landed) {
+          // Reconstruct the clean, explicitly repaired pre-ref-update state in
+          // this disposable wiki: the candidate exists but was never published.
+          await fixture.git('update-ref', 'HEAD', saved.base, candidate)
+          await writeFile(path.join(fixture.wikiRoot, 'log.md'), baselineLog)
+          await fixture.git('read-tree', 'HEAD')
+          assert.equal(await fixture.git('status', '--porcelain'), '')
+        }
+        await writeFile(
+          path.join(fixture.stateRoot, 'authoring.json'),
+          JSON.stringify({
+            ...saved,
+            status: 'writing',
+            phase: 'publishing',
+          }),
+        )
+        const notes = []
+        const restarted = manualAuthoring({ configuration, runtime: runtimeFixture([], notes) })
+        await restarted.initialize()
+        const stopped = await restarted.status()
+        assert.equal(stopped.status, 'operator_action_required')
+        assert.equal(stopped.blocker, 'interrupted_authoring')
+        assert.equal(stopped.result.commit, candidate)
+        const resumed = await restarted.resume({ confirmed: true })
+        if (landed) {
+          assert.equal(resumed.status, 'completed')
+          assert.equal(resumed.commit, candidate)
+          assert.deepEqual(resumed.changed_pages, ['log.md'])
+          assert.equal(notes.length, 1)
+          assert.equal(await fixture.git('rev-list', '--count', 'HEAD'), '4')
+        } else {
+          assert.deepEqual(resumed, { verified: true, status: 'idle', request_id: null })
+          assert.equal(notes.length, 0)
+          assert.equal(await fixture.git('rev-list', '--count', 'HEAD'), '3')
+        }
+        assert.equal(await authoringBusy(fixture.stateRoot), false)
+      },
+      { texts: [ANALYSIS_BLOCK()] },
+    )
+  }
+})
+
 test('a dirty wiki after an interrupted save stops for operator action until repaired', async () => {
   await authoringFixtureTest(async ({ fixture, configuration }) => {
     await writeFile(

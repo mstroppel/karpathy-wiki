@@ -26,7 +26,7 @@ const DIGEST_RE = /^[0-9a-f]{64}$/
 const FENCE = /```karpathy-authoring([^\n]*)(?:\n([\s\S]*?)(\n```|$)|$)/g
 const KINDS = ['analysis', 'answers']
 const STATUSES = ['idle', 'writing', 'completed', 'operator_action_required']
-const PHASES = ['extract', 'writing', 'summary']
+const PHASES = ['extract', 'writing', 'publishing', 'summary']
 const BLOCKERS = ['interrupted_authoring', 'authoring_uncertain', 'summary_admission_uncertain']
 const TRUNCATION = ['[showing ', 'full output saved to']
 const ANSWER_END = '<!-- END CONFIRMED ANSWERS -->'
@@ -158,9 +158,11 @@ export function validate(state) {
     invalid()
   if (state.status === 'writing') {
     if (state.blocker !== null) invalid()
-    // The verified result exists only once the write completed and its
-    // summary is being delivered.
-    if (state.phase === 'summary' ? state.result === null : state.result !== null) invalid()
+    // A validated candidate commit is persisted before ref publication; the
+    // result is authoritative only after ancestry/digests verify it landed.
+    const hasResult = state.phase === 'publishing' || state.phase === 'summary'
+    if (hasResult ? state.result === null : state.result !== null) invalid()
+    if (state.phase === 'publishing' && state.kind !== 'analysis') invalid()
     // Extraction records intent first; digests and base follow once the
     // prepared content is in hand and before the first write.
     if (
@@ -595,22 +597,16 @@ export function manualAuthoring({ configuration, runtime }) {
       const log = (await readFile(logFile)).toString('utf8')
       await writeNewFile(logFile, log + logEntry(block.target, block.title, now, existed), 0o644)
       const allowed = [page, print, 'index.md', 'log.md']
-      const commit = await commitPages({
+      return commitPages({
+        state,
         head,
         message: `feat(analyses): ${block.title} speichern`,
         allowed,
       })
-      return {
-        kind: 'analysis',
-        name: block.target,
-        commit,
-        changed_pages: await changedPages(commit),
-        path: pageFile,
-      }
     })
   }
 
-  async function commitPages({ head, message, allowed }) {
+  async function commitPages({ state, head, message, allowed }) {
     await git('add', '--', ...allowed)
     const tree = (await git('write-tree')).trim()
     const commit = (
@@ -621,10 +617,22 @@ export function manualAuthoring({ configuration, runtime }) {
     // commit and never claims pages it did not touch.
     if (!changed.every((page) => allowed.includes(page)) || !changed.includes('log.md'))
       fail('authoring_uncertain')
+    // Record the validated candidate before the ref can move. Identical
+    // re-saves may change only log.md, leaving no page/print history event;
+    // candidate identity makes that publication recoverable without guessing.
+    state.result = {
+      kind: 'analysis',
+      name: state.target,
+      commit,
+      changed_pages: changed,
+      path: path.join(opts.wikiRoot, `analyses/${state.target}.md`),
+    }
+    state.phase = 'publishing'
+    await save(state)
     // Compare-and-swap: a foreign writer that moved HEAD aborts this save.
     await git('update-ref', 'HEAD', commit, head)
     if ((await git('rev-parse', 'HEAD')).trim() !== commit) fail('authoring_uncertain')
-    return commit
+    return state.result
   }
 
   const changedPages = async (commit) =>
@@ -729,8 +737,15 @@ export function manualAuthoring({ configuration, runtime }) {
     if (!clean) fail('manual_maintenance_required')
     const page = `analyses/${state.target}.md`
     const print = `assets/analyses/${state.target}.html`
+    const candidate = state.result?.commit
+    const landed =
+      candidate &&
+      (await git('merge-base', '--is-ancestor', candidate, 'HEAD').then(
+        () => true,
+        () => false,
+      ))
     const commit =
-      state.result?.commit ??
+      (landed ? candidate : null) ??
       ((await git('rev-parse', 'HEAD')).trim() !== state.base
         ? await findCommit(state, page, print)
         : null)
