@@ -12,6 +12,7 @@ own configuration, sources, wiki history, credentials, and sessions.
 Requirements:
 
 - Docker Engine with Docker Compose v2
+- Python 3.11+ (launcher), GNU tar (safe updates and rollback)
 - A reverse proxy attached to a Docker network
 - An account with an [OpenCode-supported model provider](https://opencode.ai/docs/providers/)
 
@@ -190,10 +191,26 @@ To pin a release:
 ./karpathy-wiki.sh update 0.2.0
 ```
 
-Back up `DATA_ROOT` and review release notes before upgrades that change the
-data layout or generated policies. Local Compose changes belong in
-`compose.override.yaml` and survive updates. See [backup and restore](docs/backup-restore.md)
-for a consistent backup and a separate-instance restore check.
+Launcher updates always stop the instance for a verified full backup of
+`DATA_ROOT`, configuration, external file secrets, and installed images **before**
+changing the version. Backup failure blocks the update; update failure never
+automatically resets data. Local Compose changes belong in `compose.override.yaml`.
+Use private local storage outside `DATA_ROOT` (`KARPATHY_WIKI_BACKUP_DIR`, default
+`./backups`), preferably on an encrypted disk. Backups contain plaintext secrets.
+Direct Compose calls bypass this guarantee. Review release notes before upgrading.
+
+```bash
+./karpathy-wiki.sh backup list
+./karpathy-wiki.sh rollback <backup-id>
+```
+
+Rollback requires explicit confirmation and a separate current-state rescue
+backup; it restores software, configuration and data together, even after later
+updates. **All changes since the chosen snapshot are lost in the restored state.**
+Update backups stay at least 30 days and the latest three are always retained;
+failed-update and rescue backups are never automatically deleted. See
+[backup and restore](docs/backup-restore.md) for requirements, custom-mount and
+proxy boundaries, recovery, and a separate-instance restore check.
 
 ## Security
 
@@ -236,6 +253,7 @@ docker build --target publisher -t kw-publisher:integration -f opencode/Dockerfi
 sh tests/integration/trusted-publisher.sh  # isolated writer, crash recovery and reader boundary
 sh tests/integration/manual-ingest.sh  # UI-only admission, synthetic worker proposals and trusted authoring saves
 tests/integration/run.sh  # requires Docker; disposable Compose stack test
+sh tests/integration/launcher-backup.sh  # real Compose update snapshots and delayed rollback
 ```
 
 The integration runner builds local images and starts a temporary Compose

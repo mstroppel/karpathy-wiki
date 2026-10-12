@@ -126,46 +126,27 @@ compose_file_for() {
 }
 
 run_compose() {
+  require_backup_runtime
   if [ -f "$override_file" ]; then
-    docker compose \
+    python3 "$script_dir/launcher_backup.py" forward "$project_dir" docker compose \
       --project-directory "$project_dir" \
       -f "$compose_file" \
       -f "$override_file" \
       "$@"
   else
-    docker compose \
+    python3 "$script_dir/launcher_backup.py" forward "$project_dir" docker compose \
       --project-directory "$project_dir" \
       -f "$compose_file" \
       "$@"
   fi
 }
 
-set_env_version() {
-  [ -f "$env_file" ] || die "missing $env_file; create it from .env.example first"
-  cp -f "$env_file" "$env_file.bak"
-  chmod 0600 "$env_file.bak" 2>/dev/null || true
-  sev_tmp="$env_file.tmp.$$"
-  if grep -q '^KARPATHY_WIKI_VERSION=' "$env_file"; then
-    sed "s/^KARPATHY_WIKI_VERSION=.*/KARPATHY_WIKI_VERSION=$1/" "$env_file" >"$sev_tmp"
-  else
-    cp "$env_file" "$sev_tmp"
-    printf 'KARPATHY_WIKI_VERSION=%s\n' "$1" >>"$sev_tmp"
-  fi
-  if ! grep -q '^OPENCODE_PASSWORD=.' "$sev_tmp"; then
-    sev_password=$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')
-    if grep -q '^OPENCODE_PASSWORD=' "$sev_tmp"; then
-      sed "s/^OPENCODE_PASSWORD=.*/OPENCODE_PASSWORD=$sev_password/" \
-        "$sev_tmp" >"$sev_tmp.password"
-      mv -f "$sev_tmp.password" "$sev_tmp"
-    else
-      printf 'OPENCODE_PASSWORD=%s\n' "$sev_password" >>"$sev_tmp"
-    fi
-  fi
-  chmod 0600 "$sev_tmp"
-  mv -f "$sev_tmp" "$env_file"
-}
-
 cmd_update() {
+  require_backup_runtime
+  [ -f "$env_file" ] || die "missing .env"
+  cu_current=$(resolve_version)
+  compose_file_for "$cu_current"
+  cu_current_compose=$compose_file
   cu_requested=${KARPATHY_WIKI_CHANNEL:-$(read_env_value KARPATHY_WIKI_CHANNEL)}
   case "${cu_requested:-}" in
     ''|stable) cu_channel=stable ;;
@@ -183,11 +164,13 @@ cmd_update() {
   fi
   # Download before touching .env so a failed update leaves it unchanged.
   compose_file_for "$cu_target"
-  set_env_version "$cu_target"
-  printf 'Pinned KARPATHY_WIKI_VERSION=%s in %s (backup: %s)\n' \
-    "$cu_target" "$env_file" "$env_file.bak"
-  run_compose pull
-  run_compose up -d
+  python3 "$script_dir/launcher_backup.py" update "$project_dir" \
+    "$cu_current_compose" "$cu_current" "$cu_target" "$compose_file"
+}
+
+require_backup_runtime() {
+  command -v python3 >/dev/null 2>&1 || die "python3 (3.11+) is required for safe updates"
+  [ -f "$script_dir/launcher_backup.py" ] || die "missing launcher_backup.py; install the launcher pair"
 }
 
 usage() {
@@ -203,8 +186,11 @@ Usage:
   karpathy-wiki.sh <compose args...>   Forward to docker compose (up -d, ps, logs, ...)
   karpathy-wiki.sh update [version]    Pin version (default: latest release, or
                                        latest pre-release when the pre channel is
-                                       set) in .env, back up .env, pull images,
-                                       and restart (up -d)
+                                       set); mandatory whole-instance backup,
+                                       pull images, restart and verify health
+  karpathy-wiki.sh backup list         List local update and rescue snapshots
+  karpathy-wiki.sh rollback <id>       Confirm full data/config/software rollback;
+                                       creates a rescue snapshot first
   karpathy-wiki.sh version             Print the resolved version
   karpathy-wiki.sh help                Show this help
 
@@ -215,6 +201,12 @@ Environment:
                                resolves to the newest v*-pre.* pre-release
   KARPATHY_WIKI_PROJECT_DIR    Project directory (default: directory of this script)
   KARPATHY_WIKI_CACHE_DIR      Compose cache directory (default: <project dir>/.cache)
+  KARPATHY_WIKI_BACKUP_DIR     Private local storage outside DATA_ROOT (default: ./backups)
+  KARPATHY_WIKI_BACKUP_EXTRA_PATHS  JSON array of external proxy/config paths to include
+
+Updates stop all instance writers. Backups contain plaintext secrets: use trusted,
+preferably encrypted storage. Direct Compose calls bypass this safety guarantee.
+Rollback loses all changes since the selected snapshot; no automatic rollback.
 EOF
 }
 
@@ -230,6 +222,21 @@ case "$command" in
     shift
     [ $# -le 1 ] || die "usage: karpathy-wiki.sh update [version]"
     cmd_update "${1:-}"
+    ;;
+  backup|rollback)
+    require_backup_runtime
+    shift
+    if [ "$command" = backup ]; then
+      [ "$#" = 1 ] && [ "$1" = list ] || die "usage: karpathy-wiki.sh backup list"
+      backup_action=list
+      shift
+    else
+      [ "$#" = 1 ] || die "usage: karpathy-wiki.sh rollback <backup-id>"
+      backup_action=rollback
+    fi
+    version=$(resolve_version)
+    compose_file_for "$version"
+    python3 "$script_dir/launcher_backup.py" "$backup_action" "$project_dir" "$compose_file" "$version" "$@"
     ;;
   *)
     version=$(resolve_version)

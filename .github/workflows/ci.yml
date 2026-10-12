@@ -78,6 +78,8 @@ jobs:
         run: sh scripts/setup-ci-docker.sh
       - name: Run disposable Compose stack test
         run: tests/integration/run.sh
+      - name: Verify safe launcher update and delayed full rollback
+        run: sh tests/integration/launcher-backup.sh
       - name: Run primary chat integration
         run: |
           docker build --target openchamber -t kw-openchamber:integration -f opencode/Dockerfile .

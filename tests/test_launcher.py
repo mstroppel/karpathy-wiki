@@ -1,3 +1,6 @@
+import datetime as dt
+import importlib.util
+import json
 import os
 import shutil
 import stat
@@ -5,15 +8,53 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 LAUNCHER = ROOT / "karpathy-wiki.sh"
 
-DOCKER_STUB = """#!/bin/sh
-{
-  printf -- '---\\n'
-  for arg in "$@"; do printf '%s\\n' "$arg"; done
-} >> "$DOCKER_STUB_LOG"
+DOCKER_STUB = """#!/usr/bin/env python3
+import io, json, os, sys, tarfile
+from pathlib import Path
+args = sys.argv[1:]
+with open(os.environ['DOCKER_STUB_LOG'], 'a') as log:
+    log.write('---\\n' + '\\n'.join(args) + '\\n')
+failure = os.environ.get('STUB_FAIL')
+if failure and failure in args:
+    print('synthetic-private-secret', file=sys.stderr)
+    sys.exit(17)
+if args[:2] == ['image', 'inspect']:
+    print(json.dumps([{'Id': 'sha256:' + 'a' * 64}]))
+elif args[:2] == ['image', 'save']:
+    if os.environ.get('STUB_INCOMPLETE'):
+        Path(args[args.index('--output') + 1]).write_bytes(b'incomplete archive')
+        sys.exit(0)
+    with tarfile.open(args[args.index('--output') + 1], 'w') as archive:
+        data = b'synthetic saved image'
+        member = tarfile.TarInfo('manifest.json')
+        member.size = len(data)
+        archive.addfile(member, io.BytesIO(data))
+elif args[0] == 'inspect':
+    print(json.dumps([{'State': {'Running': False}, 'Image': 'sha256:' + 'a' * 64,
+                      'Config': {'Labels': {'com.docker.compose.service': 'writer'}}}]))
+elif args[0] == 'ps':
+    if os.environ.get('STUB_CONTAINERS'): print('synthetic-container')
+elif args[0] == 'compose' and 'config' in args:
+    project = Path(args[args.index('--project-directory') + 1])
+    values = dict(line.split('=', 1) for line in (project / '.env').read_text().splitlines()
+                  if '=' in line and not line.startswith('#'))
+    values = {key: value.strip(\"\\\"'\") for key, value in values.items()}
+    if '--environment' in args:
+        print('\\n'.join(key + '=' + value for key, value in values.items()))
+    elif '--format' in args:
+        source = str((project / values.get('DATA_ROOT', 'data')).resolve())
+        version = os.environ.get('KARPATHY_WIKI_VERSION', '0.0.1')
+        config = {'name': values.get('COMPOSE_PROJECT_NAME', 'test-wiki'),
+                  'services': {'writer': {'image': 'synthetic:' + version,
+                    'volumes': [{'type': 'bind', 'source': source, 'target': '/data'}]}}}
+        if os.environ.get('STUB_CONFIG'):
+            config.update(json.loads(os.environ['STUB_CONFIG']))
+        print(json.dumps(config))
 """
 
 CURL_STUB = """#!/bin/sh
@@ -58,6 +99,7 @@ class LauncherTests(unittest.TestCase):
         root = Path(temporary.name)
         self.project = root / "wiki"
         self.project.mkdir()
+        (self.project / "data").mkdir()
         self.cache = self.project / ".cache"
         self.bin = root / "bin"
         self.bin.mkdir()
@@ -70,8 +112,9 @@ class LauncherTests(unittest.TestCase):
         self.launcher = self.project / "karpathy-wiki.sh"
         shutil.copy(LAUNCHER, self.launcher)
         self.launcher.chmod(0o755)
+        shutil.copy(ROOT / "launcher_backup.py", self.project / "launcher_backup.py")
 
-    def run_launcher(self, *args, env=None, cwd=None):
+    def run_launcher(self, *args, env=None, cwd=None, input=None):
         environment = {**os.environ}
         environment.pop("KARPATHY_WIKI_VERSION", None)
         environment.update(
@@ -88,12 +131,15 @@ class LauncherTests(unittest.TestCase):
             cwd=str(cwd or self.project),
             text=True,
             capture_output=True,
+            input=input,
         )
 
     def write_env(self, content):
         env_file = self.project / ".env"
         env_file.write_text(content)
         env_file.chmod(0o600)
+        if "KARPATHY_WIKI_VERSION=0.0.1\n" in content:
+            self.pin_cache("0.0.1")
         return env_file
 
     def pin_cache(self, version):
@@ -254,16 +300,15 @@ class LauncherTests(unittest.TestCase):
         self.assertIn("KARPATHY_WIKI_VERSION=9.9.9", updated)
         self.assertIn("OTHER=keep", updated)
         self.assertRegex(updated, r"OPENCODE_PASSWORD=[0-9a-f]{48}\n")
-        self.assertEqual(
-            (self.project / ".env.bak").read_text(),
-            "KARPATHY_WIKI_VERSION=0.0.1\nOTHER=keep\n",
-        )
+        metadata = self.snapshot_metadata()[0]
+        self.assertEqual(metadata["version"], "0.0.1")
+        self.assertEqual(metadata["status"], "success")
         self.assertEqual(env_file.stat().st_mode & 0o777, 0o600)
         self.assertTrue((self.cache / "compose-v9.9.9.yaml").exists())
-        calls = self.docker_calls()
+        calls = [call for call in self.docker_calls() if "pull" in call or "up" in call]
         self.assertEqual(len(calls), 2)
         self.assertEqual(calls[0][-1:], ["pull"])
-        self.assertEqual(calls[1][-2:], ["up", "-d"])
+        self.assertIn("--wait", calls[1])
         for call in calls:
             self.assertIn(str(self.cache / "compose-v9.9.9.yaml"), call)
 
@@ -343,6 +388,340 @@ class LauncherTests(unittest.TestCase):
     def test_launcher_is_executable_in_repository(self):
         mode = LAUNCHER.stat().st_mode
         self.assertTrue(mode & stat.S_IXUSR)
+
+    def snapshot_metadata(self):
+        return [
+            json.loads(p.read_text()) for p in (self.project / "backups").glob("*/metadata.json")
+        ]
+
+    def test_delayed_rollback_restores_complete_snapshot_and_rescues_current_state(self):
+        import sqlite3
+
+        self.write_env("KARPATHY_WIKI_VERSION=0.0.1\nOPENCODE_PASSWORD=synthetic-secret\n")
+        data = self.project / "data"
+        wiki = data / "wiki"
+        wiki.mkdir()
+        subprocess.run(["git", "init", "-q", str(wiki)], check=True)
+        (wiki / "index.md").write_text("old wiki")
+        subprocess.run(["git", "-C", str(wiki), "add", "."], check=True)
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(wiki),
+                "-c",
+                "user.name=Synthetic",
+                "-c",
+                "user.email=synthetic@example.com",
+                "commit",
+                "-qm",
+                "snapshot",
+            ],
+            check=True,
+        )
+        database = sqlite3.connect(data / "state.sqlite3")
+        database.execute("create table queue (item text)")
+        database.execute("insert into queue values ('old queued item')")
+        database.commit()
+        database.close()
+        (data / ".session").write_text("old session")
+        (data / ".session").chmod(0o640)
+        external = self.project.parent / "synthetic-secret"
+        external.write_text("old secret")
+        with (self.project / ".env").open("a") as stream:
+            stream.write(f"TOKEN_FILE={external}\n")
+        override = self.project / "compose.override.yaml"
+        override.write_text("services: {}\n")
+        self.assertEqual(self.run_launcher("update", "1.2.3").returncode, 0)
+        identifier = self.snapshot_metadata()[0]["id"]
+        (wiki / "index.md").write_text("new wiki")
+        (data / "new-only").write_text("must not merge")
+        external.write_text("new secret")
+        override.write_text("services: {} # new\n")
+        self.assertEqual(self.run_launcher("update", "2.0.0").returncode, 0)
+
+        result = self.run_launcher("rollback", identifier, input=f"rollback {identifier}\n")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("All changes since", result.stdout)
+        self.assertIn("Current version: 2.0.0", result.stdout)
+        self.assertEqual((wiki / "index.md").read_text(), "old wiki")
+        self.assertFalse((data / "new-only").exists())
+        self.assertEqual((data / ".session").read_text(), "old session")
+        self.assertEqual((data / ".session").stat().st_mode & 0o777, 0o640)
+        self.assertEqual(external.read_text(), "old secret")
+        self.assertEqual(override.read_text(), "services: {}\n")
+        self.assertIn("KARPATHY_WIKI_VERSION=0.0.1", (self.project / ".env").read_text())
+        subprocess.run(["git", "-C", str(wiki), "fsck", "--full"], check=True, capture_output=True)
+        with sqlite3.connect(data / "state.sqlite3") as database:
+            self.assertEqual(
+                database.execute("select item from queue").fetchone(), ("old queued item",)
+            )
+        database.close()
+        self.assertEqual(len([m for m in self.snapshot_metadata() if m["kind"] == "rescue"]), 1)
+        self.assertNotIn("synthetic-secret", result.stdout + result.stderr)
+
+    def test_update_failures_retain_snapshot_and_offer_explicit_rollback(self):
+        for failure in ("pull", "up"):
+            with self.subTest(failure=failure):
+                self.write_env("KARPATHY_WIKI_VERSION=0.0.1\n")
+                result = self.run_launcher("update", "1.2.3", env={"STUB_FAIL": failure})
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("rollback", result.stderr)
+                self.assertEqual(self.snapshot_metadata()[-1]["status"], "failed")
+                self.assertNotIn("synthetic-private-secret", result.stderr)
+
+    def test_archive_failure_blocks_update_without_changing_env_or_data(self):
+        original = "KARPATHY_WIKI_VERSION=0.0.1\n"
+        self.write_env(original)
+        result = self.run_launcher("update", "1.2.3", env={"STUB_FAIL": "save"})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual((self.project / ".env").read_text(), original)
+        self.assertEqual(self.snapshot_metadata(), [])
+        self.assertFalse(any("pull" in c or "up" in c for c in self.docker_calls()))
+
+    def test_rollback_needs_confirmation_and_successful_rescue(self):
+        self.write_env("KARPATHY_WIKI_VERSION=0.0.1\n")
+        self.assertEqual(self.run_launcher("update", "1.2.3").returncode, 0)
+        identifier = self.snapshot_metadata()[0]["id"]
+        original = (self.project / ".env").read_text()
+        result = self.run_launcher("rollback", identifier, input="no\n")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(len(self.snapshot_metadata()), 1)
+        result = self.run_launcher(
+            "rollback", identifier, input=f"rollback {identifier}\n", env={"STUB_FAIL": "save"}
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual((self.project / ".env").read_text(), original)
+        self.assertFalse(any("load" in c or "down" in c for c in self.docker_calls()))
+
+    def test_stop_all_writers_precedes_image_archive_and_pull(self):
+        self.write_env("KARPATHY_WIKI_VERSION=0.0.1\n")
+        result = self.run_launcher("update", "1.2.3", env={"STUB_CONTAINERS": "1"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = self.docker_calls()
+        stop = next(i for i, c in enumerate(calls) if c[0] == "stop")
+        save = next(i for i, c in enumerate(calls) if c[:2] == ["image", "save"])
+        pull = next(i for i, c in enumerate(calls) if "pull" in c)
+        self.assertLess(stop, save)
+        self.assertLess(save, pull)
+
+    def test_unsupported_mounts_and_missing_paths_block_before_stopping(self):
+        self.write_env("KARPATHY_WIKI_VERSION=0.0.1\n")
+        for mount in (
+            {"type": "volume", "source": "private-data"},
+            {"type": "bind", "source": str(self.project.parent), "read_only": False},
+        ):
+            config = {"services": {"writer": {"image": "synthetic:0.0.1", "volumes": [mount]}}}
+            result = self.run_launcher("update", "1.2.3", env={"STUB_CONFIG": json.dumps(config)})
+            self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(any(c[0] == "stop" or "save" in c for c in self.docker_calls()))
+        self.assertIn("0.0.1", (self.project / ".env").read_text())
+
+    def test_private_storage_and_no_secret_values_in_list(self):
+        self.write_env("KARPATHY_WIKI_VERSION=0.0.1\nOPENCODE_PASSWORD=synthetic-private-secret\n")
+        self.assertEqual(self.run_launcher("update", "1.2.3").returncode, 0)
+        store = self.project / "backups"
+        self.assertEqual(store.stat().st_mode & 0o777, 0o700)
+        for path in store.glob("*/*"):
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        result = self.run_launcher("backup", "list")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("synthetic-private-secret", result.stdout + result.stderr)
+        self.assertIn(self.snapshot_metadata()[0]["id"], result.stdout)
+
+    def test_retention_boundary_latest_three_failed_and_rescue_protection(self):
+        spec = importlib.util.spec_from_file_location(
+            "launcher_backup", ROOT / "launcher_backup.py"
+        )
+        assert spec and spec.loader
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        self.write_env("KARPATHY_WIKI_VERSION=0.0.1\n")
+        self.assertEqual(self.run_launcher("update", "1.2.3").returncode, 0)
+        template = self.snapshot_metadata()[0]
+        store = self.project / "backups"
+        shutil.rmtree(store / template["id"])
+        now = dt.datetime(2026, 10, 12, tzinfo=dt.UTC)
+        for number, days, kind, status in [
+            (1, 31, "update", "success"),
+            (2, 31, "update", "failed"),
+            (3, 30, "update", "success"),
+            (4, 29.999, "update", "success"),
+            (5, 28, "update", "success"),
+            (6, 27, "update", "success"),
+            (7, 26, "update", "success"),
+            (8, 40, "rescue", "pending"),
+        ]:
+            metadata = {
+                **template,
+                "id": str(number),
+                "kind": kind,
+                "status": status,
+                "created": (now - dt.timedelta(days=days)).isoformat(),
+            }
+            directory = store / str(number)
+            directory.mkdir()
+            (directory / "metadata.json").write_text(json.dumps(metadata))
+        instance = type("Fixture", (), {"store": store, "identity": template["instance"]})()
+        module.prune(instance, now=now)
+        self.assertEqual({p.name for p in store.iterdir()}, {"2", "4", "5", "6", "7", "8"})
+        with patch.object(
+            module,
+            "backups",
+            return_value=[
+                {**template, "id": str(i), "created": (now - dt.timedelta(days=90)).isoformat()}
+                for i in (5, 6, 7)
+            ],
+        ):
+            module.prune(instance, now=now)
+        self.assertTrue(all((store / str(i)).exists() for i in (5, 6, 7)))
+
+    def test_missing_secret_and_insecure_or_nested_storage_block_update(self):
+        original = "KARPATHY_WIKI_VERSION=0.0.1\nTOKEN_FILE=./missing-secret\n"
+        self.write_env(original)
+        result = self.run_launcher("update", "1.2.3")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual((self.project / ".env").read_text(), original)
+        self.write_env("KARPATHY_WIKI_VERSION=0.0.1\n")
+        for location, mode in (
+            (self.project / "data" / "nested-backup", 0o700),
+            (self.project / "public-backup", 0o755),
+        ):
+            location.mkdir(mode=mode)
+            result = self.run_launcher(
+                "update", "1.2.3", env={"KARPATHY_WIKI_BACKUP_DIR": str(location)}
+            )
+            self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(any("save" in c or "pull" in c for c in self.docker_calls()))
+
+    def test_corrupted_or_foreign_snapshot_is_not_restored(self):
+        self.write_env("KARPATHY_WIKI_VERSION=0.0.1\n")
+        self.assertEqual(self.run_launcher("update", "1.2.3").returncode, 0)
+        metadata = self.snapshot_metadata()[0]
+        identifier = metadata["id"]
+        original = (self.project / ".env").read_text()
+        metadata_path = self.project / "backups" / identifier / "metadata.json"
+        metadata_path.write_text(json.dumps({**metadata, "instance": "another-instance"}))
+        result = self.run_launcher("rollback", identifier, input=f"rollback {identifier}\n")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("different instance", result.stderr)
+        metadata_path.write_text(json.dumps(metadata))
+        archive = metadata_path.parent / "snapshot.tar"
+        with archive.open("ab") as stream:
+            stream.write(b"synthetic corruption")
+        result = self.run_launcher("rollback", identifier, input=f"rollback {identifier}\n")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("checksum", result.stderr)
+        self.assertEqual((self.project / ".env").read_text(), original)
+        self.assertEqual(len(self.snapshot_metadata()), 1)
+
+    def test_restore_failure_keeps_target_and_rescue_snapshots(self):
+        self.write_env("KARPATHY_WIKI_VERSION=0.0.1\n")
+        self.assertEqual(self.run_launcher("update", "1.2.3").returncode, 0)
+        identifier = self.snapshot_metadata()[0]["id"]
+        result = self.run_launcher(
+            "rollback", identifier, input=f"rollback {identifier}\n", env={"STUB_FAIL": "load"}
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Restore failed", result.stderr)
+        self.assertEqual(len(self.snapshot_metadata()), 2)
+        self.assertIn("KARPATHY_WIKI_VERSION=1.2.3", (self.project / ".env").read_text())
+
+    def test_failed_update_allows_immediate_explicit_rollback(self):
+        self.write_env("KARPATHY_WIKI_VERSION=0.0.1\n")
+        result = self.run_launcher("update", "1.2.3", env={"STUB_FAIL": "up"})
+        self.assertNotEqual(result.returncode, 0)
+        identifier = self.snapshot_metadata()[0]["id"]
+        result = self.run_launcher("rollback", identifier, input=f"rollback {identifier}\n")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("KARPATHY_WIKI_VERSION=0.0.1", (self.project / ".env").read_text())
+
+    def test_external_read_only_mount_env_file_secret_and_proxy_are_included(self):
+        import tarfile
+
+        files = [
+            self.project.parent / name for name in ("ro-config", "service.env", "secret", "proxy")
+        ]
+        for path in files:
+            path.write_text("synthetic private content")
+        self.write_env(
+            "KARPATHY_WIKI_VERSION=0.0.1\n"
+            f"KARPATHY_WIKI_BACKUP_EXTRA_PATHS='[{json.dumps(str(files[3]))}]'\n"
+        )
+        config = {
+            "services": {
+                "writer": {
+                    "image": "synthetic:0.0.1",
+                    "env_file": [{"path": str(files[1])}],
+                    "volumes": [{"type": "bind", "source": str(files[0]), "read_only": True}],
+                }
+            },
+            "secrets": {"private": {"file": str(files[2])}},
+        }
+        result = self.run_launcher("update", "1.2.3", env={"STUB_CONFIG": json.dumps(config)})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        metadata = self.snapshot_metadata()[0]
+        with tarfile.open(self.project / "backups" / metadata["id"] / "snapshot.tar") as archive:
+            names = archive.getnames()
+        self.assertTrue(all(str(path).lstrip("/") in names for path in files))
+        self.assertNotIn("synthetic private content", result.stdout + result.stderr)
+
+    def test_actual_other_installation_cannot_list_or_rollback_shared_backups(self):
+        self.write_env("KARPATHY_WIKI_VERSION=0.0.1\n")
+        self.assertEqual(self.run_launcher("update", "1.2.3").returncode, 0)
+        identifier = self.snapshot_metadata()[0]["id"]
+        other = self.project.parent / "other-wiki"
+        shutil.copytree(self.project, other)
+        environment = {
+            "KARPATHY_WIKI_PROJECT_DIR": str(other),
+            "KARPATHY_WIKI_BACKUP_DIR": str(self.project / "backups"),
+        }
+        result = self.run_launcher("backup", "list", env=environment)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn(identifier, result.stdout)
+        result = self.run_launcher(
+            "rollback", identifier, env=environment, input=f"rollback {identifier}\n"
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("different instance", result.stderr)
+
+    def test_incomplete_archive_blocks_update_before_version_changes(self):
+        original = "KARPATHY_WIKI_VERSION=0.0.1\n"
+        self.write_env(original)
+        result = self.run_launcher("update", "1.2.3", env={"STUB_INCOMPLETE": "1"})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual((self.project / ".env").read_text(), original)
+        self.assertEqual(self.snapshot_metadata(), [])
+        self.assertFalse(any("pull" in call or "up" in call for call in self.docker_calls()))
+
+    def test_external_symlink_blocks_snapshot_without_touching_data(self):
+        original = "KARPATHY_WIKI_VERSION=0.0.1\n"
+        self.write_env(original)
+        external = self.project.parent / "external-session"
+        external.write_text("synthetic external data")
+        (self.project / "data" / ".session").symlink_to(external)
+        result = self.run_launcher("update", "1.2.3")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("external symlink", result.stderr)
+        self.assertEqual((self.project / ".env").read_text(), original)
+        self.assertEqual(external.read_text(), "synthetic external data")
+
+    def test_launcher_cannot_start_writers_while_maintenance_lock_is_held(self):
+        import fcntl
+
+        original = "KARPATHY_WIKI_VERSION=0.0.1\n"
+        self.write_env(original)
+        with (self.project / ".launcher.lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            result = self.run_launcher("up", "-d")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("another launcher operation", result.stderr)
+            self.assertEqual(self.docker_calls(), [])
+            result = self.run_launcher("update", "1.2.3")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse(any("save" in c or "pull" in c for c in self.docker_calls()))
+        self.assertEqual((self.project / ".env").read_text(), original)
 
 
 if __name__ == "__main__":

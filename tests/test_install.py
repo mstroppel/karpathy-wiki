@@ -15,7 +15,8 @@ for argument in "$@"; do
   previous=$argument
 done
 case "$out" in
-  *karpathy-wiki.sh) printf '%s\n' '#!/bin/sh' > "$out" ;;
+  *launcher_backup.py) printf '%s\n' '# backup helper' > "$out" ;;
+  *karpathy-wiki.sh) printf '%s\n' '#!/bin/sh' '# launcher_backup.py' > "$out" ;;
   *.env) printf '%s\n' \
     'COMPOSE_PROJECT_NAME=karpathy-wiki' \
     'STACK_ID=karpathy-wiki' \
@@ -45,13 +46,15 @@ for argument in "$@"; do
   previous=$argument
 done
 case "$out" in
-  *karpathy-wiki.sh) printf '%s\\n' '#!/bin/sh' > "$out" ;;
+  *launcher_backup.py) printf '%s\n' '# backup helper' > "$out" ;;
+  *karpathy-wiki.sh) printf '%s\\n' '#!/bin/sh' '# launcher_backup.py' > "$out" ;;
   *.env) printf '%s\\n' \
     'COMPOSE_PROJECT_NAME=karpathy-wiki' \
     'STACK_ID=karpathy-wiki' \
     'KARPATHY_WIKI_VERSION=latest' > "$out" ;;
 esac
 case "$url" in
+  */main/launcher_backup.py) printf '%s\n' '# backup helper' > "$out" ;;
   *api.github.com/repos/*/tags*)
     printf '%s\\n' \
       '[' \
@@ -79,7 +82,8 @@ case "$url" in
     printf '%s\n' 'curl: (22) The requested URL returned error: 404' >&2
     exit 22
     ;;
-  */main/karpathy-wiki.sh) printf '%s\n' '#!/bin/sh' > "$out" ;;
+  */main/karpathy-wiki.sh) printf '%s\n' '#!/bin/sh' '# launcher_backup.py' > "$out" ;;
+  */main/launcher_backup.py) printf '%s\n' '# backup helper' > "$out" ;;
   */v1.2.3/.env.example) printf '%s\n' \
     'COMPOSE_PROJECT_NAME=karpathy-wiki' \
     'STACK_ID=karpathy-wiki' \
@@ -128,7 +132,11 @@ class InstallTests(unittest.TestCase):
             values = dict(line.split("=", 1) for line in environment.splitlines())
             self.assertNotEqual(values["OPENCODE_PASSWORD"], values["OPENCHAMBER_UI_PASSWORD"])
             self.assertTrue((directory / "karpathy-wiki.sh").exists())
-            self.assertEqual((directory / ".gitignore").read_text(), ".cache/\n.env.bak\n")
+            self.assertEqual(
+                (directory / ".gitignore").read_text(),
+                ".cache/\n.env.bak\nbackups/\n.launcher.lock\n",
+            )
+            self.assertTrue((directory / "launcher_backup.py").exists())
 
     def test_install_refuses_non_empty_directory_before_download(self):
         with tempfile.TemporaryDirectory() as parent:

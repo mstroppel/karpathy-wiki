@@ -24,6 +24,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Launcher updates now require a verified stopped snapshot of the complete
+  instance, including configuration, external file secrets and installed images.
+  `backup list` and confirmed `rollback <id>` restore software, configuration
+  and data together after a separate rescue snapshot, including after later
+  updates. Private local backups stay at least 30 days and the latest three
+  update snapshots are always retained; failed updates and rescues are not
+  automatically pruned. Safe updates require the matching `launcher_backup.py`,
+  Python 3.11+ and GNU tar; unsupported storage topologies fail closed. No data
+  migration, automatic rollback, encryption or cloud upload is introduced.
+
 - The opt-in reader-mode [manual ingest route](docs/manual-ingest.md) now also
   routes `/analysis-save` and confirmed `/answer-save` writes through its
   UI-authenticated trusted channel: the model runtime prepares page or answer
