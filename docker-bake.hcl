@@ -15,15 +15,15 @@ variable "RCLONE_VERSION" {
 }
 
 group "default" {
-  targets = ["opencode", "openchamber", "publisher", "ingest", "ingest-webdav", "ingest-audio", "ingest-speech", "ingest-paperless"]
+  targets = ["opencode", "openchamber", "publisher", "ingest", "ingest-webdav", "ingest-audio", "ingest-speech", "ingest-paperless", "ingest-email"]
 }
 
 group "release" {
-  targets = ["opencode-release", "openchamber-release", "publisher-release", "ingest-release", "ingest-webdav-release", "ingest-audio-release", "ingest-speech-release", "ingest-paperless-release"]
+  targets = ["opencode-release", "openchamber-release", "publisher-release", "ingest-release", "ingest-webdav-release", "ingest-audio-release", "ingest-speech-release", "ingest-paperless-release", "ingest-email-release"]
 }
 
 group "stable" {
-  targets = ["opencode-stable", "openchamber-stable", "publisher-stable", "ingest-stable", "ingest-webdav-stable", "ingest-audio-stable", "ingest-speech-stable", "ingest-paperless-stable"]
+  targets = ["opencode-stable", "openchamber-stable", "publisher-stable", "ingest-stable", "ingest-webdav-stable", "ingest-audio-stable", "ingest-speech-stable", "ingest-paperless-stable", "ingest-email-stable"]
 }
 
 target "common" {
@@ -120,6 +120,26 @@ target "ingest-paperless" {
 target "opencode-release" {
   inherits = ["opencode"]
   tags = ["${REGISTRY}/karpathy-wiki-opencode:${IMAGE_VERSION}"]
+}
+
+target "ingest-email" {
+  inherits = ["common"]
+  context = "ingest"
+  target = "email"
+  args = {
+    RCLONE_VERSION = RCLONE_VERSION
+  }
+  tags = ["karpathy-wiki-ingest-email:test"]
+}
+
+target "ingest-email-release" {
+  inherits = ["ingest-email"]
+  tags = ["${REGISTRY}/karpathy-wiki-ingest-email:${IMAGE_VERSION}"]
+}
+
+target "ingest-email-stable" {
+  inherits = ["ingest-email"]
+  tags = ["${REGISTRY}/karpathy-wiki-ingest-email:${IMAGE_VERSION}", "${REGISTRY}/karpathy-wiki-ingest-email:latest"]
 }
 
 target "openchamber-release" {

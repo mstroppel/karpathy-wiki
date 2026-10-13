@@ -14,6 +14,9 @@ from karpathy_wiki_ingest.shared import interval_seconds
 
 
 def interval() -> int:
+    email_interval = os.getenv("EMAIL_POLL_INTERVAL")
+    if email_interval is not None:
+        return interval_seconds(email_interval)
     seconds = os.getenv("SYNC_INTERVAL_SECONDS")
     if seconds is None:
         # The WebDAV plugin uses a duration string instead of plain seconds.

@@ -104,7 +104,7 @@ class IngestPackageTests(unittest.TestCase):
 
     def test_ingest_distributions_are_pinned_in_lockstep(self):
         versions = {}
-        for directory in ("core", "webdav", "audio", "speech", "paperless"):
+        for directory in ("core", "webdav", "audio", "speech", "paperless", "email"):
             with self.subTest(package=directory):
                 project = read_ingest_project(directory)
                 expected_name = {
@@ -117,7 +117,7 @@ class IngestPackageTests(unittest.TestCase):
 
     def test_plugins_depend_on_the_core_version(self):
         version = read_ingest_project("core")["version"]
-        for directory in ("webdav", "audio", "paperless"):
+        for directory in ("webdav", "audio", "paperless", "email"):
             with self.subTest(package=directory):
                 dependencies = read_ingest_project(directory)["dependencies"]
                 self.assertIn(f"karpathy-wiki-ingest=={version}", dependencies)
@@ -173,7 +173,7 @@ class IngestPackageTests(unittest.TestCase):
 
     def test_build_backends_are_pinned(self):
         requires_pin = f"setuptools=={ingest_setuptools_version()}"
-        for directory in ("core", "webdav", "audio", "speech", "paperless"):
+        for directory in ("core", "webdav", "audio", "speech", "paperless", "email"):
             with self.subTest(package=directory):
                 data = tomllib.loads(read(ROOT / "ingest" / directory / "pyproject.toml"))
                 self.assertIn(requires_pin, data["build-system"]["requires"])
@@ -186,6 +186,7 @@ class IngestPackageTests(unittest.TestCase):
             "ingest-audio",
             "ingest-speech",
             "ingest-paperless",
+            "ingest-email",
         ):
             self.assertIn(f'target "{target}"', bake)
         compose = read(ROOT / "compose.yaml")
@@ -194,6 +195,7 @@ class IngestPackageTests(unittest.TestCase):
             "karpathy-wiki-ingest-audio",
             "karpathy-wiki-ingest-speech",
             "karpathy-wiki-ingest-paperless",
+            "karpathy-wiki-ingest-email",
         ):
             self.assertIn(f"ghcr.io/mstroppel/{image}", compose)
 
@@ -243,7 +245,7 @@ class IngestImageIsolationTests(unittest.TestCase):
     speech stage ships it alone.
     """
 
-    PLUGIN_WHEEL_DIRS = ("webdav", "paperless")
+    PLUGIN_WHEEL_DIRS = ("webdav", "paperless", "email")
     SHARED_WHEEL_DIRS = ("core", "speech")
 
     def ingest_stage(self, stage: str) -> list[str]:
@@ -264,6 +266,7 @@ class IngestImageIsolationTests(unittest.TestCase):
             ("audio", "audio"),
             ("speech", None),
             ("paperless", "paperless"),
+            ("email", "email"),
         ):
             with self.subTest(stage=stage):
                 block = "\n".join(self.ingest_stage(stage))

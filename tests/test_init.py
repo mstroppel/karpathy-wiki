@@ -119,6 +119,20 @@ class InitTests(unittest.TestCase):
             self.assertEqual(stat.S_IMODE(inbox.stat().st_mode), 0o700)
             self.assertEqual((inbox / "existing.md").read_text(), "retained draft")
 
+    def test_email_profile_creates_private_archive_and_public_sources(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "knowledge"
+            self.run_init(root, COMPOSE_PROFILES="webdav, email")
+            archive = root / "incoming" / "email"
+            self.assertEqual(stat.S_IMODE(archive.stat().st_mode), 0o700)
+            self.assertEqual(archive.stat().st_uid, os.getuid())
+            self.assertTrue((root / "sources" / "email").is_dir())
+            (archive / "retained.eml").write_bytes(b"original")
+            archive.chmod(0o755)
+            self.run_init(root, COMPOSE_PROFILES="email")
+            self.assertEqual(stat.S_IMODE(archive.stat().st_mode), 0o700)
+            self.assertEqual((archive / "retained.eml").read_bytes(), b"original")
+
     def test_existing_content_is_never_overwritten(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "knowledge"

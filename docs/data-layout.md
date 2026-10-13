@@ -1,5 +1,13 @@
 # Data Layout
 
+The optional [email provider](email.md) keeps original `.eml` files and its
+private SQLite ledger in `${DATA_ROOT}/incoming/email` (`0700`, files `0600`).
+Only `email-ingest` mounts it, never OpenCode or `raw-files`. It is unredacted,
+retains attachments indefinitely, and must be backed up with its ledger.
+Redacted text generations and the provider manifest live separately in
+`${DATA_ROOT}/sources/email`; the owned wiki subtree is `wiki/sources/email`.
+Server deletion follows durable original archival, not a wiki commit.
+
 All persistent data lives below `DATA_ROOT`. The installation directory only
 contains the launcher, `.env`, optional secrets, and local Compose adoptions.
 

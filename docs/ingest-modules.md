@@ -19,6 +19,8 @@ ingest/
                                               and the worker image
   paperless/  karpathy-wiki-ingest-paperless  Paperless API + sanitizer loop
               (karpathy_wiki_ingest_paperless)
+  email/      karpathy-wiki-ingest-email      private IMAP .eml archive + locally
+              (karpathy_wiki_ingest_email)    redacted text-only publication/replay
 ```
 
 Each distribution has its own `pyproject.toml` and is built and installed
