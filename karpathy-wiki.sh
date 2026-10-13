@@ -169,7 +169,7 @@ cmd_update() {
 }
 
 require_backup_runtime() {
-  command -v python3 >/dev/null 2>&1 || die "python3 (3.11+) is required for safe updates"
+  command -v python3 >/dev/null 2>&1 || die "Python 3.11+ is required for the launcher; install it on the host"
   [ -f "$script_dir/launcher_backup.py" ] || die "missing launcher_backup.py; install the launcher pair"
 }
 
@@ -211,6 +211,16 @@ EOF
 }
 
 command=${1:-help}
+# Resolve configuration only after acquiring the installation-wide lock.
+case "$command" in
+  help|-h|--help) ;;
+  *)
+    require_backup_runtime
+    if [ -z "${KARPATHY_WIKI_LOCK_FD:-}" ]; then
+      exec python3 "$script_dir/launcher_backup.py" launch "$project_dir" sh "$script_dir/karpathy-wiki.sh" "$@"
+    fi
+    ;;
+esac
 case "$command" in
   help|-h|--help)
     usage

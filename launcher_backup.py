@@ -283,13 +283,23 @@ def secure_store(path):
 
 @contextlib.contextmanager
 def project_lock(project):
+    inherited = os.environ.get("KARPATHY_WIKI_LOCK_FD")
+    if inherited is not None:
+        descriptor = int(inherited)
+        info = os.fstat(descriptor)
+        current = (project / ".launcher.lock").stat()
+        if (info.st_dev, info.st_ino) != (current.st_dev, current.st_ino):
+            raise BackupError("invalid inherited maintenance lock")
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        yield descriptor
+        return
     with (project / ".launcher.lock").open("a") as stream:
         os.chmod(stream.name, 0o600)
         try:
             fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise BackupError("another launcher operation is active") from None
-        yield
+        yield stream.fileno()
 
 
 @contextlib.contextmanager
@@ -322,6 +332,8 @@ def snapshot(instance, kind):
     temporary.mkdir(mode=0o700)
     instance.stop()
     try:
+        # Writers may have changed entries after the running-state preflight.
+        paths = instance.paths()
         run(
             [
                 "tar",
@@ -464,8 +476,7 @@ def restore(instance, metadata):
     directory = instance.store / metadata["id"]
     stages = []
     try:
-        with tarfile.open(directory / "snapshot.tar") as archive:
-            names = {m.name.rstrip("/") for m in archive}
+        destinations = []
         for value in metadata["paths"]:
             destination = Path(value)
             if (
@@ -475,6 +486,10 @@ def restore(instance, metadata):
                 or within(destination, instance.store)
             ):
                 raise BackupError("unsafe restore destination")
+            destinations.append(instance.path(value))
+        with tarfile.open(directory / "snapshot.tar") as archive:
+            names = {m.name.rstrip("/") for m in archive}
+        for destination in destinations:
             destination.parent.mkdir(parents=True, exist_ok=True)
             stage = Path(tempfile.mkdtemp(prefix=".kw-restore-", dir=destination.parent))
             stages.append((destination, stage))
@@ -504,6 +519,7 @@ def restore(instance, metadata):
                 run(["docker", "image", "tag", image_id, image])
         instance.call("--profile", "*", "down", "--remove-orphans")
         for destination, stage in stages:
+            instance.path(str(destination))
             extracted = stage / str(destination).lstrip("/")
             if destination.exists() or destination.is_symlink():
                 destination.rename(stage / "displaced")
@@ -555,13 +571,18 @@ def main():
         return 1
     os.umask(0o077)
     try:
-        if sys.argv[1] == "forward":
+        if sys.argv[1] in {"launch", "forward"}:
+            action = sys.argv[1]
             _, project, *command = sys.argv[1:]
-            with project_lock(Path(project).resolve()):
-                return subprocess.run(command).returncode
+            with project_lock(Path(project).resolve()) as descriptor:
+                environment = dict(os.environ)
+                if action == "launch":
+                    environment["KARPATHY_WIKI_LOCK_FD"] = str(descriptor)
+                return subprocess.run(command, env=environment, pass_fds=(descriptor,)).returncode
         action, project, compose, version, *args = sys.argv[1:]
-        instance = Instance(project, compose, version)
-        with locked(instance):
+        with project_lock(Path(project).resolve()):
+            instance = Instance(project, compose, version)
+            secure_store(instance.store)
             if action == "update":
                 update(instance, *args)
             elif action == "rollback":

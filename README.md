@@ -27,7 +27,9 @@ curl -fsSL https://raw.githubusercontent.com/mstroppel/karpathy-wiki/main/instal
 ```
 
 Review `install.sh` and `karpathy-wiki.sh` before piping them to a shell if
-required by your security policy. To install a specific release:
+required by your security policy. The installer checks for host Python 3.11+
+but does not install host packages; install Python yourself if the check fails.
+To install a specific release:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/mstroppel/karpathy-wiki/main/install.sh \

@@ -88,6 +88,11 @@ if ! curl -fsSL "$base_url/karpathy-wiki.sh" -o "$temporary_dir/karpathy-wiki.sh
   curl -fsSL "$base_url/karpathy-wiki.sh" -o "$temporary_dir/karpathy-wiki.sh"
 fi
 if grep -q 'launcher_backup.py' "$temporary_dir/karpathy-wiki.sh"; then
+  if ! command -v python3 >/dev/null 2>&1 ||
+    ! python3 -c 'import sys; sys.exit(sys.version_info < (3, 11))'; then
+    printf 'Python 3.11+ is required for the launcher; install it on the host and rerun the installer.\n' >&2
+    exit 1
+  fi
   curl -fsSL "$base_url/launcher_backup.py" -o "$temporary_dir/launcher_backup.py"
 fi
 curl -fsSL "https://raw.githubusercontent.com/$repository/$tag/.env.example" -o "$temporary_dir/.env"

@@ -39,6 +39,10 @@ elif args[0] == 'inspect':
                       'Config': {'Labels': {'com.docker.compose.service': 'writer'}}}]))
 elif args[0] == 'ps':
     if os.environ.get('STUB_CONTAINERS'): print('synthetic-container')
+elif args[0] == 'stop' and os.environ.get('STUB_SWAP_LINK'):
+    entry = Path(os.environ['STUB_SWAP_LINK'])
+    entry.unlink()
+    entry.symlink_to(os.environ['STUB_LINK_TARGET'])
 elif args[0] == 'compose' and 'config' in args:
     project = Path(args[args.index('--project-directory') + 1])
     values = dict(line.split('=', 1) for line in (project / '.env').read_text().splitlines()
@@ -722,6 +726,78 @@ class LauncherTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertFalse(any("save" in c or "pull" in c for c in self.docker_calls()))
         self.assertEqual((self.project / ".env").read_text(), original)
+
+    def test_lock_precedes_version_resolution_and_compose_downloads(self):
+        import fcntl
+
+        self.write_env("KARPATHY_WIKI_VERSION=latest\n")
+        with (self.project / ".launcher.lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            for args in (
+                ("version",),
+                ("up", "-d"),
+                ("update", "1.2.3"),
+                ("backup", "list"),
+                ("rollback", "invalid"),
+            ):
+                with self.subTest(args=args):
+                    result = self.run_launcher(*args)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("another launcher operation", result.stderr)
+                    self.assertEqual(self.curl_urls(), [])
+                    self.assertEqual(self.docker_calls(), [])
+        self.assertFalse(self.cache.exists())
+
+    def test_snapshot_revalidates_tree_after_writers_stop(self):
+        original = "KARPATHY_WIKI_VERSION=0.0.1\n"
+        self.write_env(original)
+        entry = self.project / "data" / "session"
+        entry.write_text("synthetic session")
+        external = self.project.parent / "external"
+        external.write_text("keep external")
+        result = self.run_launcher(
+            "update",
+            "1.2.3",
+            env={
+                "STUB_CONTAINERS": "1",
+                "STUB_SWAP_LINK": str(entry),
+                "STUB_LINK_TARGET": str(external),
+            },
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("external symlink", result.stderr)
+        self.assertTrue(any(c[0] == "stop" for c in self.docker_calls()))
+        self.assertFalse(any("save" in c or "pull" in c for c in self.docker_calls()))
+        self.assertEqual(self.snapshot_metadata(), [])
+        self.assertEqual((self.project / ".env").read_text(), original)
+        self.assertEqual(external.read_text(), "keep external")
+
+    def test_rollback_rejects_saved_destination_with_changed_symlink_parent(self):
+        parent = self.project.parent / "proxy"
+        parent.mkdir()
+        config = parent / "config"
+        config.write_text("original proxy")
+        self.write_env(
+            f'KARPATHY_WIKI_VERSION=0.0.1\nKARPATHY_WIKI_BACKUP_EXTRA_PATHS=["{config}"]\n'
+        )
+        result = self.run_launcher("update", "1.2.3")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        identifier = self.snapshot_metadata()[0]["id"]
+        # The current configuration no longer references the old external root.
+        self.write_env("KARPATHY_WIKI_VERSION=1.2.3\n")
+        parent.rename(parent.with_name("old-proxy"))
+        external = self.project.parent / "unrelated"
+        external.mkdir()
+        (external / "config").write_text("do not overwrite")
+        parent.symlink_to(external, target_is_directory=True)
+        self.docker_log.write_text("")
+        result = self.run_launcher("rollback", identifier, input=f"rollback {identifier}\n")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("must not be symlinks", result.stderr)
+        self.assertEqual((external / "config").read_text(), "do not overwrite")
+        self.assertFalse(any("load" in c or "down" in c for c in self.docker_calls()))
+        self.assertEqual(len(self.snapshot_metadata()), 2)
+        self.assertEqual((self.project / ".env").read_text(), "KARPATHY_WIKI_VERSION=1.2.3\n")
 
 
 if __name__ == "__main__":

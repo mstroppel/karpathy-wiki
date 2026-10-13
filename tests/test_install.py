@@ -100,6 +100,11 @@ class InstallTests(unittest.TestCase):
         curl = bin_dir / "curl"
         curl.write_text(overrides.pop("CURL_STUB", INSTALL_CURL_STUB))
         curl.chmod(0o755)
+        python_stub = overrides.pop("PYTHON_STUB", None)
+        if python_stub is not None:
+            python = bin_dir / "python3"
+            python.write_text(python_stub)
+            python.chmod(0o755)
         environment = {
             **os.environ,
             "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
@@ -149,6 +154,16 @@ class InstallTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("must be empty", result.stderr)
             self.assertFalse((directory / ".env").exists())
+
+    def test_install_rejects_unsupported_python_without_installing_files(self):
+        with tempfile.TemporaryDirectory() as parent:
+            directory = Path(parent) / "my-wiki"
+            directory.mkdir()
+            result = self.run_installer(directory, PYTHON_STUB="#!/bin/sh\nexit 1\n")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Python 3.11+ is required", result.stderr)
+            self.assertIn("install it on the host", result.stderr)
+            self.assertEqual(list(directory.iterdir()), [])
 
     def test_install_suppresses_expected_missing_release_launcher(self):
         with tempfile.TemporaryDirectory() as parent:
