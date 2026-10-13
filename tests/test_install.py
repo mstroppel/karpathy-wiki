@@ -15,7 +15,8 @@ for argument in "$@"; do
   previous=$argument
 done
 case "$out" in
-  *karpathy-wiki.sh) printf '%s\n' '#!/bin/sh' > "$out" ;;
+  *launcher_backup.py) printf '%s\n' '# backup helper' > "$out" ;;
+  *karpathy-wiki.sh) printf '%s\n' '#!/bin/sh' '# launcher_backup.py' > "$out" ;;
   *.env) printf '%s\n' \
     'COMPOSE_PROJECT_NAME=karpathy-wiki' \
     'STACK_ID=karpathy-wiki' \
@@ -45,13 +46,15 @@ for argument in "$@"; do
   previous=$argument
 done
 case "$out" in
-  *karpathy-wiki.sh) printf '%s\\n' '#!/bin/sh' > "$out" ;;
+  *launcher_backup.py) printf '%s\n' '# backup helper' > "$out" ;;
+  *karpathy-wiki.sh) printf '%s\\n' '#!/bin/sh' '# launcher_backup.py' > "$out" ;;
   *.env) printf '%s\\n' \
     'COMPOSE_PROJECT_NAME=karpathy-wiki' \
     'STACK_ID=karpathy-wiki' \
     'KARPATHY_WIKI_VERSION=latest' > "$out" ;;
 esac
 case "$url" in
+  */main/launcher_backup.py) printf '%s\n' '# backup helper' > "$out" ;;
   *api.github.com/repos/*/tags*)
     printf '%s\\n' \
       '[' \
@@ -79,7 +82,8 @@ case "$url" in
     printf '%s\n' 'curl: (22) The requested URL returned error: 404' >&2
     exit 22
     ;;
-  */main/karpathy-wiki.sh) printf '%s\n' '#!/bin/sh' > "$out" ;;
+  */main/karpathy-wiki.sh) printf '%s\n' '#!/bin/sh' '# launcher_backup.py' > "$out" ;;
+  */main/launcher_backup.py) printf '%s\n' '# backup helper' > "$out" ;;
   */v1.2.3/.env.example) printf '%s\n' \
     'COMPOSE_PROJECT_NAME=karpathy-wiki' \
     'STACK_ID=karpathy-wiki' \
@@ -96,6 +100,11 @@ class InstallTests(unittest.TestCase):
         curl = bin_dir / "curl"
         curl.write_text(overrides.pop("CURL_STUB", INSTALL_CURL_STUB))
         curl.chmod(0o755)
+        python_stub = overrides.pop("PYTHON_STUB", None)
+        if python_stub is not None:
+            python = bin_dir / "python3"
+            python.write_text(python_stub)
+            python.chmod(0o755)
         environment = {
             **os.environ,
             "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
@@ -128,7 +137,11 @@ class InstallTests(unittest.TestCase):
             values = dict(line.split("=", 1) for line in environment.splitlines())
             self.assertNotEqual(values["OPENCODE_PASSWORD"], values["OPENCHAMBER_UI_PASSWORD"])
             self.assertTrue((directory / "karpathy-wiki.sh").exists())
-            self.assertEqual((directory / ".gitignore").read_text(), ".cache/\n.env.bak\n")
+            self.assertEqual(
+                (directory / ".gitignore").read_text(),
+                ".cache/\n.env.bak\nbackups/\n.launcher.lock\n",
+            )
+            self.assertTrue((directory / "launcher_backup.py").exists())
 
     def test_install_refuses_non_empty_directory_before_download(self):
         with tempfile.TemporaryDirectory() as parent:
@@ -141,6 +154,16 @@ class InstallTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("must be empty", result.stderr)
             self.assertFalse((directory / ".env").exists())
+
+    def test_install_rejects_unsupported_python_without_installing_files(self):
+        with tempfile.TemporaryDirectory() as parent:
+            directory = Path(parent) / "my-wiki"
+            directory.mkdir()
+            result = self.run_installer(directory, PYTHON_STUB="#!/bin/sh\nexit 1\n")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Python 3.11+ is required", result.stderr)
+            self.assertIn("install it on the host", result.stderr)
+            self.assertEqual(list(directory.iterdir()), [])
 
     def test_install_suppresses_expected_missing_release_launcher(self):
         with tempfile.TemporaryDirectory() as parent:

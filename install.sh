@@ -83,9 +83,19 @@ main_url="https://raw.githubusercontent.com/$repository/main"
 # fall back to main, which stays compatible with any pinned version.
 # Older releases do not contain the launcher; suppress that expected miss while
 # keeping errors from the fallback download visible.
-curl -fsSL "$base_url/karpathy-wiki.sh" -o "$temporary_dir/karpathy-wiki.sh" 2>/dev/null ||
-  curl -fsSL "$main_url/karpathy-wiki.sh" -o "$temporary_dir/karpathy-wiki.sh"
-curl -fsSL "$base_url/.env.example" -o "$temporary_dir/.env"
+if ! curl -fsSL "$base_url/karpathy-wiki.sh" -o "$temporary_dir/karpathy-wiki.sh" 2>/dev/null; then
+  base_url=$main_url
+  curl -fsSL "$base_url/karpathy-wiki.sh" -o "$temporary_dir/karpathy-wiki.sh"
+fi
+if grep -q 'launcher_backup.py' "$temporary_dir/karpathy-wiki.sh"; then
+  if ! command -v python3 >/dev/null 2>&1 ||
+    ! python3 -c 'import sys; sys.exit(sys.version_info < (3, 11))'; then
+    printf 'Python 3.11+ is required for the launcher; install it on the host and rerun the installer.\n' >&2
+    exit 1
+  fi
+  curl -fsSL "$base_url/launcher_backup.py" -o "$temporary_dir/launcher_backup.py"
+fi
+curl -fsSL "https://raw.githubusercontent.com/$repository/$tag/.env.example" -o "$temporary_dir/.env"
 sed \
   -e "s/^COMPOSE_PROJECT_NAME=.*/COMPOSE_PROJECT_NAME=$wiki_id/" \
   -e "s/^STACK_ID=.*/STACK_ID=$wiki_id/" \
@@ -97,8 +107,12 @@ mv "$temporary_dir/.env.pinned" "$temporary_dir/.env"
 
 chmod 0755 "$temporary_dir/karpathy-wiki.sh"
 chmod 0600 "$temporary_dir/.env"
-printf '.cache/\n.env.bak\n' >"$temporary_dir/.gitignore"
+printf '.cache/\n.env.bak\nbackups/\n.launcher.lock\n' >"$temporary_dir/.gitignore"
 mv "$temporary_dir/karpathy-wiki.sh" "$install_dir/karpathy-wiki.sh"
+if [ -f "$temporary_dir/launcher_backup.py" ]; then
+  chmod 0644 "$temporary_dir/launcher_backup.py"
+  mv "$temporary_dir/launcher_backup.py" "$install_dir/launcher_backup.py"
+fi
 mv "$temporary_dir/.env" "$install_dir/.env"
 mv "$temporary_dir/.gitignore" "$install_dir/.gitignore"
 
