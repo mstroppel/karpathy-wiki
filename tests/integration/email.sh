@@ -4,7 +4,9 @@ set -eu
 # shellcheck disable=SC1007
 root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 cd "$root"
-scratch=$(mktemp -d "${TMPDIR:-$HOME/.cache}/kw-email.XXXXXX")
+temporary_root=${TMPDIR:-$HOME/.cache}
+mkdir -p "$temporary_root"
+scratch=$(mktemp -d "$temporary_root/kw-email.XXXXXX")
 container=""
 cleanup() {
   if [ -n "$container" ]; then docker rm -f "$container" >/dev/null 2>&1; fi

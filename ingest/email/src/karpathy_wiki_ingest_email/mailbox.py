@@ -12,7 +12,6 @@ from email import policy
 from email.parser import BytesHeaderParser
 from typing import Any
 
-from .extract import identity, parse
 from .settings import Settings, mailboxes
 from .store import Store
 
@@ -115,7 +114,9 @@ def receive(client: Any, settings: Settings, store: Store) -> tuple[int, int]:
         try:
             previous = store.delivery(scope, epoch, uid)
             if previous is not None:
-                if not previous["deleted"]:
+                if not previous["deleted"] and authorized(
+                    store.read(previous["original"]), settings
+                ):
                     delete(client, store, scope, epoch, uid, previous["original"])
                 continue
             data = checked(client.uid("FETCH", uid, "(UID RFC822.SIZE)"))
@@ -137,7 +138,7 @@ def receive(client: Any, settings: Settings, store: Store) -> tuple[int, int]:
                 raise ValueError("incomplete IMAP message")
             if not authorized(raw, settings):
                 continue
-            original = store.archive(raw, identity(parse(raw)), scope, epoch, uid)
+            original = store.archive(raw, None, scope, epoch, uid)
             archived += 1
             delete(client, store, scope, epoch, uid, original)
         except (OSError, ValueError, RecursionError, imaplib.IMAP4.error):

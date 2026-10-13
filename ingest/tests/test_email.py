@@ -327,6 +327,52 @@ class EmailTests(unittest.TestCase):
         self.assertEqual(len(self.store.sources()), 2)
         self.assertIn(new, [path.read_bytes() for path in self.settings.archive.glob("*.eml")])
 
+    def test_pending_delete_rechecks_current_allowlist_and_delivery_header(self):
+        client = FakeIMAP()
+        client.fail_delete = True
+        receive(client, self.settings, self.store)
+        client.fail_delete = False
+        for settings in (
+            replace(self.settings, allowlist=("other@example.com",)),
+            replace(self.settings, delivery_header="Delivered-To"),
+        ):
+            client.commands.clear()
+            self.assertEqual(receive(client, settings, self.store), (0, 0))
+            self.assertFalse(any(command[0] == "STORE" for command in client.commands))
+            self.assertIn("1", client.messages)
+        self.assertEqual(receive(client, self.settings, self.store), (0, 0))
+        self.assertFalse(client.messages)
+
+    def test_pathological_mime_cannot_block_archive_or_delete(self):
+        raw = (
+            f"X-Original-To: {RECIPIENT}\r\nFrom: sender@example.com\r\n"
+            "Content-Type: multipart/mixed; boundary=b0\r\n\r\n"
+        ).encode()
+        for index in range(300):
+            raw += (
+                f"--b{index}\r\nContent-Type: multipart/mixed; boundary=b{index + 1}\r\n\r\n"
+            ).encode()
+        raw += b"text"
+        for index in reversed(range(301)):
+            raw += f"\r\n--b{index}--\r\n".encode()
+        client = FakeIMAP({"1": raw})
+        self.assertEqual(receive(client, self.settings, self.store), (1, 0))
+        self.assertFalse(client.messages)
+        self.assertEqual(next(self.settings.archive.glob("*.eml")).read_bytes(), raw)
+        self.assertEqual(extract(self.store, self.anonymizer, 25), 1)
+
+    def test_identity_exception_follows_durable_archive_with_extra_ledger(self):
+        self.assertEqual(self.store.db.execute("PRAGMA synchronous").fetchone()[0], 3)
+        raw = mail()
+
+        def failing_identity(message):
+            self.assertEqual(next(self.settings.archive.glob("*.eml")).read_bytes(), raw)
+            raise RecursionError
+
+        with patch("karpathy_wiki_ingest_email.store.message_identity", new=failing_identity):
+            self.assertEqual(receive(FakeIMAP({"1": raw}), self.settings, self.store), (1, 0))
+        self.assertEqual(self.store.sources()[0]["identity"], "raw:" + digest(raw))
+
     def test_transit_duplicates_archive_all_originals_but_one_source(self):
         first, second = mail(received="first hop"), mail(received="second hop")
         self.assertNotEqual(digest(first), digest(second))
@@ -422,6 +468,38 @@ class EmailTests(unittest.TestCase):
         self.assertNotEqual(second["source_revision"], first["source_revision"])
         with self.assertRaises(ValueError):
             self.store.rearm("unknown")
+
+    def test_failed_replay_retains_last_safe_projection_and_immutable_file(self):
+        self.seed()
+        extract(self.store, self.anonymizer, 25)
+        publish(self.store, self.settings.sanitized, self.anonymizer)
+        first = self.manifest()["items"][0]
+        original_path = self.settings.sanitized / first["source_path"]
+        original_text = original_path.read_text()
+        self.store.rearm(first["source_key"])
+        with patch("karpathy_wiki_ingest_email.render", side_effect=ValueError("private")):
+            self.assertEqual(extract(self.store, self.anonymizer, 25), 1)
+        self.assertEqual(publish(self.store, self.settings.sanitized, self.anonymizer), 1)
+        self.assertEqual(self.manifest()["items"], [first])
+        self.assertEqual(self.manifest()["revoked"], [])
+        self.assertEqual(original_path.read_text(), original_text)
+        self.assertEqual(self.manifest()["errors"][0]["error"], "ValueError")
+        self.assertEqual(extract(self.store, self.anonymizer, 25), 1)  # retry backoff
+
+    def test_failed_replay_never_retains_projection_rejected_by_current_privacy_gate(self):
+        self.seed()
+        extract(self.store, self.anonymizer, 25)
+        publish(self.store, self.settings.sanitized, self.anonymizer)
+        self.store.rearm(None)
+        with patch("karpathy_wiki_ingest_email.render", side_effect=ValueError("private")):
+            extract(self.store, self.anonymizer, 25)
+        rejecting = Mock(spec=self.anonymizer)
+        rejecting.anonymize.side_effect = ValueError("private")
+        rejecting.fingerprint = "b" * 64
+        rejecting.locate.return_value = []
+        self.assertGreater(publish(self.store, self.settings.sanitized, rejecting), 0)
+        self.assertEqual(self.manifest()["items"], [])
+        self.assertEqual(len(self.manifest()["revoked"]), 1)
 
     def test_mime_and_manifest_privacy_failures_revoke_source(self):
         self.seed()

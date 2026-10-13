@@ -28,7 +28,7 @@ LOG = logging.getLogger("karpathy-wiki-email")
 def extract(store: Store, anonymizer: TargetedAnonymizer, limit: int) -> int:
     failed = handled = 0
     for source in store.sources():
-        if source["output"] is not None:
+        if not source["pending"]:
             continue
         if source["attempts"] >= 5:
             failed += 1
@@ -59,10 +59,10 @@ def publish(store: Store, root: Path, anonymizer: TargetedAnonymizer) -> int:
     revoked = []
     errors = []
     for source in store.sources():
+        if source["error"]:
+            errors.append({"source_key": source["id"], "error": source["error"]})
         if source["output"] is None:
             revoked.append({"source_key": source["id"], "claim": {"email_id": source["id"]}})
-            if source["error"]:
-                errors.append({"source_key": source["id"], "error": source["error"]})
             continue
         try:
             documents[source["id"]] = anonymizer.anonymize(source["output"])[0]
@@ -70,9 +70,7 @@ def publish(store: Store, root: Path, anonymizer: TargetedAnonymizer) -> int:
             revoked.append({"source_key": source["id"], "claim": {"email_id": source["id"]}})
             errors.append({"source_key": source["id"], "error": "PrivacyValidationError"})
     fingerprint = digest(
-        json.dumps(
-            [EXTRACTION_VERSION, anonymizer.fingerprint, documents, revoked, errors], sort_keys=True
-        ).encode()
+        json.dumps([EXTRACTION_VERSION, anonymizer.fingerprint, documents], sort_keys=True).encode()
     )
     # Deterministic content identity makes publication restart-idempotent.
     generation = root / "generations" / fingerprint

@@ -82,7 +82,7 @@ after a cycle; cycles never overlap. Tests never contact a live mailbox.
 
 `${DATA_ROOT}/incoming/email` is private (`0700`). Immutable `.eml` files (`0600`)
 have opaque names. Originals are verified after writing; the file **and parent
-directory** are fsynced, then a provider-local SQLite FULL-synchronous ledger
+directory** are fsynced, then a provider-local SQLite EXTRA-synchronous ledger
 commit records the delivery **before** deletion. Disk/state/integrity failures
 never permit deletion. A crash before the ledger commit can leave an orphan
 original; keep it for operator inspection. Pending deletions resume by
@@ -101,6 +101,12 @@ privacy failures remain recoverable locally. Extraction errors back off one
 hour, stop after five attempts, and remain unhealthy/content-free errors until
 repair/replay. An unreachable IMAP server does not prevent local extraction.
 No stateless destructive or publication fallback exists.
+
+Pending server deletes recheck the archived message against the current recipient
+proof and From allowlist. MIME identity processing occurs only after the original
+is durable; pathological MIME falls back to exact-original-byte deduplication.
+Failed replay retains the last successful projection, subject to the current
+privacy gate, and reports the failure without discarding safe published text.
 
 Body extraction prefers `text/plain`, otherwise converts HTML locally to text,
 preserves signatures/quotes, ignores attachments/embedded messages and loads no

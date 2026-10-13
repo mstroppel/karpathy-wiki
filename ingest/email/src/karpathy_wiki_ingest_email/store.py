@@ -1,4 +1,4 @@
-"""Private restart-safe archive ledger; FULL SQLite commits precede IMAP deletion.
+"""Private restart-safe archive ledger; EXTRA SQLite commits precede IMAP deletion.
 
 This is a new provider-local schema, not a migration of the shared job store.
 One advisory process lock serializes receive, extraction, publication and replay.
@@ -14,6 +14,9 @@ import stat
 import time
 import uuid
 from pathlib import Path
+
+from .extract import identity as message_identity
+from .extract import parse
 
 
 def fsync_directory(path: Path) -> None:
@@ -47,12 +50,17 @@ class Store:
             self.db = sqlite3.connect(root / "mail.sqlite3")
             self.db.row_factory = sqlite3.Row
             self.db.execute("PRAGMA journal_mode=DELETE")
-            self.db.execute("PRAGMA synchronous=FULL")
+            self.db.execute("PRAGMA synchronous=EXTRA")
             self.db.execute("PRAGMA foreign_keys=ON")
+            if (
+                self.db.execute("PRAGMA journal_mode").fetchone()[0] != "delete"
+                or self.db.execute("PRAGMA synchronous").fetchone()[0] != 3
+            ):
+                raise ValueError("durable SQLite configuration required")
             self.db.executescript("""
                 CREATE TABLE IF NOT EXISTS sources (
                     id TEXT PRIMARY KEY, identity TEXT UNIQUE NOT NULL,
-                    original TEXT NOT NULL, output TEXT,
+                    original TEXT NOT NULL, output TEXT, pending INTEGER NOT NULL DEFAULT 1,
                     attempts INTEGER NOT NULL DEFAULT 0,
                     next_attempt INTEGER NOT NULL DEFAULT 0, error TEXT
                 );
@@ -96,7 +104,7 @@ class Store:
             raise ValueError("original archive integrity failure")
         return raw
 
-    def archive(self, raw: bytes, identity: str, scope: str, epoch: str, uid: str) -> str:
+    def archive(self, raw: bytes, identity: str | None, scope: str, epoch: str, uid: str) -> str:
         existing = self.db.execute(
             "SELECT id, source_id FROM originals WHERE sha256=?", (digest(raw),)
         ).fetchone()
@@ -105,10 +113,6 @@ class Store:
             self.read(original)
         else:
             original = uuid.uuid4().hex
-            source = self.db.execute(
-                "SELECT id FROM sources WHERE identity=?", (identity,)
-            ).fetchone()
-            source_id = source["id"] if source else uuid.uuid4().hex
             temporary = self.root / f".{original}.tmp"
             path = self.root / f"{original}.eml"
             try:
@@ -123,6 +127,18 @@ class Store:
                 fsync_directory(self.root)
             finally:
                 temporary.unlink(missing_ok=True)
+            # MIME parsing/serialization cannot prevent durable raw retention.
+            # Pathological MIME uses exact-byte deduplication and stays locally
+            # replayable even when content-aware identity cannot be computed.
+            if identity is None:
+                try:
+                    identity = message_identity(parse(raw))
+                except (ValueError, UnicodeError, LookupError, RecursionError):
+                    identity = "raw:" + digest(raw)
+            source = self.db.execute(
+                "SELECT id FROM sources WHERE identity=?", (identity,)
+            ).fetchone()
+            source_id = source["id"] if source else uuid.uuid4().hex
             with self.db:
                 if not source:
                     self.db.execute(
@@ -168,14 +184,15 @@ class Store:
     def succeeded(self, source_id: str, output: str) -> None:
         with self.db:
             self.db.execute(
-                "UPDATE sources SET output=?, error=NULL, attempts=0, next_attempt=0 WHERE id=?",
+                "UPDATE sources SET output=?, pending=0, error=NULL, attempts=0, "
+                "next_attempt=0 WHERE id=?",
                 (output, source_id),
             )
 
     def failed(self, source_id: str, error: str) -> None:
         with self.db:
             self.db.execute(
-                "UPDATE sources SET output=NULL, error=?, attempts=attempts+1, "
+                "UPDATE sources SET pending=1, error=?, attempts=attempts+1, "
                 "next_attempt=? WHERE id=?",
                 (error, int(time.time()) + 3600, source_id),
             )
@@ -187,7 +204,7 @@ class Store:
         ):
             raise ValueError("unknown source ID")
         with self.db:
-            query = "UPDATE sources SET output=NULL, attempts=0, next_attempt=0, error=NULL"
+            query = "UPDATE sources SET pending=1, attempts=0, next_attempt=0, error=NULL"
             self.db.execute(
                 query if source_id is None else query + " WHERE id=?",
                 () if source_id is None else (source_id,),
