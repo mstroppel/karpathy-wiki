@@ -21,6 +21,7 @@ COPY webdav/ /src/webdav/
 COPY audio/ /src/audio/
 COPY speech/ /src/speech/
 COPY paperless/ /src/paperless/
+COPY email/ /src/email/
 # The PEP 517 build backend is preinstalled from a hash-pinned wheel so the
 # wheel builds below can run with --no-build-isolation and never execute
 # index-resolved tooling. This install is the only index access in the build.
@@ -29,12 +30,13 @@ RUN python -m pip install --require-hashes --no-deps -r /src/build-requirements.
 # Each distribution builds into its own wheel directory so every final stage
 # can copy exactly the wheels it needs. --no-deps is safe because the plugin
 # wheels declare an exact dependency on the core wheel, which is built here.
-RUN mkdir -p /wheels/core /wheels/webdav /wheels/audio /wheels/speech /wheels/paperless \
+RUN mkdir -p /wheels/core /wheels/webdav /wheels/audio /wheels/speech /wheels/paperless /wheels/email \
     && python -m pip wheel --no-deps --no-build-isolation --wheel-dir /wheels/core /src/core \
     && python -m pip wheel --no-deps --no-build-isolation --wheel-dir /wheels/webdav /src/webdav \
     && python -m pip wheel --no-deps --no-build-isolation --wheel-dir /wheels/audio /src/audio \
     && python -m pip wheel --no-deps --no-build-isolation --wheel-dir /wheels/speech /src/speech \
-    && python -m pip wheel --no-deps --no-build-isolation --wheel-dir /wheels/paperless /src/paperless
+    && python -m pip wheel --no-deps --no-build-isolation --wheel-dir /wheels/paperless /src/paperless \
+    && python -m pip wheel --no-deps --no-build-isolation --wheel-dir /wheels/email /src/email
 
 FROM python:3.14-slim-bookworm@sha256:48b13b003dda20b16f9442b8475aa05fe21bf6579a8c881db92ffb4d8fd20f83 AS core
 
@@ -52,6 +54,11 @@ RUN python -m pip install --no-index --find-links=/wheels karpathy-wiki-ingest \
     && rm -rf /wheels
 # The core image is the base for third-party plugins; it ships no plugins.
 ENTRYPOINT ["python", "-m", "karpathy_wiki_ingest"]
+
+FROM core AS email
+COPY --from=build /wheels/email /wheels
+RUN python -m pip install --no-deps --no-index --find-links=/wheels karpathy-wiki-ingest-email \
+    && rm -rf /wheels
 
 FROM core AS webdav
 COPY --from=build /wheels/webdav /wheels

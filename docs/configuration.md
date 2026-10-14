@@ -1,5 +1,11 @@
 # Configuration
 
+For optional IMAP reception, enable `email` and configure `EMAIL_IMAP_*`,
+`EMAIL_RECIPIENT`, the explicitly trusted delivery header, optional
+`EMAIL_FROM_ALLOWLIST`, polling and size limits in `.env`. See [email
+ingestion](email.md) **before enabling it**: it archives original messages
+privately then deletes matches on the server, including matching old mail.
+
 Karpathy Wiki uses one Compose file for every installation. Keep instance
 configuration in an untracked environment file and pin `KARPATHY_WIKI_VERSION`
 when reproducible upgrades are required.

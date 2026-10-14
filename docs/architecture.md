@@ -2,11 +2,11 @@
 
 The core services are `init`, `opencode`, `openchamber`, and `silverbullet`. Optional source
 and export services are enabled with Compose profiles. The `webdav-ingest`,
-`audio-ingest`, and `paperless-ingest` services use dedicated images
-(`karpathy-wiki-ingest-webdav`, `karpathy-wiki-ingest-audio`, and
-`karpathy-wiki-ingest-paperless`) that contain only the shared ingest core
-and their own plugin; audio additionally uses the separate local speech
-worker image (`karpathy-wiki-ingest-speech`). Ingest is
+`audio-ingest`, `paperless-ingest`, and `email-ingest` services use dedicated images
+(`karpathy-wiki-ingest-webdav`, `karpathy-wiki-ingest-audio`,
+`karpathy-wiki-ingest-paperless`, and `karpathy-wiki-ingest-email`) that contain
+only the shared ingest core and their own plugin; audio additionally uses the
+separate local speech worker image (`karpathy-wiki-ingest-speech`). Ingest is
 plugin-based; additional modules can live in separate repositories (see
 `ingest-modules.md`).
 
@@ -20,6 +20,9 @@ WebDAV audio -- rclone snapshot -> local speech worker ->         |
 Paperless ---- local redaction (optional) -> sources/paperless/ --+--> OpenCode
                                         (coherent generations)      |
 Confirmed Q&A -> local inbox -> local redaction -> sources/answers/ -+
+TLS IMAP ---- private original archive + ledger -> targeted delete  |
+                -> local body/header extraction -> local redaction  |
+                -> sources/email/ (coherent generations) -----------+
                                                                         |
                                                                         v
                                                                    wiki/ + Git
@@ -27,6 +30,16 @@ Confirmed Q&A -> local inbox -> local redaction -> sources/answers/ -+
                                                                         v
                                                                    SilverBullet
 ```
+
+The opt-in `email` profile keeps complete, unredacted `.eml` originals (including
+attachments) and its durable ledger in `${DATA_ROOT}/incoming/email`, mounted
+only into `email-ingest`. Verified archive and ledger commits precede targeted
+server deletion; extraction and redaction follow locally. Only redacted body
+text and headers cross the atomic manifest boundary into `sources/email/` for
+OpenCode. Originals, mailbox credentials and attachments are not exposed to
+OpenCode, SilverBullet or `raw-files`. Offline replay uses the private archive
+without contacting IMAP; wiki ingestion still requires explicit `/ingest-new`.
+See [email ingestion](email.md) for trust, deletion and retention boundaries.
 
 OpenChamber exposes the private OpenCode backend's sessions and wiki commands;
 sessions are not exported to SilverBullet. The frontend has a separate private

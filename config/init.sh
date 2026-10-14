@@ -21,6 +21,10 @@ case ",$profiles_without_space," in
   *,answers,*) ANSWERS_ENABLED=true ;;
   *) ANSWERS_ENABLED=false ;;
 esac
+case ",$profiles_without_space," in
+  *,email,*) EMAIL_ENABLED=true ;;
+  *) EMAIL_ENABLED=false ;;
+esac
 
 case "$PUID:$PGID" in
   *[!0-9:]*|:*|*:|*:*:*)
@@ -80,6 +84,10 @@ if [ "$PAPERLESS_ENABLED" = true ]; then
 fi
 if [ "$ANSWERS_ENABLED" = true ]; then
   mkdir -p "$sources/answers"
+fi
+if [ "$EMAIL_ENABLED" = true ]; then
+  mkdir -p "$sources/email" "$KNOWLEDGE_ROOT/incoming/email"
+  chmod 0700 "$KNOWLEDGE_ROOT/incoming/email"
 fi
 
 # Git rejects repositories owned by another identity. Correct the configured

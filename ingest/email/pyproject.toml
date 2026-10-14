@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools==84.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "karpathy-wiki-ingest-email"
+version = "0.1.0"
+description = "Private IMAP original archive and redacted text sources for Karpathy Wiki"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+dependencies = ["karpathy-wiki-ingest==0.1.0"]
+classifiers = ["Programming Language :: Python :: 3", "Typing :: Typed"]
+
+[project.urls]
+Source = "https://github.com/mstroppel/karpathy-wiki"
+
+[project.entry-points."karpathy_wiki_ingest.plugins"]
+email = "karpathy_wiki_ingest_email:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"*" = ["py.typed"]

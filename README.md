@@ -166,11 +166,12 @@ Set `COMPOSE_PROFILES` in `.env`; profiles can be enabled independently:
 | `audio` | Transcribe WebDAV recordings and publish redacted transcripts (local by default, opt-in hosted backend) |
 | `answers` | Publish confirmed Q&A drafts from the local answer inbox |
 | `paperless` | Export tagged OCR text and redact configured personal data |
+| `email` | Privately archive matching IMAP mail, delete it on the server, publish redacted body text |
 | `raw-files` | Expose source files to a trusted reverse proxy |
 
 See [configuration](docs/configuration.md),
 [audio ingestion](docs/audio.md), and
-[Paperless ingestion](docs/paperless.md) for profile-specific setup and
+[Paperless ingestion](docs/paperless.md), and [email ingestion](docs/email.md) for profile-specific setup and
 production paths. See [architecture](docs/architecture.md)
 for service boundaries and [data layout](docs/data-layout.md) for the persistent
 folder structure.
@@ -236,7 +237,7 @@ Run the same checks CI runs:
 
 ```bash
 python3 -m pip install -r requirements-dev.txt
-python3 -m pip install -e ingest/core -e ingest/webdav -e ingest/paperless -e ingest/audio -e ingest/speech
+python3 -m pip install -e ingest/core -e ingest/webdav -e ingest/paperless -e ingest/audio -e ingest/speech -e ingest/email
 npm ci
 scripts/install-shellcheck.sh  # add ~/.local/bin to PATH if needed; Linux x86_64
 scripts/lint.sh
@@ -255,6 +256,7 @@ docker build --target publisher -t kw-publisher:integration -f opencode/Dockerfi
 sh tests/integration/trusted-publisher.sh  # isolated writer, crash recovery and reader boundary
 sh tests/integration/manual-ingest.sh  # UI-only admission, synthetic worker proposals and trusted authoring saves
 tests/integration/run.sh  # requires Docker; disposable Compose stack test
+sh tests/integration/email.sh  # synthetic TLS IMAP, archive-before-delete, restart, replay
 sh tests/integration/launcher-backup.sh  # real Compose update snapshots and delayed rollback
 ```
 
