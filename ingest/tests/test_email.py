@@ -266,9 +266,58 @@ class EmailTests(unittest.TestCase):
         )
         settings = replace(self.settings, batch=1, max_bytes=2000)
         self.assertEqual(receive(client, settings, self.store), (0, 1))
-        self.assertEqual(receive(client, settings, self.store), (0, 0))
         self.assertEqual(receive(client, settings, self.store), (1, 0))
+        self.assertEqual(receive(client, settings, self.store), (0, 0))
+        self.assertEqual(receive(client, settings, self.store), (0, 0))
         self.assertEqual(receive(client, settings, self.store), (0, 1))
+
+    def test_growing_backlog_reserves_newest_slots_without_skipping_old_mail(self):
+        client = FakeIMAP({str(uid): mail(delivery="other@example.com") for uid in range(1, 101)})
+        client.messages["3"] = mail(body="old matching message")
+        settings = replace(self.settings, batch=4)
+        for poll in range(6):
+            with self.subTest(poll=poll):
+                first = 101 + 4 * poll
+                for uid in range(first, first + 4):
+                    client.messages[str(uid)] = mail(delivery="other@example.com")
+                latest = str(first + 3)
+                client.messages[latest] = mail(body=f"new message {latest}")
+                client.commands.clear()
+                self.assertEqual(receive(client, settings, self.store), (2 if poll == 1 else 1, 0))
+                fetched = [
+                    command[1]
+                    for command in client.commands
+                    if command[0] == "FETCH" and "RFC822.SIZE" in command[2]
+                ]
+                self.assertEqual(
+                    fetched, [str(2 * poll + 1), str(2 * poll + 2), latest, str(first + 2)]
+                )
+                self.assertNotIn(latest, client.messages)
+                # Both lane cursors survive actual process-store restart.
+                self.store.close()
+                self.store = Store(self.settings.archive)
+        self.assertNotIn("3", client.messages)
+
+    def test_single_slot_alternates_newest_and_backlog_across_restarts(self):
+        client = FakeIMAP({str(uid): mail(delivery="other@example.com") for uid in range(1, 21)})
+        client.messages["3"] = mail(body="old matching message")
+        settings = replace(self.settings, batch=1)
+        for poll in range(6):
+            latest = str(21 + poll)
+            client.messages[latest] = mail(body=f"new message {latest}")
+            client.commands.clear()
+            self.assertEqual(
+                receive(client, settings, self.store), (1 if poll % 2 or poll == 4 else 0, 0)
+            )
+            fetched = [
+                command[1]
+                for command in client.commands
+                if command[0] == "FETCH" and "RFC822.SIZE" in command[2]
+            ]
+            self.assertEqual(fetched, [latest if poll % 2 else str(poll // 2 + 1)])
+            self.store.close()
+            self.store = Store(self.settings.archive)
+        self.assertNotIn("3", client.messages)
 
     def test_archive_write_or_state_failure_never_flags_message(self):
         for failure in (OSError("private data"), sqlite3.OperationalError("private data")):

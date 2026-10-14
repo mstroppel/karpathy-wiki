@@ -72,8 +72,11 @@ single-quoted values when necessary to avoid Compose `$` interpolation.
 ```
 
 **Activation can delete old matching mail.** Unmatched, non-allowlisted,
-oversized, incomplete or unproven messages stay on the server. Batches rotate
-over UIDs so poison/nonmatching messages do not starve later arrivals. Limits
+oversized, incomplete or unproven messages stay on the server. Batches reserve
+half their slots (rounded down) for newest UIDs; the remainder advances an
+independent rotating backlog cursor. Batch size 1 alternates backlog and newest
+turns, persisted across restarts. Growing backlogs and poison/nonmatching messages
+cannot monopolize new-mail reception, and older mail continues to be scanned. Limits
 default to 25 MiB per original including attachments, 25 candidates per
 receive/extraction batch, and 30 seconds per network operation. Polling waits
 after a cycle; cycles never overlap. Tests never contact a live mailbox.

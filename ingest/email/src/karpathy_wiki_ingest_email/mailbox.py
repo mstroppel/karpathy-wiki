@@ -106,11 +106,23 @@ def receive(client: Any, settings: Settings, store: Store) -> tuple[int, int]:
     ordered = sorted(set(uids), key=int)
     cursor_scope = f"{scope}:{epoch}"
     cursor = store.cursor(cursor_scope)
-    ordered = [uid for uid in ordered if int(uid) > cursor] + [
+    rotating = [uid for uid in ordered if int(uid) > cursor] + [
         uid for uid in ordered if int(uid) <= cursor
     ]
+    # Reserve half the batch for newest mail, independently of the backlog
+    # cursor. A growing tail must not delay new arrivals or skip older work.
+    newest_count = settings.batch // 2
+    if settings.batch == 1:
+        # Persist alternating turns so restarts cannot starve either lane.
+        turn_scope = f"{cursor_scope}:newest-turn"
+        newest_count = store.cursor(turn_scope)
+        store.advance(turn_scope, str(1 - newest_count))
+    newest = list(reversed(ordered[-newest_count:])) if newest_count else []
+    newest_set = set(newest)
+    backlog = [uid for uid in rotating if uid not in newest_set][: settings.batch - len(newest)]
+    backlog_set = set(backlog)
     archived = failed = 0
-    for uid in ordered[: settings.batch]:
+    for uid in backlog + newest:
         try:
             previous = store.delivery(scope, epoch, uid)
             if previous is not None:
@@ -144,7 +156,9 @@ def receive(client: Any, settings: Settings, store: Store) -> tuple[int, int]:
         except (OSError, ValueError, RecursionError, imaplib.IMAP4.error):
             failed += 1
         finally:
-            # A rejected/oversized/poison message must not starve later arrivals.
+            # Only backlog work advances the cursor; newest-first processing
+            # must not jump over old mail. Rejected/poison messages advance too.
             # SQLite failures intentionally escape and stop destructive work.
-            store.advance(cursor_scope, uid)
+            if uid in backlog_set:
+                store.advance(cursor_scope, uid)
     return archived, failed
