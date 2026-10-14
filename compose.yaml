@@ -398,7 +398,7 @@ services:
       - no-new-privileges:true
 
   silverbullet:
-    image: ghcr.io/silverbulletmd/silverbullet:2.12.0
+    image: ghcr.io/silverbulletmd/silverbullet:2.12.1
     user: "${PUID:-1000}:${PGID:-1000}"
     restart: unless-stopped
     environment:
@@ -422,7 +422,7 @@ services:
       - no-new-privileges:true
 
   raw-files:
-    image: caddy:2.11.4-alpine
+    image: caddy:2.11.7-alpine
     profiles: ["raw-files"]
     restart: unless-stopped
     command: ["caddy", "file-server", "--root", "/srv", "--listen", ":8080"]
