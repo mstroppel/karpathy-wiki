@@ -1,12 +1,12 @@
-FROM debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251 AS opencode
+FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587 AS opencode
 
 # The OpenCode CLI is downloaded from the npm registry and verified against
 # these pinned sha512 digests (hex, one per supported target architecture).
 # Digests must be updated together with OPENCODE_VERSION; the scheduled
 # OpenCode update workflow opens a pull request that bumps all three.
-ARG OPENCODE_VERSION=2.0.27
-ARG OPENCODE_SHA512_LINUX_X64=40f1abcc1492b390131b79cce178d2e2d9965d4076d838b7e87d2f7ccba12b093a8b73d1dcd6f8b26fa5d3482f4dd732091a2162c2b0aa3bc3ebb4f40cf7102d
-ARG OPENCODE_SHA512_LINUX_ARM64=a8ad84f22cbb672382d5171b259b95bb35071c3c20e01c60138d39f9b3cb6637a9d1c536caabe27ec541d14a6dca256cd86c577d90db9a7db0ef2e4f5b8f6cb2
+ARG OPENCODE_VERSION=2.0.29
+ARG OPENCODE_SHA512_LINUX_X64=a5d1bf4f8b81c520b78635133ab4e5c76a5795997656a00195bd00803959f153bfab5a5450e62fa285a637955e4a2f843fc70a19552c8f419498c0de076ca6a4
+ARG OPENCODE_SHA512_LINUX_ARM64=12c0a7be9e6530935e9b462840933d3e45d8d0aae48ae80be7933d27626522643329d42767808abadacf0173a7b1af3cf6a1e1639b634690270ff65817386444
 ARG TARGETARCH
 ARG APP_UID=1000
 ARG APP_GID=100
@@ -54,7 +54,7 @@ ENTRYPOINT ["karpathy-wiki-entrypoint"]
 
 # Both images share the same checksum-verified CLI; external-server mode still
 # needs it for version discovery. Never download a second independent CLI pin.
-FROM node:26-bookworm-slim@sha256:662933cf47f013bc8e4beb31a6116448427a82057ba7c42c97e4c5ba766504c2 AS openchamber
+FROM node:26-bookworm-slim@sha256:86f07bc9c5dce4578cf37e5a418b7bfc7f817cda25cde66e2b66e95ed86c4567 AS openchamber
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates git \
     && rm -rf /var/lib/apt/lists/*
@@ -81,7 +81,7 @@ ENTRYPOINT ["karpathy-wiki-chat"]
 # Trusted writer only: no OpenCode, chat, npm packages, model credentials or API.
 # The deterministic analysis renderer ships here so the trusted channel derives
 # print views itself instead of trusting runtime-produced artifacts.
-FROM node:26-bookworm-slim@sha256:662933cf47f013bc8e4beb31a6116448427a82057ba7c42c97e4c5ba766504c2 AS publisher
+FROM node:26-bookworm-slim@sha256:86f07bc9c5dce4578cf37e5a418b7bfc7f817cda25cde66e2b66e95ed86c4567 AS publisher
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git python3 python3-markdown python3-bleach \
     && rm -rf /var/lib/apt/lists/*

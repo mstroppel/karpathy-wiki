@@ -77,7 +77,8 @@ const missingReport = new URLSearchParams({
 })
 assert.equal((await request(`/api/fs/read?${missingReport}`)).status, 404)
 
-await json('/api/opencode/directory', { method: 'POST', body: { path: directory } })
+// OpenChamber 2.2 scopes discovery through the per-request directory header;
+// there is no separate mutable directory-selection endpoint.
 const commands = await json('/api/command')
 const agents = await json('/api/agent')
 const skills = await json('/api/skill')

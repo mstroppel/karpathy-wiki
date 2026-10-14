@@ -9,7 +9,7 @@ ARG RCLONE_VERSION=1.75.1@sha256:45401ad7410db1d67ffdb58e19059ad20b0d8e0285a60e3
 
 FROM rclone/rclone:${RCLONE_VERSION} AS rclone
 
-FROM python:3.14-slim-bookworm@sha256:c8137f4c460908c8763f281c8f22c431eb5c538514ba9553fc3a89c06b7cfb88 AS build
+FROM python:3.14-slim-bookworm@sha256:48b13b003dda20b16f9442b8475aa05fe21bf6579a8c881db92ffb4d8fd20f83 AS build
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -38,7 +38,7 @@ RUN mkdir -p /wheels/core /wheels/webdav /wheels/audio /wheels/speech /wheels/pa
     && python -m pip wheel --no-deps --no-build-isolation --wheel-dir /wheels/paperless /src/paperless \
     && python -m pip wheel --no-deps --no-build-isolation --wheel-dir /wheels/email /src/email
 
-FROM python:3.14-slim-bookworm@sha256:c8137f4c460908c8763f281c8f22c431eb5c538514ba9553fc3a89c06b7cfb88 AS core
+FROM python:3.14-slim-bookworm@sha256:48b13b003dda20b16f9442b8475aa05fe21bf6579a8c881db92ffb4d8fd20f83 AS core
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -78,7 +78,7 @@ RUN python -m pip install --no-deps --no-index --find-links=/wheels \
 # FFmpeg libraries so decoding needs no system ffmpeg. This is the only
 # stage that installs third-party runtime wheels from the index, pinned by
 # hash in speech/requirements.txt so dependabot keeps them current.
-FROM python:3.14-slim-bookworm@sha256:c8137f4c460908c8763f281c8f22c431eb5c538514ba9553fc3a89c06b7cfb88 AS speech
+FROM python:3.14-slim-bookworm@sha256:48b13b003dda20b16f9442b8475aa05fe21bf6579a8c881db92ffb4d8fd20f83 AS speech
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
