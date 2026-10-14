@@ -54,7 +54,7 @@ ENTRYPOINT ["karpathy-wiki-entrypoint"]
 
 # Both images share the same checksum-verified CLI; external-server mode still
 # needs it for version discovery. Never download a second independent CLI pin.
-FROM node:26-bookworm-slim@sha256:662933cf47f013bc8e4beb31a6116448427a82057ba7c42c97e4c5ba766504c2 AS openchamber
+FROM node:26-bookworm-slim@sha256:86f07bc9c5dce4578cf37e5a418b7bfc7f817cda25cde66e2b66e95ed86c4567 AS openchamber
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates git \
     && rm -rf /var/lib/apt/lists/*
@@ -81,7 +81,7 @@ ENTRYPOINT ["karpathy-wiki-chat"]
 # Trusted writer only: no OpenCode, chat, npm packages, model credentials or API.
 # The deterministic analysis renderer ships here so the trusted channel derives
 # print views itself instead of trusting runtime-produced artifacts.
-FROM node:26-bookworm-slim@sha256:662933cf47f013bc8e4beb31a6116448427a82057ba7c42c97e4c5ba766504c2 AS publisher
+FROM node:26-bookworm-slim@sha256:86f07bc9c5dce4578cf37e5a418b7bfc7f817cda25cde66e2b66e95ed86c4567 AS publisher
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git python3 python3-markdown python3-bleach \
     && rm -rf /var/lib/apt/lists/*
