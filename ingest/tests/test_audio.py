@@ -895,6 +895,108 @@ class IdentityStabilityTests(CycleHarness):
 
 
 class FailureTests(CycleHarness):
+    def test_quarantine_logs_processing_stage_exception_and_correlation(self):
+        from karpathy_wiki_ingest_audio import publisher
+
+        write_recording(self.incoming, "Meetings/ok.mp3")
+        self.assertEqual(self.cycle(), (1, 0, False))
+        previous = os.readlink(self.sanitized / ACTIVE_SYMLINK)
+        previous_manifest = self.manifest()
+        cases = [
+            ("transcribe_source", RuntimeError, "speech", "detail_unavailable"),
+            ("transcribe_source", publisher.SpeechTimeoutError, "speech", "timeout"),
+            ("redact_transcript", ValueError, "transcript_redaction", "detail_unavailable"),
+            ("render_transcript_document", ValueError, "rendering", "detail_unavailable"),
+        ]
+        for operation, exception, stage, reason in cases:
+            with self.subTest(stage=stage, reason=reason):
+                with (
+                    mock.patch.object(publisher, operation, side_effect=exception("failed")),
+                    self.assertLogs(publisher.LOG, level="ERROR") as logs,
+                ):
+                    self.assertEqual(self.cycle(store=None), (0, 1, False))
+                report = next(self.quarantine.glob("*.error")).read_text(encoding="utf-8")
+                fields = dict(line.split("=", 1) for line in report.splitlines())
+                message = logs.output[-1]
+                self.assertIn(f"Audio source {fields['source_key']} was quarantined", message)
+                self.assertIn(f"generation={fields['generation']}", message)
+                self.assertIn(f"stage={stage}", message)
+                self.assertIn(f"error_type={exception.__name__}", message)
+                self.assertIn(f"reason={reason}", message)
+                self.assertIn("job=unavailable", message)
+                self.assertEqual(os.readlink(self.sanitized / ACTIVE_SYMLINK), previous)
+                self.assertEqual(self.manifest(), previous_manifest)
+
+    def test_quarantine_logs_document_validation_and_filesystem_stages(self):
+        from karpathy_wiki_ingest_audio import publisher
+
+        write_recording(self.incoming, "a.mp3")
+        original_write = publisher.atomic_write
+
+        def fail_output(path, content):
+            if path.suffix == ".md":
+                raise OSError("failed")
+            return original_write(path, content)
+
+        with (
+            mock.patch.object(publisher, "atomic_write", side_effect=fail_output),
+            self.assertLogs(publisher.LOG, level="ERROR") as logs,
+        ):
+            self.assertEqual(self.cycle(store=None), (0, 1, False))
+        self.assertIn("stage=output_write error_type=OSError reason=filesystem", logs.output[-1])
+
+        instance = anonymizer()
+        original_anonymize = instance.anonymize
+
+        def fail_validation(text):
+            if text.startswith("---"):
+                raise ValueError("failed")
+            return original_anonymize(text)
+
+        with (
+            mock.patch.object(instance, "anonymize", side_effect=fail_validation),
+            self.assertLogs(publisher.LOG, level="ERROR") as logs,
+        ):
+            self.assertEqual(self.cycle(anonymizer_instance=instance, store=None), (0, 1, False))
+        self.assertIn("stage=document_redaction error_type=ValueError", logs.output[-1])
+
+    def test_dead_job_logs_next_diagnostic_step_without_rearming(self):
+        from karpathy_wiki_ingest_audio import publisher
+
+        write_recording(self.incoming, "a.mp3")
+        with mock.patch.object(publisher, "transcribe_source", side_effect=RuntimeError("failed")):
+            for now in (1000, 1060, 1180, 1420, 1900):
+                with self.assertLogs(publisher.LOG, level="ERROR") as logs:
+                    self.assertEqual(self.cycle(now=now), (0, 1, False))
+                job, _ = self.store.enqueue(
+                    "ingest",
+                    {"provider": SOURCE_NAME, "upstream_files": 1},
+                    idempotency_key=publisher.cycle_idempotency_key(
+                        anonymizer().fingerprint,
+                        publisher.audio_inventory(self.incoming, DEFAULT_LIMITS),
+                        publisher.requested_options_identity(
+                            TranscriptionOptions(), self.speech_root
+                        ),
+                    ),
+                    now=now,
+                )
+                self.assertIn(f"job={job.id}", logs.output[-1])
+        self.assertEqual(job.state, "dead")
+        self.assertEqual(job.attempts, 5)
+        with (
+            mock.patch.object(publisher, "publish_generation") as publish,
+            self.assertLogs(publisher.LOG, level="ERROR") as logs,
+        ):
+            self.assertEqual(self.cycle(now=2000), (0, 1, False))
+        publish.assert_not_called()
+        message = logs.output[-1]
+        self.assertIn(f"Audio ingest job {job.id} is dead", message)
+        self.assertIn("attempts=5", message)
+        self.assertIn("detailed failure cause is unavailable", message)
+        self.assertIn("private audio quarantine reports and speech-worker diagnostics", message)
+        self.assertIn("docs/audio.md", message)
+        self.assertEqual(self.store.job(job.id).attempts, 5)
+
     def test_oversized_recording_fails_content_free_and_keeps_previous_generation(self):
         write_recording(self.incoming, "Meetings/ok.mp3")
         self.assertEqual(self.cycle(), (1, 0, False))

@@ -268,6 +268,8 @@ def sanitize_into_generation(
     previous_revisions: dict[str, str],
     quarantine: Path,
     speech_timeout: int,
+    *,
+    job_id: str | None = None,
 ) -> tuple[list[ManifestItem], int, int]:
     """Render, redact, and validate every source into the fresh generation.
 
@@ -281,14 +283,18 @@ def sanitize_into_generation(
     changed = 0
     for work in build_sources(mapping, inventory, source_ids):
         target = staging / TRANSCRIPT_DIRECTORY / f"{work.source_id}.md"
+        stage = "metadata_redaction"
         try:
             # Public metadata (origin path, page title) is redacted before
             # rendering so the document, the manifest frontmatter, and the
             # wiki page all carry the sanitized value.
             safe_title, _ = anonymizer.anonymize(title_of(work.relative))
             safe_origin, _ = anonymizer.anonymize(work.relative)
+            stage = "speech"
             result = transcribe_source(work, snapshot, speech_root, options, limits, speech_timeout)
+            stage = "transcript_redaction"
             segments, counts = redact_transcript(result.segments, anonymizer)
+            stage = "rendering"
             document = render_transcript_document(
                 title=safe_title,
                 language=result.language,
@@ -302,8 +308,10 @@ def sanitize_into_generation(
             )
             # The full rendered document is the final redaction surface:
             # frontmatter, provenance, and every rendered entry must pass.
+            stage = "document_redaction"
             output, _ = anonymizer.anonymize(document)
             revision = hashlib.sha256(output.encode("utf-8")).hexdigest()
+            stage = "output_write"
             atomic_write(target, output)
             items.append(
                 ManifestItem(
@@ -322,6 +330,7 @@ def sanitize_into_generation(
             )
             if previous_revisions.get(work.source_id) != revision:
                 changed += 1
+            stage = "quarantine_cleanup"
             (quarantine / f"{work.source_id}.error").unlink(missing_ok=True)
         except (OSError, RuntimeError, ValueError) as error:
             failed += 1
@@ -333,7 +342,21 @@ def sanitize_into_generation(
                     "error": f"processing:{type(error).__name__}",
                 }
             )
-            LOG.error("Audio source %s was quarantined", work.source_id)
+            reason = "detail_unavailable"
+            if isinstance(error, SpeechTimeoutError):
+                reason = "timeout"
+            elif isinstance(error, OSError):
+                reason = "filesystem"
+            LOG.error(
+                "Audio source %s was quarantined: stage=%s error_type=%s reason=%s"
+                " generation=%s job=%s",
+                work.source_id,
+                stage,
+                type(error).__name__,
+                reason,
+                generation_name,
+                job_id or "unavailable",
+            )
     return items, changed, failed
 
 
@@ -474,6 +497,8 @@ def publish_generation(
     limits: TranscriptionLimits,
     speech_timeout: int,
     commit_guard: Callable[[], None] | None = None,
+    *,
+    job_id: str | None = None,
 ) -> tuple[int, int]:
     """Build a complete generation and publish it in one atomic step."""
     speech_identity = requested_options_identity(options, speech_root)
@@ -505,6 +530,7 @@ def publish_generation(
             previous_revisions,
             quarantine,
             speech_timeout,
+            job_id=job_id,
         )
         write_generation_metadata(
             staging,
@@ -760,8 +786,11 @@ def process_cycle(
             if job.state == JOB_DEAD:
                 LOG.error(
                     "Audio ingest job %s is dead after repeated failures;"
-                    " fix the rejected recording or redaction configuration",
+                    " attempts=%s; detailed failure cause is unavailable in job state."
+                    " Inspect private audio quarantine reports and speech-worker diagnostics"
+                    " (see docs/audio.md); the active generation is unchanged",
                     job.id,
+                    job.attempts,
                 )
                 return 0, 1, False
             store.rearm(job.id, now=moment)
@@ -801,6 +830,7 @@ def process_cycle(
                 limits,
                 speech_timeout,
                 commit_guard=guard,
+                job_id=job.id,
             )
 
         publication_started = True
