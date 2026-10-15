@@ -43,6 +43,9 @@ is reported content-free through the health record and retry backoff.
 | --- | --- | --- |
 | `AUDIO_WEBDAV_PATH` | `Recordings` | WebDAV folder scanned for audio files |
 | `AUDIO_SYNC_INTERVAL` | `1h` | Pause after each completed daemon cycle (for example, `1m`) |
+| `AUDIO_SYNC_TIMEOUT_SEC` | `3600` | Health deadline for one WebDAV synchronization phase |
+| `AUDIO_PHASE_TIMEOUT_SEC` | `600` | Health deadline per local inventory item, rendering or publication phase |
+| `SPEECH_TIMEOUT_SEC` | `43200` | Provider wait and worker health deadline per recording, not per backlog |
 | `AUDIO_LANGUAGE` | auto-detect | ISO code passed to the speech worker (see below) |
 | `AUDIO_DIARIZE` | `0` | Request anonymous speaker-turn diarization |
 | `AUDIO_MAX_BYTES` | `536870912` | Reject larger recordings content-free |
@@ -206,6 +209,64 @@ untimed answers and exhausted retries fail content-free: the worker writes an
 error *type* only (for example `speech:processing:HostedRateLimitError`) into
 `speech/failures`, the source is quarantined, and the last successful
 published generation stays active.
+
+## Readiness, long first cycles and health
+
+**Healthy means ready and making bounded progress, not that every recording has
+finished.** The first backlog may take hours. The provider initializes a health
+record even on fresh `/tmp`, validates local configuration/state, waits up to
+120 seconds for the speech dependency, and proves WebDAV access with a
+content-suppressed, non-recursive listing (60-second timeout). It can then become
+ready during synchronization/transcription, before publishing its first complete
+generation. Invalid credentials, inaccessible storage and unavailable dependencies
+do not count as successful initialization.
+
+Both processes write a content-free heartbeat every 10 seconds. Health requires
+`ready=true`, no recorded failure, a heartbeat no older than 120 seconds, and an
+unexpired **fixed phase deadline**. The heartbeat cannot extend that deadline.
+Actual work advances phases/progress; there is no deadline for the whole backlog:
+
+- `startup` / `initializing`: not ready until initialization and dependency checks
+  succeed; every process restart overwrites the old ready record;
+- `synchronizing`: bounded by `AUDIO_SYNC_TIMEOUT_SEC`;
+- `inventory`, `source`, `rendering`, `publication`: local work bounded by
+  `AUDIO_PHASE_TIMEOUT_SEC`; inventory advances per file and sources individually;
+- `speech_wait` / worker `transcribing`: bounded by `SPEECH_TIMEOUT_SEC` per
+  recording. The provider checks dependency health at least every 10 seconds
+  while waiting. Long blocking backend calls have no finer progress proof: a
+  wedged-but-alive backend is detected at this configured deadline, not instantly;
+- `idle`: a real completed cycle; bounded by the configured pause plus 120 seconds;
+- `failed` (including degraded state, exhausted retries and quarantine) stays
+  unhealthy during retry; only a completed successful cycle clears failures.
+  `stalled` means a phase exceeded its deadline. A dead process becomes stale
+  even if its phase deadline was much longer.
+
+These are health deadlines, not force-cancellation, lease extensions or permission
+to publish. Existing leases, fencing, all-or-nothing publication, retries and
+quarantine remain authoritative. Choose bounds appropriate to the host; raising
+them delays stall detection. Do not merely increase them to mask a real failure.
+
+Compose checks provider health every 10 seconds with a two-minute startup grace;
+the check also requires healthy speech-worker status. The launcher's existing
+`up --wait --wait-timeout 600` now waits for readiness, not backlog completion.
+Genuine startup failures still fail the update, retain its verified backup and
+require explicit recovery as described in [backup/restore](backup-restore.md).
+Do not touch a health file manually or claim a completed cycle from readiness.
+
+Inspect private, content-free phase/progress, `deadline_at`, `checked_at`, `failed`
+and `last_success_at` (null until a successful cycle):
+
+```sh
+./karpathy-wiki.sh exec -T audio-ingest cat /tmp/health.json
+./karpathy-wiki.sh exec -T audio-speech cat /data/speech/worker-health.json
+./karpathy-wiki.sh ps
+```
+
+After changing bounds, recreate both audio services. No real-model calls are
+needed to validate health: `test_audio_health.py` covers long active work beyond
+the old grace/wait, startup/restart, idle, stale/stalled phases and failed
+dependencies/state. The daemon scheduling test also delays a fake transcription
+by 1,801 simulated seconds while proving readiness without cycle success.
 
 ## Quarantine and dead-job diagnostics
 

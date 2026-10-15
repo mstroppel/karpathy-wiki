@@ -24,6 +24,7 @@ from karpathy_wiki_speech.cache import (
     request_id,
     request_path,
 )
+from karpathy_wiki_speech.liveness import read_healthy
 from karpathy_wiki_speech.types import (
     LimitExceededError,
     TranscriptionOptions,
@@ -33,6 +34,18 @@ from karpathy_wiki_speech.types import (
 
 class TimeoutError(RuntimeError):
     """The worker did not produce a result before the cycle timeout."""
+
+
+def wait_for_worker(root: Path) -> None:
+    deadline = time.monotonic() + 120
+    while True:
+        try:
+            read_healthy(root / "worker-health.json")
+            return
+        except RuntimeError:
+            if time.monotonic() >= deadline:
+                raise RuntimeError("speech dependency did not become ready") from None
+            time.sleep(2)
 
 
 def requested_options(options: TranscriptionOptions) -> dict[str, object]:
@@ -189,7 +202,9 @@ def await_result(
             return result
         if time.monotonic() >= deadline:
             raise SpeechTimeoutError("the speech worker did not answer in time")
-        time.sleep(max(poll_seconds, 1))
+        # A dead/stalled worker must not hide behind a long per-recording timeout.
+        read_healthy(speech_root / "worker-health.json")
+        time.sleep(min(max(poll_seconds, 1), 10))
 
 
 class SpeechProcessingError(ValueError):

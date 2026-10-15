@@ -121,6 +121,8 @@ services:
       AUDIO_MAX_DURATION_SECONDS: ${AUDIO_MAX_DURATION_SECONDS}
       SPEECH_ROOT: /data/speech
       SPEECH_TIMEOUT_SEC: ${SPEECH_TIMEOUT_SEC:-43200}
+      AUDIO_SYNC_TIMEOUT_SEC: ${AUDIO_SYNC_TIMEOUT_SEC:-3600}
+      AUDIO_PHASE_TIMEOUT_SEC: ${AUDIO_PHASE_TIMEOUT_SEC:-600}
     user: "${PUID:-1000}:${PGID:-1000}"
     volumes:
       - ${DATA_ROOT:-./data}/incoming/audio:/data/incoming/audio:rw
@@ -136,11 +138,11 @@ services:
       audio-speech:
         condition: service_started
     healthcheck:
-      test: ["CMD", "python", "-m", "karpathy_wiki_ingest.health"]
-      interval: 1m
+      test: ["CMD", "python", "-m", "karpathy_wiki_ingest_audio.health"]
+      interval: 10s
       timeout: 10s
       retries: 3
-      start_period: 10m
+      start_period: 2m
     read_only: true
     tmpfs:
       - /tmp
@@ -163,6 +165,7 @@ services:
       SPEECH_DEVICE: ${SPEECH_DEVICE:-cpu}
       SPEECH_COMPUTE_TYPE: ${SPEECH_COMPUTE_TYPE:-int8}
       SPEECH_POLL_SECONDS: ${SPEECH_POLL_SECONDS:-5}
+      SPEECH_TIMEOUT_SEC: ${SPEECH_TIMEOUT_SEC:-43200}
       SPEECH_MAX_BYTES: ${AUDIO_MAX_BYTES}
       SPEECH_MAX_DURATION_SECONDS: ${AUDIO_MAX_DURATION_SECONDS}
       # Opt-in hosted transcription (SPEECH_BACKEND=mistral): the worker-only

@@ -624,6 +624,7 @@ class CycleHarness(unittest.TestCase):
 class DaemonSchedulingTests(CycleHarness):
     def test_short_interval_waits_for_transcription_and_reuses_completed_work(self):
         from karpathy_wiki_ingest_audio import publisher
+        from karpathy_wiki_speech.liveness import Liveness, read_healthy
 
         redactions = self.root / "redactions.json"
         redactions.write_text(json.dumps(ANONYMIZER_CONFIGURATION), encoding="utf-8")
@@ -633,6 +634,12 @@ class DaemonSchedulingTests(CycleHarness):
         stop_event = mock.Mock()
         stop_event.is_set.return_value = False
         instant_worker = publisher.await_result
+        monitored = []
+
+        def monitor(path):
+            status = Liveness(path)
+            monitored.append(status)
+            return status
 
         def synchronize(incoming, _remote):
             sync_times.append(clock)
@@ -640,8 +647,13 @@ class DaemonSchedulingTests(CycleHarness):
 
         def slow_worker(*args, **kwargs):
             nonlocal clock
-            # More than two sync intervals pass before the worker answers.
-            clock += 125
+            # Exceed the old 10m grace and launcher's 600s wait without completing
+            # the backlog. A real phase heartbeat remains healthy, not a cycle success.
+            clock += 1801
+            monitored[0].write()
+            payload = read_healthy(self.root / "health.json")
+            self.assertEqual(payload["phase"], "speech_wait")
+            self.assertIsNone(payload["last_success_at"])
             self.assertEqual(sync_times, [1000])
             self.assertEqual(wait_times, [])
             return instant_worker(*args, **kwargs)
@@ -674,13 +686,16 @@ class DaemonSchedulingTests(CycleHarness):
             ),
             mock.patch.object(publisher, "install_stop_handler", return_value=stop_event),
             mock.patch.object(publisher, "synchronize", side_effect=synchronize),
+            mock.patch.object(publisher, "probe"),
+            mock.patch.object(publisher, "wait_for_worker"),
+            mock.patch.object(publisher, "Liveness", side_effect=monitor),
             mock.patch.object(publisher, "await_result", side_effect=slow_worker) as speech,
             mock.patch.object(publisher.time, "time", side_effect=lambda: clock),
         ):
             publisher.run(once=False)
 
-        self.assertEqual(sync_times, [1000, 1185])
-        self.assertEqual(wait_times, [1125, 1185])
+        self.assertEqual(sync_times, [1000, 2861])
+        self.assertEqual(wait_times, [2801, 2861])
         speech.assert_called_once()
         self.assertEqual(self.store.metrics()["jobs"][JOB_SUCCEEDED], 1)
         self.assertEqual(self.store.metrics()["source_generations"], 1)
@@ -1074,13 +1089,15 @@ class WorkerLifecycleTests(unittest.TestCase):
         self.assertEqual(list((self.root / "requests").glob("*.json")), [])
 
     def test_health_check_flag_exits_nonzero_on_failure_record(self):
-        from karpathy_wiki_ingest.shared import write_health
+        from karpathy_wiki_speech.liveness import Liveness
 
         healthy = self.root / "healthy.json"
         failing = self.root / "failing.json"
         missing = self.root / "missing.json"
-        write_health(healthy, 0)
-        write_health(failing, 3)
+        for path, failures in ((healthy, 0), (failing, 3)):
+            status = Liveness(path)
+            status.finish(failures, 120)
+            status.close()
         speech_worker.health_check(healthy)  # must not raise
         with self.assertRaises(SystemExit):
             speech_worker.health_check(failing)
