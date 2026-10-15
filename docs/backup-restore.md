@@ -37,6 +37,10 @@ Subsequent `update [version]` commands resolve one release, stage and validate
 both files (shell syntax and the target Python runtime/protocol), then take the
 mandatory verified backup. Target releases must support launcher protocol 1;
 PR preview versions and older non-self-updating launchers cannot be update targets.
+Bootstrap acceptance also validates protocol/runtime support: unsupported local
+launcher edits cannot be accepted as a future rollback pair. Rollback rejects
+missing launcher metadata, unsupported saved pairs or mismatched hashes before
+loading images, removing containers or replacing live configuration/data.
 The Compose file is cached by that same release version. Python 3.11+ is required
 on the host; if a future target needs unavailable dependencies, its runtime probe
 fails before stopping writers or changing the installed pair or `.env`.
@@ -50,6 +54,9 @@ modified files block updates. Preserve/review edits first; an explicit
 `launcher-accept <version>` authorizes replacing those exact bytes on the next
 update, with the accepted pair retained in the backup. Prefer configuration and
 Compose overrides over launcher edits.
+The reserved `.launcher-stage` directory must not overlap current data, backup
+storage, snapshot roots or saved restore destinations; overlap is rejected before
+staging cleanup or destructive restoration.
 
 After image pull, the old shell **execs** the in-memory updater and never resumes
 reading its replaced script. Pair activation uses a durable

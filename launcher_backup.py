@@ -96,14 +96,22 @@ def validate_pair(directory):
         raise BackupError("target helper does not support launcher protocol 1")
 
 
-def stage_pair(target):
-    if not re.fullmatch(r"[0-9][0-9A-Za-z.-]*", target):
-        raise BackupError("self-update requires a release version, not a PR preview")
-    accepted_pair(LAUNCHER_DIR)
-    stage = LAUNCHER_DIR / ".launcher-stage"
+def reset_pair_stage(instance, destinations=()):
+    stage = instance.path(str(LAUNCHER_DIR / ".launcher-stage"))
+    for path in (*instance.paths(), instance.data, instance.store, *destinations):
+        if within(path, stage) or within(stage, path):
+            raise BackupError("launcher staging overlaps data, backup storage or a snapshot root")
     if stage.exists():
         shutil.rmtree(stage)
     stage.mkdir(mode=0o700)
+    return stage
+
+
+def stage_pair(instance, target):
+    if not re.fullmatch(r"[0-9][0-9A-Za-z.-]*", target):
+        raise BackupError("self-update requires a release version, not a PR preview")
+    accepted_pair(LAUNCHER_DIR)
+    stage = reset_pair_stage(instance)
     for name in PAIR:
         run(
             [
@@ -531,7 +539,7 @@ def set_version(project, version, ensure_password=True):
 def update(instance, target, target_compose):
     if instance.project != LAUNCHER_DIR:
         raise BackupError("safe updates require the launcher pair in the project directory")
-    stage = stage_pair(target)
+    stage = stage_pair(instance, target)
     record = prepare_activation(stage, target)
     metadata = snapshot(instance, "update")
     directory = instance.store / metadata["id"]
@@ -591,6 +599,15 @@ def restore(instance, metadata):
             ):
                 raise BackupError("unsafe restore destination")
             destinations.append(instance.path(value))
+        required = {LAUNCHER_DIR / name for name in (*PAIR, ".launcher-pair.json")}
+        saved_pair = metadata.get("launcher")
+        if not required.issubset(destinations) or not isinstance(saved_pair, dict):
+            raise BackupError("unsupported snapshot: complete launcher pair metadata is required")
+        if not isinstance(saved_pair.get("version"), str) or not isinstance(
+            saved_pair.get("sha256"), dict
+        ):
+            raise BackupError("unsupported snapshot: invalid launcher pair metadata")
+        pair_stage = reset_pair_stage(instance, destinations)
         with tarfile.open(directory / "snapshot.tar") as archive:
             names = {m.name.rstrip("/") for m in archive}
         for destination in destinations:
@@ -617,6 +634,18 @@ def restore(instance, metadata):
                     member,
                 ]
             )
+        for name in PAIR:
+            destination = LAUNCHER_DIR / name
+            source = next(
+                stage / str(destination).lstrip("/")
+                for dest, stage in stages
+                if dest == destination
+            )
+            shutil.copyfile(source, pair_stage / name)
+        validate_pair(pair_stage)
+        record = prepare_activation(pair_stage, saved_pair["version"])
+        if record != saved_pair:
+            raise BackupError("saved launcher pair does not match snapshot metadata")
         run(["docker", "image", "load", "--input", str(directory / "images.tar")])
         for image, image_id in metadata["images"].items():
             if image != image_id and "@" not in image:
@@ -630,22 +659,6 @@ def restore(instance, metadata):
             if destination.exists() or destination.is_symlink():
                 destination.rename(stage / "displaced")
             extracted.rename(destination)
-        pair_stage = LAUNCHER_DIR / ".launcher-stage"
-        if pair_stage.exists():
-            shutil.rmtree(pair_stage)
-        pair_stage.mkdir(mode=0o700)
-        for name in PAIR:
-            destination = LAUNCHER_DIR / name
-            source = next(
-                stage / str(destination).lstrip("/")
-                for dest, stage in stages
-                if dest == destination
-            )
-            shutil.copyfile(source, pair_stage / name)
-        validate_pair(pair_stage)
-        record = prepare_activation(pair_stage, metadata["launcher"]["version"])
-        if record != metadata["launcher"]:
-            raise BackupError("saved launcher pair does not match snapshot metadata")
         activate_pair(LAUNCHER_DIR, pair_stage, record, instance.project)
         if str(instance.override) not in metadata["paths"] and instance.override.exists():
             instance.override.unlink()
@@ -705,6 +718,7 @@ def main():
                 if action == "accept":
                     if (LAUNCHER_DIR / ".launcher-activation.json").exists():
                         raise BackupError("recover interrupted activation before accepting files")
+                    validate_pair(LAUNCHER_DIR)
                     write_json(
                         LAUNCHER_DIR / ".launcher-pair.json",
                         {"version": args[0], "sha256": pair_hashes(LAUNCHER_DIR)},
