@@ -207,6 +207,31 @@ error *type* only (for example `speech:processing:HostedRateLimitError`) into
 `speech/failures`, the source is quarantined, and the last successful
 published generation stays active.
 
+## Quarantine and dead-job diagnostics
+
+Audio quarantine logs include the opaque source ID, exception class, attempted
+generation and durable job ID (`unavailable` without durable coordination).
+The controlled `stage` identifies the operation that failed: `metadata_redaction`,
+`speech`, `transcript_redaction`, `rendering`, `document_redaction`, `output_write`
+or `quarantine_cleanup`. Redaction stages include privacy validation. The
+controlled `reason` is `timeout`, `filesystem`, or `detail_unavailable`; the last
+value means the operation and exception class are known, but no finer cause is
+established. A speech-stage failure does not prove that the audio is invalid.
+
+Correlate source failures with terminal dead-job logs by job ID and with private
+`${DATA_ROOT}/quarantine/audio/<source_id>.error` reports by source ID and
+generation. Reports record the exception class, not its message. For speech
+failures, also inspect the `audio-speech` service diagnostics and private
+`${DATA_ROOT}/speech/failures` reports. Job state retains only aggregate quarantine
+counts or publication exception types, not a per-source root cause. Reports can
+be replaced by later publication attempts, so use generation IDs to avoid
+mistaking a newer report for the original failure.
+
+Retry limits, quarantine, and all-or-nothing publication remain unchanged. A dead
+job is not automatically rearmed; diagnose the failure before making an explicit
+operator recovery decision. No recording-specific paths or raw exception messages
+are added to these service logs.
+
 ## What is published
 
 Sanitized Markdown only, below `sources/audio` with `wiki_root: audio`:
