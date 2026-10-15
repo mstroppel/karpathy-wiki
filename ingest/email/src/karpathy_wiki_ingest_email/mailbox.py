@@ -47,11 +47,16 @@ def authorized(raw: bytes, settings: Settings) -> bool:
     # Authorization concerns envelope/header evidence, not body validity. Bad
     # MIME bodies can still be archived and recovered after server deletion.
     message = BytesHeaderParser(policy=policy.default).parsebytes(raw)
-    if message.defects or not settings.trusted:
+    if message.defects:
         return False
-    values = message.get_all(settings.delivery_header, [])
-    # Reject duplicated/ambiguous delivery metadata, even if one value matches.
-    if len(values) != 1 or mailboxes([str(values[0])]) != [settings.recipient]:
+    if settings.recipient_verification == "strict":
+        if not settings.trusted:
+            return False
+        values = message.get_all(settings.delivery_header, [])
+        # Reject duplicated/ambiguous delivery metadata, even if one value matches.
+        if len(values) != 1 or mailboxes([str(values[0])]) != [settings.recipient]:
+            return False
+    elif settings.recipient_verification != "disabled":
         return False
     if settings.allowlist:
         senders = message.get_all("From", [])

@@ -7,6 +7,7 @@ import sqlite3
 import stat
 import tempfile
 import unittest
+from contextlib import closing
 from dataclasses import replace
 from email import policy
 from email.message import EmailMessage
@@ -163,6 +164,106 @@ class EmailTests(unittest.TestCase):
             authorized(mail(sender="sender@example.com, other@example.com"), restricted)
         )
         self.assertTrue(authorized(mail(sender="Allowed Name <sender@example.com>"), restricted))
+
+    def disabled_settings(self, **changes):
+        return replace(
+            self.settings,
+            recipient_verification="disabled",
+            trusted=False,
+            delivery_header="",
+            **changes,
+        )
+
+    def test_disabled_mode_trusts_folder_not_recipient_or_delivery_metadata(self):
+        settings = self.disabled_settings()
+        for raw in (
+            mail(delivery=None),
+            mail(delivery="other@example.com"),
+            mail(delivery="not-an-address"),
+            b"X-Original-To: other@example.com\r\n" + mail(),
+        ):
+            with self.subTest(raw=raw):
+                self.assertTrue(authorized(raw, settings))
+        self.assertFalse(authorized(b"not a header\r\n\r\nbody", settings))
+        self.assertFalse(authorized(mail(), replace(settings, recipient_verification="typo")))
+        restricted = replace(settings, allowlist=("sender@example.com",))
+        self.assertTrue(authorized(mail(delivery=None), restricted))
+        for sender in ("other@example.com", "sender@example.com, other@example.com"):
+            self.assertFalse(authorized(mail(delivery=None, sender=sender), restricted))
+        duplicate = b"From: sender@example.com\r\n" + mail(delivery=None)
+        self.assertFalse(authorized(duplicate, restricted))
+
+    def test_disabled_receive_filters_and_verifies_durability_before_targeted_delete(self):
+        raw = mail(delivery=None, attachment=True)
+        client = FakeIMAP(
+            {
+                "1": raw,
+                "2": mail(delivery=None, sender="other@example.com"),
+                "3": mail(delivery=None, body="x" * 10000),
+            }
+        )
+        settings = self.disabled_settings(allowlist=("sender@example.com",), max_bytes=2000)
+
+        def durable(uid):
+            delivery = self.store.db.execute("SELECT * FROM deliveries").fetchone()
+            self.assertEqual(self.store.read(delivery["original"]), raw)
+            with closing(sqlite3.connect(settings.archive / "mail.sqlite3")) as db:
+                self.assertEqual(db.execute("SELECT COUNT(*) FROM deliveries").fetchone()[0], 1)
+
+        client.on_store = durable
+        with patch("karpathy_wiki_ingest_email.store.os.fsync", wraps=os.fsync) as sync:
+            self.assertEqual(receive(client, settings, self.store), (1, 1))
+            self.assertGreaterEqual(sync.call_count, 2)
+        self.assertEqual(set(client.messages), {"2", "3"})
+        self.assertEqual([cmd[1] for cmd in client.commands if cmd[0] == "EXPUNGE"], ["1"])
+
+    def test_disabled_mode_preserves_archive_failure_and_uidplus_guards(self):
+        settings = self.disabled_settings()
+        for target in ("archive", "read"):
+            client = FakeIMAP({"1": mail(delivery=None)})
+            with patch.object(self.store, target, side_effect=OSError("private")):
+                self.assertEqual(receive(client, settings, self.store), (target == "read", 1))
+            self.assertFalse(any(cmd[0] == "STORE" for cmd in client.commands))
+        client = FakeIMAP({"1": mail(delivery=None)})
+        client.capabilities = (b"IMAP4REV1",)
+        with self.assertRaises(ValueError):
+            receive(client, settings, self.store)
+        self.assertFalse(client.commands)
+
+    def test_pending_delete_revalidates_mode_and_filter_across_restart(self):
+        client = FakeIMAP({"1": mail(delivery=None)})
+        client.fail_delete = True
+        disabled = self.disabled_settings()
+        self.assertEqual(receive(client, disabled, self.store), (1, 1))
+        self.store.close()
+        self.store = Store(self.settings.archive)
+        client.fail_delete = False
+        for settings in (
+            self.settings,
+            replace(disabled, allowlist=("other@example.com",)),
+        ):
+            client.commands.clear()
+            self.assertEqual(receive(client, settings, self.store), (0, 0))
+            self.assertFalse(any(cmd[0] in {"STORE", "FETCH"} for cmd in client.commands))
+        self.assertEqual(receive(client, disabled, self.store), (0, 0))
+        self.assertFalse(client.messages)
+        self.assertEqual(len(list(self.settings.archive.glob("*.eml"))), 1)
+
+    def test_disabled_pending_delete_still_checks_integrity_and_uidvalidity(self):
+        disabled = self.disabled_settings()
+        client = FakeIMAP({"1": mail(delivery=None)})
+        client.fail_delete = True
+        self.assertEqual(receive(client, disabled, self.store), (1, 1))
+        next(self.settings.archive.glob("*.eml")).write_bytes(b"corrupt")
+        client.commands.clear()
+        client.fail_delete = False
+        self.assertEqual(receive(client, disabled, self.store), (0, 1))
+        self.assertFalse(any(cmd[0] == "STORE" for cmd in client.commands))
+        client.epoch = "2"
+        new = mail(delivery=None, body="new epoch")
+        client.messages["1"] = new
+        self.assertEqual(receive(client, disabled, self.store), (1, 0))
+        self.assertIn(new, [p.read_bytes() for p in self.settings.archive.glob("*.eml")])
 
     def test_plain_preferred_and_attachments_and_embedded_mail_not_extracted(self):
         message = parse(mail(attachment=True))
@@ -667,6 +768,48 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(settings.password, " password with spaces ")
         self.assertEqual(settings.interval, 60)
         self.assertEqual(settings.allowlist, ())
+        self.assertEqual(settings.recipient_verification, "strict")
+
+    def test_disabled_env_needs_no_header_trust_or_recipient_but_requires_credentials(self):
+        env = {**self.env(), "EMAIL_RECIPIENT_VERIFICATION": "disabled"}
+        for key in ("EMAIL_DELIVERY_HEADER", "EMAIL_DELIVERY_HEADER_TRUSTED", "EMAIL_RECIPIENT"):
+            env.pop(key)
+        with patch.dict(os.environ, env, clear=True):
+            settings = Settings.from_env()
+        self.assertFalse(settings.trusted)
+        self.assertEqual(settings.delivery_header, "")
+        self.assertEqual(settings.recipient, "")
+        self.assertTrue(authorized(mail(delivery=None), settings))
+        for key in ("EMAIL_IMAP_HOST", "EMAIL_IMAP_USERNAME", "EMAIL_IMAP_PASSWORD"):
+            with (
+                self.subTest(key=key),
+                patch.dict(os.environ, {**env, key: ""}, clear=True),
+                self.assertRaises(ValueError),
+            ):
+                Settings.from_env()
+
+    def test_invalid_mode_never_echoes_value_and_missing_header_is_not_opt_out(self):
+        for mode in ("", "false", "STRICT", "private-password"):
+            with patch.dict(
+                os.environ, {**self.env(), "EMAIL_RECIPIENT_VERIFICATION": mode}, clear=True
+            ):
+                with self.assertRaisesRegex(ValueError, "must be strict or disabled") as caught:
+                    Settings.from_env()
+                self.assertNotIn("private-password", str(caught.exception))
+        for header in ("", "X-Original-To"):
+            with (
+                patch.dict(
+                    os.environ,
+                    {
+                        **self.env(),
+                        "EMAIL_DELIVERY_HEADER": header,
+                        "EMAIL_DELIVERY_HEADER_TRUSTED": "0",
+                    },
+                    clear=True,
+                ),
+                self.assertRaisesRegex(ValueError, "strict recipient verification"),
+            ):
+                Settings.from_env()
 
     def test_unsafe_env_rejected(self):
         for key, value in [

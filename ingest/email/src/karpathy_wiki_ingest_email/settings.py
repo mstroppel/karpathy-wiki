@@ -49,14 +49,21 @@ class Settings:
     max_bytes: int = 25 * 1024 * 1024
     timeout: int = 30
     allowlist: tuple[str, ...] = ()
+    recipient_verification: str = "strict"
 
     @classmethod
     def from_env(cls, *, offline: bool = False) -> Settings:
+        mode = os.getenv("EMAIL_RECIPIENT_VERIFICATION", "strict")
+        if mode not in {"strict", "disabled"}:
+            raise ValueError("EMAIL_RECIPIENT_VERIFICATION must be strict or disabled")
+        recipient = "" if offline else os.getenv("EMAIL_RECIPIENT", "").strip()
+        if not offline and mode == "strict":
+            recipient = required_env("EMAIL_RECIPIENT")
         result = cls(
             host="" if offline else required_env("EMAIL_IMAP_HOST"),
             username="" if offline else required_env("EMAIL_IMAP_USERNAME"),
             password="" if offline else os.environ.get("EMAIL_IMAP_PASSWORD", ""),
-            recipient="" if offline else address(required_env("EMAIL_RECIPIENT")),
+            recipient=address(recipient) if recipient else "",
             delivery_header=os.getenv("EMAIL_DELIVERY_HEADER", ""),
             trusted=os.getenv("EMAIL_DELIVERY_HEADER_TRUSTED", "0") == "1",
             archive=Path(os.getenv("EMAIL_ARCHIVE_ROOT", "/data/incoming/email")),
@@ -74,14 +81,23 @@ class Settings:
                 for item in os.getenv("EMAIL_FROM_ALLOWLIST", "").split(",")
                 if item.strip()
             ),
+            recipient_verification=mode,
         )
-        if not offline and (
-            not result.password
-            or not result.trusted
-            or not re.fullmatch(r"[A-Za-z0-9-]+", result.delivery_header)
-            or result.delivery_header.lower() in {"to", "cc", "bcc", "from", "received"}
+        if not offline and not result.password:
+            raise ValueError("EMAIL_IMAP_PASSWORD is required")
+        if (
+            not offline
+            and mode == "strict"
+            and (
+                not result.trusted
+                or not re.fullmatch(r"[A-Za-z0-9-]+", result.delivery_header)
+                or result.delivery_header.lower() in {"to", "cc", "bcc", "from", "received"}
+            )
         ):
-            raise ValueError("password and explicitly trusted delivery header are required")
+            raise ValueError(
+                "strict recipient verification requires EMAIL_DELIVERY_HEADER and "
+                "EMAIL_DELIVERY_HEADER_TRUSTED=1; use disabled only for a dedicated folder"
+            )
         roots = (result.archive.resolve(), result.sanitized.resolve())
         if roots[0].is_relative_to(roots[1]) or roots[1].is_relative_to(roots[0]):
             raise ValueError("original archive and published sources must be separate")

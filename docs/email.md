@@ -12,7 +12,8 @@ OAuth, SMTP receiver, or automatic wiki commits are included.
 2. Confirm TLS IMAP with certificate verification (default port 993) and password
    or app-password login. Unencrypted IMAP and STARTTLS downgrade paths are not
    supported. Some providers require OAuth and cannot use this connector.
-3. Inspect actual mail delivered **To, CC and BCC** to your exact plus address.
+3. In default **strict** mode, inspect actual mail delivered **To, CC and BCC**
+   to your exact plus address.
    The receiving server must strip sender-supplied copies of the delivery header
    and set **exactly one** authoritative address preserving the plus tag.
    `Delivered-To` and `X-Original-To` are examples, not inherently trusted headers.
@@ -25,8 +26,8 @@ OAuth, SMTP receiver, or automatic wiki commits are included.
    attachments, and have no automatic expiry**. Never expose the archive through
    OpenCode, `raw-files`, or another public file server.
 
-Missing/repeated/multiple-address delivery metadata, other aliases and other
-plus tags do not match. Domains compare case-insensitively; local parts remain
+In strict mode, missing/repeated/multiple-address delivery metadata, other aliases
+and other plus tags do not match. Domains compare case-insensitively; local parts remain
 exact. Sender filtering requires one exact From mailbox if configured.
 
 The server must advertise **UIDPLUS**. Deletion uses only `UID STORE` for the
@@ -46,6 +47,7 @@ EMAIL_IMAP_USERNAME=wiki@example.com
 EMAIL_IMAP_PASSWORD=replace-with-app-password
 EMAIL_IMAP_FOLDER=INBOX
 EMAIL_RECIPIENT=server+fs-wiki@example.com
+EMAIL_RECIPIENT_VERIFICATION=strict
 EMAIL_DELIVERY_HEADER=X-Original-To
 # Set ONLY after verifying server-specific header trust above:
 EMAIL_DELIVERY_HEADER_TRUSTED=1
@@ -57,6 +59,44 @@ EMAIL_MAX_BYTES=26214400
 EMAIL_TIMEOUT_SECONDS=30
 REDACTIONS_FILE=./secrets/redactions.json
 ```
+
+### Dedicated-folder mode (explicit trust decision)
+
+Only for a dedicated mailbox or restricted account/folder, set:
+
+```env
+EMAIL_RECIPIENT_VERIFICATION=disabled
+```
+
+**This can ingest and delete ALL eligible existing and new messages in the
+selected folder**, subject to `EMAIL_FROM_ALLOWLIST`, size limits and the other
+safety gates. The configured account/folder, not a message header, is the trust
+boundary. `EMAIL_RECIPIENT` is optional and does not filter messages in this mode
+(if supplied, it must still be a valid single mailbox). Neither To/Cc nor From
+becomes authenticated recipient proof. Delivery headers and
+`EMAIL_DELIVERY_HEADER_TRUSTED=1` are not required; disabling verification does
+not mark any header trusted. Credentials, verified TLS, UIDPLUS, verified durable
+original/ledger storage before deletion and privacy gates remain mandatory.
+Only `strict` and `disabled` are valid modes; a missing header or trust flag never
+implicitly enables disabled mode.
+
+After changing mode, validate and recreate the service to load the new environment:
+
+```sh
+./karpathy-wiki.sh config --quiet
+./karpathy-wiki.sh up -d --force-recreate email-ingest
+```
+
+To switch back, set `EMAIL_RECIPIENT_VERIFICATION=strict`, configure the exact
+`EMAIL_RECIPIENT` and verified authoritative `EMAIL_DELIVERY_HEADER`, set
+`EMAIL_DELIVERY_HEADER_TRUSTED=1`, then validate/recreate as above. Pending deletes
+are rechecked against the current mode and sender filter; unproven deliveries
+remain on the server in strict mode. Already deleted mail cannot be restored by
+changing mode; the private archive is retained. Changing the recipient also
+changes the delivery tracking scope; surviving server messages are considered
+again with current policy and the archive still deduplicates exact originals.
+
+### Filtering and activation
 
 An empty allowlist disables sender filtering. A configured list applies before
 archiving/deletion but is **not authentication**: From is forgeable. Configure
@@ -106,7 +146,8 @@ repair/replay. An unreachable IMAP server does not prevent local extraction.
 No stateless destructive or publication fallback exists.
 
 Pending server deletes recheck the archived message against the current recipient
-proof and From allowlist. MIME identity processing occurs only after the original
+verification mode and From allowlist, archive integrity and UIDVALIDITY.
+MIME identity processing occurs only after the original
 is durable; pathological MIME falls back to exact-original-byte deduplication.
 Failed replay retains the last successful projection, subject to the current
 privacy gate, and reports the failure without discarding safe published text.
