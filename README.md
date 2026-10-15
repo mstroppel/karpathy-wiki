@@ -182,7 +182,9 @@ workflows, and access boundaries.
 ## Updates
 
 The launcher downloads and caches the Compose file matching the pinned release
-in `.env`. Update to the latest release with:
+in `.env`. Updates also install both host launcher files from that same release.
+After the [one-time launcher bootstrap](docs/backup-restore.md#launcher-bootstrap-and-recovery),
+update to the latest release with:
 
 ```bash
 ./karpathy-wiki.sh update

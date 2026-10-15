@@ -2,6 +2,7 @@
 set -eu
 
 repository="mstroppel/karpathy-wiki"
+# launcher-protocol: 1
 
 # shellcheck disable=SC1007 # CDPATH is intentionally cleared for this command only
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -164,7 +165,7 @@ cmd_update() {
   fi
   # Download before touching .env so a failed update leaves it unchanged.
   compose_file_for "$cu_target"
-  python3 "$script_dir/launcher_backup.py" update "$project_dir" \
+  exec python3 "$script_dir/launcher_backup.py" update "$project_dir" \
     "$cu_current_compose" "$cu_current" "$cu_target" "$compose_file"
 }
 
@@ -189,6 +190,7 @@ Usage:
                                        set); mandatory whole-instance backup,
                                        pull images, restart and verify health
   karpathy-wiki.sh backup list         List local update and rescue snapshots
+  karpathy-wiki.sh launcher-accept <version>  Explicitly trust the installed pair
   karpathy-wiki.sh rollback <id>       Confirm full data/config/software rollback;
                                        creates a rescue snapshot first
   karpathy-wiki.sh version             Print the resolved version
@@ -211,6 +213,10 @@ EOF
 }
 
 command=${1:-help}
+# Never import a potentially mixed helper after interrupted activation.
+if [ -f "$script_dir/.launcher-activation.json" ]; then
+  die "interrupted launcher activation; run: python3 $script_dir/.launcher-stage/launcher_backup.py recover $project_dir"
+fi
 # Resolve configuration only after acquiring the installation-wide lock.
 case "$command" in
   help|-h|--help) ;;
@@ -233,6 +239,12 @@ case "$command" in
     [ $# -le 1 ] || die "usage: karpathy-wiki.sh update [version]"
     cmd_update "${1:-}"
     ;;
+  launcher-accept)
+    shift
+    [ $# = 1 ] || die "usage: launcher-accept <installed-launcher-version>"
+    validate_version "$1" || die "invalid launcher version: $1"
+    exec python3 "$script_dir/launcher_backup.py" accept "$project_dir" "$1"
+    ;;
   backup|rollback)
     require_backup_runtime
     shift
@@ -246,7 +258,7 @@ case "$command" in
     fi
     version=$(resolve_version)
     compose_file_for "$version"
-    python3 "$script_dir/launcher_backup.py" "$backup_action" "$project_dir" "$compose_file" "$version" "$@"
+    exec python3 "$script_dir/launcher_backup.py" "$backup_action" "$project_dir" "$compose_file" "$version" "$@"
     ;;
   *)
     version=$(resolve_version)

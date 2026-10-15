@@ -19,6 +19,69 @@ installed release and cache its Compose file before updating. Images must exist
 locally and match the installed containers; no registry access is needed to restore
 saved images. Reconcile mismatched/orphan containers before a new update.
 
+### Launcher bootstrap and recovery
+
+Older launchers cannot update themselves. Once, with no launcher operations or
+host writers running, preserve the installed pair separately and download
+`karpathy-wiki.sh` and `launcher_backup.py` from the **same reviewed release tag**
+that includes self-update support. Stage both outside the installation, check
+`sh -n karpathy-wiki.sh` and `python3 launcher_backup.py check-runtime`, then
+install both together in the project directory (`0755` shell, `0644` helper).
+Do not run a launcher between these manual replacements. Register the pair with
+`./karpathy-wiki.sh launcher-accept <installed-launcher-version>`. Fresh manual
+installations also require this explicit initial acceptance. This records an
+operator-attested version and SHA-256 hashes, not a cryptographic release signature.
+The launcher version can differ from the stack version pinned in `.env`.
+
+Subsequent `update [version]` commands resolve one release, stage and validate
+both files (shell syntax and the target Python runtime/protocol), then take the
+mandatory verified backup. Target releases must support launcher protocol 1;
+PR preview versions and older non-self-updating launchers cannot be update targets.
+Bootstrap acceptance also validates protocol/runtime support: unsupported local
+launcher edits cannot be accepted as a future rollback pair. Rollback rejects
+missing launcher metadata, unsupported saved pairs or mismatched hashes before
+loading images, removing containers or replacing live configuration/data.
+The Compose file is cached by that same release version. Python 3.11+ is required
+on the host; if a future target needs unavailable dependencies, its runtime probe
+fails before stopping writers or changing the installed pair or `.env`.
+
+Downloads over HTTPS from this repository's release tags are **trusted executable
+host code**: the target helper's runtime probe executes before backup. Hashes detect
+local changes and interrupted writes, not a compromised publisher or moved tag.
+Keep installation and staging directories writable only by trusted operators;
+do not share one launcher pair across different project directories. Locally
+modified files block updates. Preserve/review edits first; an explicit
+`launcher-accept <version>` authorizes replacing those exact bytes on the next
+update, with the accepted pair retained in the backup. Prefer configuration and
+Compose overrides over launcher edits.
+The reserved `.launcher-stage` directory must not overlap current data, backup
+storage, snapshot roots or saved restore destinations; overlap is rejected before
+staging cleanup or destructive restoration.
+
+After image pull, the old shell **execs** the in-memory updater and never resumes
+reading its replaced script. Pair activation uses a durable
+`.launcher-activation.json` guard under the installation lock, fsynced staged
+files and atomic individual replacements; two file renames are not pair-atomic.
+The guard blocks normal launcher operations until the complete pair and its hash
+record are durable. The same protocol applies when explicitly restoring a backup.
+
+If activation is interrupted, **do not delete the guard or run the installed mixed
+helper**. With host writers stopped, from the installation directory run:
+
+```bash
+python3 .launcher-stage/launcher_backup.py recover "$PWD"
+```
+
+This takes the same installation lock, verifies staged hashes, completes only the
+selected launcher pair and clears the guard. It does not change `.env`, restore
+data or restart containers. Inspect `backup list` and the private snapshot metadata,
+then retry the update or choose an explicit full rollback. An interruption after
+pair activation can leave a complete new launcher with the old stack pin, or a
+new pin without a verified startup; this is not reported as update success. If
+staging is missing/corrupt or recovery fails, retain target/rescue snapshots and
+the guard, stop writers, and manually reinstall a complete reviewed pair before
+investigating configuration/data recovery. No automatic data rollback occurs.
+
 Configure `KARPATHY_WIKI_BACKUP_DIR` in `.env` (default `./backups`, relative to the
 installation). It must be outside `DATA_ROOT`, owned by the operator, mode `0700`.
 All snapshot files are private. Choose trusted, preferably encrypted local storage:

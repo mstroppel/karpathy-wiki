@@ -91,6 +91,12 @@ case "$url" in
     printf 'name: stub-compose\\n' > "$out"
     exit 0
     ;;
+  *"/karpathy-wiki.sh"|*"/launcher_backup.py")
+    name=${url##*/}
+    [ "${STUB_DOWNLOAD_FAIL:-}" != "$name" ] || exit 7
+    cp "$STUB_RELEASE_DIR/$name" "$out"
+    exit 0
+    ;;
 esac
 exit 1
 """
@@ -117,6 +123,21 @@ class LauncherTests(unittest.TestCase):
         shutil.copy(LAUNCHER, self.launcher)
         self.launcher.chmod(0o755)
         shutil.copy(ROOT / "launcher_backup.py", self.project / "launcher_backup.py")
+        self.release = root / "release"
+        self.release.mkdir()
+        for name in ("karpathy-wiki.sh", "launcher_backup.py"):
+            shutil.copy(ROOT / name, self.release / name)
+        subprocess.run(
+            [
+                "python3",
+                str(self.project / "launcher_backup.py"),
+                "accept",
+                str(self.project),
+                "0.0.1",
+            ],
+            check=True,
+            capture_output=True,
+        )
 
     def run_launcher(self, *args, env=None, cwd=None, input=None):
         environment = {**os.environ}
@@ -126,6 +147,7 @@ class LauncherTests(unittest.TestCase):
                 "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}",
                 "DOCKER_STUB_LOG": str(self.docker_log),
                 "CURL_STUB_LOG": str(self.curl_log),
+                "STUB_RELEASE_DIR": str(self.release),
                 **(env or {}),
             }
         )
@@ -291,6 +313,8 @@ class LauncherTests(unittest.TestCase):
                 "https://api.github.com/repos/mstroppel/karpathy-wiki/tags?per_page=100",
                 "https://raw.githubusercontent.com/mstroppel/karpathy-wiki"
                 "/v2.0.0-pre.1/compose.yaml",
+                "https://raw.githubusercontent.com/mstroppel/karpathy-wiki/v2.0.0-pre.1/karpathy-wiki.sh",
+                "https://raw.githubusercontent.com/mstroppel/karpathy-wiki/v2.0.0-pre.1/launcher_backup.py",
             ],
         )
 
@@ -325,7 +349,10 @@ class LauncherTests(unittest.TestCase):
         self.assertIn("KARPATHY_WIKI_VERSION=1.2.3", env_file.read_text())
         self.assertEqual(
             self.curl_urls(),
-            ["https://raw.githubusercontent.com/mstroppel/karpathy-wiki/v1.2.3/compose.yaml"],
+            [
+                f"https://raw.githubusercontent.com/mstroppel/karpathy-wiki/v1.2.3/{name}"
+                for name in ("compose.yaml", "karpathy-wiki.sh", "launcher_backup.py")
+            ],
         )
 
     def test_update_without_env_file_fails(self):
@@ -392,6 +419,236 @@ class LauncherTests(unittest.TestCase):
     def test_launcher_is_executable_in_repository(self):
         mode = LAUNCHER.stat().st_mode
         self.assertTrue(mode & stat.S_IXUSR)
+
+    def test_update_installs_matching_pair_and_rollback_restores_actual_old_pair(self):
+        self.write_env("KARPATHY_WIKI_VERSION=0.0.1\n")
+        old = {
+            name: (self.project / name).read_bytes()
+            for name in ("karpathy-wiki.sh", "launcher_backup.py")
+        }
+        for name in old:
+            with (self.release / name).open("a") as stream:
+                stream.write("\n# synthetic target release\n")
+        result = self.run_launcher("update", "1.2.3")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for name in old:
+            self.assertEqual((self.project / name).read_bytes(), (self.release / name).read_bytes())
+        self.assertEqual(self.launcher.stat().st_mode & 0o777, 0o755)
+        record = json.loads((self.project / ".launcher-pair.json").read_text())
+        self.assertEqual(record["version"], "1.2.3")
+        metadata = self.snapshot_metadata()[0]
+        self.assertEqual(metadata["launcher"]["version"], "0.0.1")
+        result = self.run_launcher("rollback", metadata["id"], input=f"rollback {metadata['id']}\n")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for name in old:
+            self.assertEqual((self.project / name).read_bytes(), old[name])
+        self.assertEqual(
+            json.loads((self.project / ".launcher-pair.json").read_text())["version"], "0.0.1"
+        )
+
+    def test_download_or_runtime_validation_failure_leaves_pair_and_env_unchanged(self):
+        self.write_env("KARPATHY_WIKI_VERSION=0.0.1\n")
+        original = {
+            name: (self.project / name).read_bytes()
+            for name in ("karpathy-wiki.sh", "launcher_backup.py", ".env")
+        }
+        for name in ("karpathy-wiki.sh", "launcher_backup.py"):
+            result = self.run_launcher("update", "1.2.3", env={"STUB_DOWNLOAD_FAIL": name})
+            self.assertNotEqual(result.returncode, 0)
+        (self.release / "launcher_backup.py").write_text(
+            "raise RuntimeError('incompatible runtime')\n"
+        )
+        result = self.run_launcher("update", "1.2.3")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("incompatible runtime", result.stderr)
+        for name, content in original.items():
+            self.assertEqual((self.project / name).read_bytes(), content)
+        self.assertEqual(self.snapshot_metadata(), [])
+        self.assertEqual(self.docker_calls().count(["stop"]), 0)
+        self.assertFalse(any("save" in c or "pull" in c or "up" in c for c in self.docker_calls()))
+
+    def test_unregistered_or_modified_pair_requires_explicit_acceptance(self):
+        self.write_env("KARPATHY_WIKI_VERSION=0.0.1\n")
+        record = self.project / ".launcher-pair.json"
+        record.unlink()
+        result = self.run_launcher("update", "1.2.3")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("launcher-accept", result.stderr)
+        self.assertEqual(self.run_launcher("launcher-accept", "0.0.1").returncode, 0)
+        with self.launcher.open("a") as stream:
+            stream.write("\n# local customization\n")
+        result = self.run_launcher("update", "1.2.3")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("locally modified", result.stderr)
+        self.assertEqual(self.snapshot_metadata(), [])
+
+    def test_accept_rejects_nonprotocol_edits_without_overwriting_record(self):
+        record = self.project / ".launcher-pair.json"
+        original = record.read_bytes()
+        self.launcher.write_text(self.launcher.read_text().replace("# launcher-protocol: 1", ""))
+        result = self.run_launcher("launcher-accept", "0.0.1")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("protocol", result.stderr)
+        self.assertEqual(record.read_bytes(), original)
+
+    def test_update_rejects_staging_overlap_without_deleting_configured_roots(self):
+        stage = self.project / ".launcher-stage"
+        for setting in ("DATA_ROOT", "KARPATHY_WIKI_BACKUP_DIR", "TOKEN_FILE"):
+            with self.subTest(setting=setting):
+                root = stage / setting.lower()
+                root.mkdir(mode=0o700, parents=True, exist_ok=True)
+                sentinel = root / "keep"
+                sentinel.write_text("synthetic preserved data")
+                (stage / "keep-stage").write_text("preserve stage too")
+                value = str(sentinel if setting == "TOKEN_FILE" else root)
+                self.write_env(f"KARPATHY_WIKI_VERSION=0.0.1\n{setting}={value}\n")
+                result = self.run_launcher("update", "1.2.3")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("staging overlaps", result.stderr)
+                self.assertEqual(sentinel.read_text(), "synthetic preserved data")
+                self.assertTrue((stage / "keep-stage").exists())
+        self.assertFalse(any("save" in c or "pull" in c for c in self.docker_calls()))
+
+    def test_rollback_rejects_saved_staging_overlap_before_loading_or_replacing(self):
+        import hashlib
+        import io
+        import tarfile
+
+        self.write_env("KARPATHY_WIKI_VERSION=0.0.1\n")
+        self.assertEqual(self.run_launcher("update", "1.2.3").returncode, 0)
+        metadata = self.snapshot_metadata()[0]
+        saved_root = self.project / ".launcher-stage" / "saved-data"
+        metadata["paths"].append(str(saved_root))
+        path = self.project / "backups" / metadata["id"] / "metadata.json"
+        archive_path = path.parent / "snapshot.tar"
+        # A valid saved destination, not merely a path missing from the archive.
+        with tarfile.open(archive_path, "a") as archive:
+            member = tarfile.TarInfo(str(saved_root).lstrip("/"))
+            member.type = tarfile.DIRTYPE
+            member.mode = 0o700
+            member.uid, member.gid = os.getuid(), os.getgid()
+            archive.addfile(member)
+            member = tarfile.TarInfo(str(saved_root / "keep-data").lstrip("/"))
+            member.size = 5
+            member.uid, member.gid = os.getuid(), os.getgid()
+            archive.addfile(member, io.BytesIO(b"saved"))
+        metadata["sha256"]["snapshot.tar"] = hashlib.sha256(archive_path.read_bytes()).hexdigest()
+        path.write_text(json.dumps(metadata))
+        marker = self.project / ".launcher-stage" / "preserve-staging"
+        marker.write_text("retained evidence")
+        current_env = (self.project / ".env").read_bytes()
+        self.docker_log.write_text("")
+        result = self.run_launcher("rollback", metadata["id"], input=f"rollback {metadata['id']}\n")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("staging overlaps", result.stderr)
+        self.assertEqual(marker.read_text(), "retained evidence")
+        self.assertEqual((self.project / ".env").read_bytes(), current_env)
+        self.assertFalse(any("load" in c or "down" in c for c in self.docker_calls()))
+
+    def test_rollback_validates_saved_pair_before_any_live_replacement(self):
+        import hashlib
+        import io
+        import tarfile
+
+        self.write_env("KARPATHY_WIKI_VERSION=0.0.1\n")
+        self.assertEqual(self.run_launcher("update", "1.2.3").returncode, 0)
+        metadata = self.snapshot_metadata()[0]
+        directory = self.project / "backups" / metadata["id"]
+        archive_path = directory / "snapshot.tar"
+        original_archive = archive_path.read_bytes()
+        current_env = (self.project / ".env").read_bytes()
+        current_pair = {
+            name: (self.project / name).read_bytes()
+            for name in ("karpathy-wiki.sh", "launcher_backup.py")
+        }
+        sentinel = self.project / "data" / "new-data"
+        sentinel.write_text("preserve current data")
+        for invalid in ("missing-metadata", "missing-root", "wrong-hash", "nonprotocol"):
+            with self.subTest(invalid=invalid):
+                archive_path.write_bytes(original_archive)
+                changed = json.loads(json.dumps(metadata))
+                if invalid == "missing-metadata":
+                    del changed["launcher"]
+                elif invalid == "missing-root":
+                    changed["paths"].remove(str(self.launcher))
+                elif invalid == "wrong-hash":
+                    changed["launcher"]["sha256"]["karpathy-wiki.sh"] = "0" * 64
+                else:
+                    # A checksum-valid archive containing unsupported old launcher bytes.
+                    content = self.launcher.read_bytes().replace(b"# launcher-protocol: 1", b"")
+                    replacement = directory / "modified.tar"
+                    with (
+                        tarfile.open(archive_path) as source,
+                        tarfile.open(replacement, "w") as target,
+                    ):
+                        for member in source:
+                            body = source.extractfile(member) if member.isfile() else None
+                            if member.name == str(self.launcher).lstrip("/"):
+                                member.size = len(content)
+                                body = io.BytesIO(content)
+                            target.addfile(member, body)
+                    replacement.replace(archive_path)
+                    changed["launcher"]["sha256"]["karpathy-wiki.sh"] = hashlib.sha256(
+                        content
+                    ).hexdigest()
+                    changed["sha256"]["snapshot.tar"] = hashlib.sha256(
+                        archive_path.read_bytes()
+                    ).hexdigest()
+                (directory / "metadata.json").write_text(json.dumps(changed))
+                self.docker_log.write_text("")
+                result = self.run_launcher(
+                    "rollback", metadata["id"], input=f"rollback {metadata['id']}\n"
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(sentinel.read_text(), "preserve current data")
+                self.assertEqual((self.project / ".env").read_bytes(), current_env)
+                for name, content in current_pair.items():
+                    self.assertEqual((self.project / name).read_bytes(), content)
+                self.assertFalse(
+                    any("load" in c or "tag" in c or "down" in c for c in self.docker_calls())
+                )
+
+    def test_interrupted_activation_blocks_commands_and_recovers_only_complete_pair(self):
+        spec = importlib.util.spec_from_file_location(
+            "launcher_backup", ROOT / "launcher_backup.py"
+        )
+        assert spec and spec.loader
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        self.write_env("KARPATHY_WIKI_VERSION=0.0.1\n")
+        stage = self.project / ".launcher-stage"
+        shutil.copytree(self.release, stage)
+        with (stage / "karpathy-wiki.sh").open("a") as stream:
+            stream.write("\n# new release\n")
+        record = module.prepare_activation(stage, "1.2.3")
+        real_sync = module.sync_directory
+        calls = 0
+
+        def crash_after_shell(directory):
+            nonlocal calls
+            real_sync(directory)
+            calls += 1
+            if calls == 2:  # durable marker, then first replacement
+                raise SystemExit("synthetic power loss")
+
+        with patch.object(module, "sync_directory", side_effect=crash_after_shell):
+            with self.assertRaises(SystemExit):
+                module.activate_pair(self.project, stage, record, self.project)
+        for command in (("up", "-d"), ("update", "1.2.3"), ("launcher-accept", "1.2.3")):
+            result = self.run_launcher(*command)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("interrupted launcher activation", result.stderr)
+        self.assertEqual(self.docker_calls(), [])
+        result = subprocess.run(
+            ["python3", str(stage / "launcher_backup.py"), "recover", str(self.project)],
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.project / ".launcher-activation.json").exists())
+        self.assertEqual(module.pair_hashes(self.project), record["sha256"])
+        self.assertEqual((self.project / ".env").read_text(), "KARPATHY_WIKI_VERSION=0.0.1\n")
+        self.assertEqual(self.run_launcher("version").stdout, "0.0.1\n")
 
     def snapshot_metadata(self):
         return [

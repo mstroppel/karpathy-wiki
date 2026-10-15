@@ -4,6 +4,10 @@
 .cache/
 backups/
 .launcher.lock
+.launcher-pair.json
+.launcher-activation.json
+.launcher-stage/
+*.activate
 __pycache__/
 *.py[cod]
 *.egg-info/
