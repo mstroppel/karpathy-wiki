@@ -102,6 +102,21 @@ class OpenCodeDownloadTests(unittest.TestCase):
 class IngestPackageTests(unittest.TestCase):
     """Metadata checks for the split ingest distributions (#24)."""
 
+    def test_test_workflows_install_all_ingest_distributions(self):
+        packages = {
+            f"./{path.parent.relative_to(ROOT).as_posix()}"
+            for path in (ROOT / "ingest").glob("*/pyproject.toml")
+        }
+        self.assertTrue(packages)
+        for workflow in ("ci.yml", "pre-release.yml"):
+            with self.subTest(workflow=workflow):
+                content = read(ROOT / ".github" / "workflows" / workflow)
+                install_lines = [
+                    line for line in content.splitlines() if "pip install --no-deps" in line
+                ]
+                installed = {word for line in install_lines for word in line.split()}
+                self.assertTrue(packages <= installed, f"missing packages: {packages - installed}")
+
     def test_ingest_distributions_are_pinned_in_lockstep(self):
         versions = {}
         for directory in ("core", "webdav", "audio", "speech", "paperless", "email"):
