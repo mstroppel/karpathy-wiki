@@ -241,12 +241,15 @@ Actual work advances phases/progress; there is no deadline for the whole backlog
   `stalled` means a phase exceeded its deadline. A dead process becomes stale
   even if its phase deadline was much longer.
 
-These are health deadlines, not force-cancellation, lease extensions or permission
-to publish. Existing leases, fencing, all-or-nothing publication, retries and
+The synchronization bound also terminates a stuck rclone subprocess and returns
+to the normal failed-cycle retry path. Other phase bounds are health deadlines,
+not force-cancellation, lease extensions or permission to publish. Existing
+leases, fencing, all-or-nothing publication, retries and
 quarantine remain authoritative. Choose bounds appropriate to the host; raising
 them delays stall detection. Do not merely increase them to mask a real failure.
 
-Compose checks provider health every 10 seconds with a two-minute startup grace;
+Compose checks provider health every 10 seconds with a four-minute startup grace
+(longer than the combined 120-second dependency wait and 60-second remote probe);
 the check also requires healthy speech-worker status. The launcher's existing
 `up --wait --wait-timeout 600` now waits for readiness, not backlog completion.
 Genuine startup failures still fail the update, retain its verified backup and

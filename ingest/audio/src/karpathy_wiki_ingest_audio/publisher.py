@@ -970,7 +970,11 @@ def run(once: bool) -> None:
                 wait_for_worker(environment.speech_root)
                 probe(os.environ["WEBDAV_PATH"])
                 status.enter("synchronizing", environment.sync_timeout, ready=not store_failed)
-                synchronize(incoming, os.environ["WEBDAV_PATH"])
+                synchronize(
+                    incoming,
+                    os.environ["WEBDAV_PATH"],
+                    timeout_seconds=environment.sync_timeout,
+                )
                 source_ids = load_mapping(mapping)
                 changed, failed, degraded = process_cycle(
                     incoming,

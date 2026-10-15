@@ -27,7 +27,13 @@ def probe(path: str, rclone_binary: str = "rclone") -> None:
     )
 
 
-def synchronize(incoming: Path, path: str, rclone_binary: str = "rclone") -> None:
+def synchronize(
+    incoming: Path,
+    path: str,
+    rclone_binary: str = "rclone",
+    *,
+    timeout_seconds: int = 3600,
+) -> None:
     """Mirror the upstream WebDAV folder into the private snapshot."""
     subprocess.run(
         [
@@ -44,6 +50,7 @@ def synchronize(incoming: Path, path: str, rclone_binary: str = "rclone") -> Non
             "INFO",
         ],
         check=True,
+        timeout=timeout_seconds,
     )
 
 

@@ -2,13 +2,14 @@
 
 import json
 import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
 from karpathy_wiki_ingest_audio import health, publisher, speech_client
-from karpathy_wiki_ingest_audio.connector import probe
+from karpathy_wiki_ingest_audio.connector import probe, synchronize
 from karpathy_wiki_ingest_audio.speech_client import await_result
 from karpathy_wiki_speech import worker
 from karpathy_wiki_speech.liveness import Liveness, read_healthy
@@ -198,42 +199,102 @@ class LivenessTests(unittest.TestCase):
         self.assertEqual(run.call_args.kwargs["stdout"], -3)
         self.assertEqual(run.call_args.kwargs["stderr"], -3)
 
+    def test_sync_execution_is_bounded_not_just_its_health_record(self):
+        with patch("karpathy_wiki_ingest_audio.connector.subprocess.run") as run:
+            synchronize(self.root, "Recordings", timeout_seconds=123)
+        self.assertEqual(run.call_args.kwargs["timeout"], 123)
+        with (
+            patch(
+                "karpathy_wiki_ingest_audio.connector.subprocess.run",
+                side_effect=subprocess.TimeoutExpired("rclone", 123),
+            ),
+            self.assertRaises(subprocess.TimeoutExpired),
+        ):
+            synchronize(self.root, "Recordings", timeout_seconds=123)
+
+    def test_startup_grace_covers_bounded_dependency_and_probe_checks(self):
+        compose = Path(__file__).resolve().parents[2] / "compose.yaml"
+        audio = (
+            compose.read_text().split("\n  audio-ingest:", 1)[1].split("\n  audio-speech:", 1)[0]
+        )
+        self.assertIn("start_period: 4m", audio)
+        self.assertGreater(4 * 60, 120 + 60)
+
 
 class StartupTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        self.settings = publisher.Settings(
+            incoming=root / "incoming",
+            sanitized=root / "sources",
+            quarantine=root / "quarantine",
+            mapping=root / "mapping",
+            speech_root=root / "speech",
+            speech_timeout=43200,
+            interval=3600,
+            redactions=root / "redactions",
+            health_path=root / "health.json",
+            state_path=root / "state.sqlite3",
+        )
+        self.settings.redactions.write_text(
+            '{"people":[{"values":["Synthetic Person"],"replacement":"[PERSON]"}]}'
+        )
+
     def test_broken_state_stays_unhealthy_during_long_work(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            settings = publisher.Settings(
-                incoming=root / "incoming",
-                sanitized=root / "sources",
-                quarantine=root / "quarantine",
-                mapping=root / "mapping",
-                speech_root=root / "speech",
-                speech_timeout=43200,
-                interval=3600,
-                redactions=root / "redactions",
-                health_path=root / "health.json",
-                state_path=root / "state.sqlite3",
-            )
-            settings.redactions.write_text('{"people":[]}')
+        def sync(*args, **kwargs):
+            with self.assertRaises(RuntimeError):
+                read_healthy(self.settings.health_path)
 
-            def sync(*args):
-                with self.assertRaises(RuntimeError):
-                    read_healthy(settings.health_path)
+        with (
+            patch.object(publisher.Settings, "from_env", return_value=self.settings),
+            patch.object(
+                publisher, "install_stop_handler", return_value=Mock(is_set=lambda: False)
+            ),
+            patch.object(publisher.StateStore, "open", side_effect=OSError("private")),
+            patch.object(publisher, "probe"),
+            patch.object(publisher, "wait_for_worker"),
+            patch.object(publisher, "synchronize", side_effect=sync) as synchronization,
+            patch.object(publisher, "process_cycle", return_value=(0, 0, False)),
+            patch.dict(os.environ, {"WEBDAV_PATH": "Recordings"}),
+            self.assertLogs(publisher.LOG),
+            self.assertRaises(SystemExit),
+        ):
+            publisher.run(once=True)
+        self.assertEqual(json.loads(self.settings.health_path.read_text())["failed"], 1)
+        synchronization.assert_called_once()
 
-            with (
-                patch.object(publisher.Settings, "from_env", return_value=settings),
-                patch.object(
-                    publisher, "install_stop_handler", return_value=Mock(is_set=lambda: False)
-                ),
-                patch.object(publisher.StateStore, "open", side_effect=OSError("private")),
-                patch.object(publisher, "probe"),
-                patch.object(publisher, "wait_for_worker"),
-                patch.object(publisher, "synchronize", side_effect=sync),
-                patch.object(publisher, "process_cycle", return_value=(0, 0, False)),
-                patch.dict(os.environ, {"WEBDAV_PATH": "Recordings"}),
-                self.assertLogs(publisher.LOG),
-                self.assertRaises(SystemExit),
-            ):
-                publisher.run(once=True)
-            self.assertEqual(json.loads(settings.health_path.read_text())["failed"], 1)
+    def test_sync_timeout_records_failure_and_retries_without_losing_state(self):
+        stop = Mock()
+        stop.is_set.return_value = False
+        observed = []
+
+        def wait(interval):
+            self.assertEqual(interval, 3600)
+            observed.append(json.loads(self.settings.health_path.read_text())["failed"])
+            return len(observed) == 2
+
+        stop.wait.side_effect = wait
+        with (
+            patch.object(publisher.Settings, "from_env", return_value=self.settings),
+            patch.object(publisher, "install_stop_handler", return_value=stop),
+            patch.object(publisher, "probe"),
+            patch.object(publisher, "wait_for_worker"),
+            patch.object(
+                publisher,
+                "synchronize",
+                side_effect=[subprocess.TimeoutExpired("rclone", 3600), None],
+            ) as sync,
+            patch.object(publisher, "process_cycle", return_value=(0, 0, False)) as process,
+            patch.dict(os.environ, {"WEBDAV_PATH": "Recordings"}),
+            self.assertLogs(publisher.LOG) as logs,
+        ):
+            publisher.run(once=False)
+        self.assertEqual(observed, [1, 0], logs.output)
+        self.assertEqual(sync.call_count, 2)
+        self.assertEqual(sync.call_args.kwargs["timeout_seconds"], 3600)
+        process.assert_called_once()
+        self.assertIsNotNone(self.settings.state_path)
+        assert self.settings.state_path is not None
+        self.assertTrue(self.settings.state_path.is_file())

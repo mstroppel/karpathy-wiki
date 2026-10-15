@@ -641,7 +641,8 @@ class DaemonSchedulingTests(CycleHarness):
             monitored.append(status)
             return status
 
-        def synchronize(incoming, _remote):
+        def synchronize(incoming, _remote, *, timeout_seconds):
+            self.assertEqual(timeout_seconds, 3600)
             sync_times.append(clock)
             write_recording(incoming, "meeting.mp3")
 
