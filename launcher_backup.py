@@ -16,6 +16,10 @@ import tarfile
 import tempfile
 from pathlib import Path
 
+LAUNCHER_PROTOCOL = 1
+PAIR = ("karpathy-wiki.sh", "launcher_backup.py")
+LAUNCHER_DIR = Path(__file__).resolve().parent
+
 
 class BackupError(Exception):
     pass
@@ -53,6 +57,94 @@ def write_json(path, value):
 
 def within(path, parent):
     return path == parent or parent in path.parents
+
+
+def pair_hashes(directory):
+    for name in PAIR:
+        path = directory / name
+        if path.is_symlink() or not path.is_file() or path.stat().st_nlink != 1:
+            raise BackupError("launcher files must be independent regular files")
+    return {name: digest(directory / name) for name in PAIR}
+
+
+def accepted_pair(directory):
+    record = directory / ".launcher-pair.json"
+    if not record.is_file():
+        raise BackupError(
+            "unregistered launcher pair; inspect files, then run launcher-accept <version>"
+        )
+    value = json.loads(record.read_text())
+    if value["sha256"] != pair_hashes(directory):
+        raise BackupError(
+            "locally modified launcher pair; preserve edits and explicitly "
+            "launcher-accept <version> before updating"
+        )
+    return value
+
+
+def validate_pair(directory):
+    pair_hashes(directory)
+    if "# launcher-protocol: 1" not in (directory / PAIR[0]).read_text():
+        raise BackupError("target launcher does not support safe pair activation protocol 1")
+    run(["sh", "-n", str(directory / PAIR[0])])
+    # Downloads are trusted executable release code. Probe the actual target runtime
+    # before stopping writers or changing configuration, not just Python syntax.
+    if (
+        run([sys.executable, str(directory / PAIR[1]), "check-runtime"]).strip()
+        != b"launcher-protocol: 1"
+    ):
+        raise BackupError("target helper does not support launcher protocol 1")
+
+
+def stage_pair(target):
+    if not re.fullmatch(r"[0-9][0-9A-Za-z.-]*", target):
+        raise BackupError("self-update requires a release version, not a PR preview")
+    accepted_pair(LAUNCHER_DIR)
+    stage = LAUNCHER_DIR / ".launcher-stage"
+    if stage.exists():
+        shutil.rmtree(stage)
+    stage.mkdir(mode=0o700)
+    for name in PAIR:
+        run(
+            [
+                "curl",
+                "-fsSL",
+                f"https://raw.githubusercontent.com/mstroppel/karpathy-wiki/v{target}/{name}",
+                "-o",
+                str(stage / name),
+            ]
+        )
+    validate_pair(stage)
+    return stage
+
+
+def activate_pair(directory, stage, record, project):
+    """A durable guard, not two allegedly atomic renames. Caller holds project lock."""
+    if pair_hashes(stage) != record["sha256"]:
+        raise BackupError("staged launcher checksum mismatch; retain backup and recover manually")
+    marker = directory / ".launcher-activation.json"
+    write_json(marker, {"pair": record, "project": str(project)})
+    for name in PAIR:
+        temporary = directory / (name + ".activate")
+        shutil.copyfile(stage / name, temporary)
+        temporary.chmod(0o755 if name.endswith(".sh") else 0o644)
+        with temporary.open("rb") as stream:
+            os.fsync(stream.fileno())
+        temporary.replace(directory / name)
+        sync_directory(directory)
+    write_json(directory / ".launcher-pair.json", record)
+    marker.unlink()
+    sync_directory(directory)
+
+
+def prepare_activation(stage, version):
+    # Retain a complete, durable recovery pair until the next update.
+    for name in PAIR:
+        with (stage / name).open("rb") as stream:
+            os.fsync(stream.fileno())
+    sync_directory(stage)
+    sync_directory(stage.parent)
+    return {"version": version, "sha256": pair_hashes(stage)}
 
 
 def check_file_metadata(path):
@@ -168,6 +260,7 @@ class Instance:
             Path(__file__).resolve().with_name("karpathy-wiki.sh"),
             Path(__file__).resolve(),
             self.compose,
+            LAUNCHER_DIR / ".launcher-pair.json",
         }
         if self.override.exists():
             paths.add(self.override)
@@ -215,6 +308,10 @@ class Instance:
                 raise BackupError("snapshot path overlaps backup storage or filesystem root")
             if path.is_symlink():
                 raise BackupError("snapshot roots must not be symlinks")
+            if path.is_dir() and within(LAUNCHER_DIR, path):
+                raise BackupError(
+                    "snapshot directory roots must not contain the launcher installation"
+                )
             if path.is_mount() or not os.access(path.parent, os.W_OK | os.X_OK):
                 raise BackupError(
                     "snapshot roots require writable parents and cannot be mountpoints"
@@ -370,6 +467,7 @@ def snapshot(instance, kind):
             "data": str(instance.data),
             "compose": str(instance.compose),
             "images": images,
+            "launcher": accepted_pair(LAUNCHER_DIR),
             "sha256": {name: digest(temporary / name) for name in ("snapshot.tar", "images.tar")},
         }
         verify(temporary, metadata)
@@ -431,6 +529,10 @@ def set_version(project, version, ensure_password=True):
 
 
 def update(instance, target, target_compose):
+    if instance.project != LAUNCHER_DIR:
+        raise BackupError("safe updates require the launcher pair in the project directory")
+    stage = stage_pair(target)
+    record = prepare_activation(stage, target)
     metadata = snapshot(instance, "update")
     directory = instance.store / metadata["id"]
     updated = None
@@ -442,6 +544,8 @@ def update(instance, target, target_compose):
             raise BackupError("update changed instance identity or DATA_ROOT")
         phase = "image pull"
         updated.call("pull")
+        phase = "launcher activation (use staged helper recover if interrupted)"
+        activate_pair(LAUNCHER_DIR, stage, record, instance.project)
         set_version(instance.project, target)
         phase = "startup/health verification"
         updated.start()
@@ -519,11 +623,30 @@ def restore(instance, metadata):
                 run(["docker", "image", "tag", image_id, image])
         instance.call("--profile", "*", "down", "--remove-orphans")
         for destination, stage in stages:
+            if destination in {LAUNCHER_DIR / name for name in (*PAIR, ".launcher-pair.json")}:
+                continue
             instance.path(str(destination))
             extracted = stage / str(destination).lstrip("/")
             if destination.exists() or destination.is_symlink():
                 destination.rename(stage / "displaced")
             extracted.rename(destination)
+        pair_stage = LAUNCHER_DIR / ".launcher-stage"
+        if pair_stage.exists():
+            shutil.rmtree(pair_stage)
+        pair_stage.mkdir(mode=0o700)
+        for name in PAIR:
+            destination = LAUNCHER_DIR / name
+            source = next(
+                stage / str(destination).lstrip("/")
+                for dest, stage in stages
+                if dest == destination
+            )
+            shutil.copyfile(source, pair_stage / name)
+        validate_pair(pair_stage)
+        record = prepare_activation(pair_stage, metadata["launcher"]["version"])
+        if record != metadata["launcher"]:
+            raise BackupError("saved launcher pair does not match snapshot metadata")
+        activate_pair(LAUNCHER_DIR, pair_stage, record, instance.project)
         if str(instance.override) not in metadata["paths"] and instance.override.exists():
             instance.override.unlink()
         # A formerly floating pin must not resolve to today's release on restart.
@@ -542,6 +665,8 @@ def rollback(instance, identifier):
     metadata = json.loads((directory / "metadata.json").read_text())
     if metadata["instance"] != instance.identity or metadata["id"] != identifier:
         raise BackupError("backup belongs to a different instance")
+    if instance.project != LAUNCHER_DIR:
+        raise BackupError("safe rollback requires the launcher pair in the project directory")
     verify(directory, metadata)
     print(
         f"Backup date: {metadata['created']}\nCurrent version: {instance.version}\n"
@@ -571,6 +696,36 @@ def main():
         return 1
     os.umask(0o077)
     try:
+        if sys.argv[1] == "check-runtime":
+            print(f"launcher-protocol: {LAUNCHER_PROTOCOL}")
+            return 0
+        if sys.argv[1] in {"accept", "recover"}:
+            action, project, *args = sys.argv[1:]
+            with project_lock(Path(project).resolve()):
+                if action == "accept":
+                    if (LAUNCHER_DIR / ".launcher-activation.json").exists():
+                        raise BackupError("recover interrupted activation before accepting files")
+                    write_json(
+                        LAUNCHER_DIR / ".launcher-pair.json",
+                        {"version": args[0], "sha256": pair_hashes(LAUNCHER_DIR)},
+                    )
+                    print("Installed launcher pair explicitly accepted")
+                else:
+                    directory = LAUNCHER_DIR.parent
+                    journal = json.loads((directory / ".launcher-activation.json").read_text())
+                    if journal["project"] != str(Path(project).resolve()):
+                        raise BackupError("activation belongs to a different project")
+                    activate_pair(directory, LAUNCHER_DIR, journal["pair"], Path(project).resolve())
+                    print(
+                        "Launcher pair recovered only; inspect stopped stack, then retry update "
+                        "or explicitly rollback. No data restored."
+                    )
+            return 0
+        if (LAUNCHER_DIR / ".launcher-activation.json").exists():
+            raise BackupError(
+                "interrupted launcher activation; use "
+                ".launcher-stage/launcher_backup.py recover <project>"
+            )
         if sys.argv[1] in {"launch", "forward"}:
             action = sys.argv[1]
             _, project, *command = sys.argv[1:]

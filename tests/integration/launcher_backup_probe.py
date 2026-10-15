@@ -36,6 +36,23 @@ def main():
         )
         for file in ("karpathy-wiki.sh", "launcher_backup.py"):
             shutil.copy(ROOT / file, project / file)
+        run("sh", str(project / "karpathy-wiki.sh"), "launcher-accept", "1.0.0")
+        # Serve synthetic release pairs locally; retain real Docker/Compose behavior.
+        binary = project / "bin"
+        binary.mkdir()
+        curl = binary / "curl"
+        curl.write_text(
+            "#!/usr/bin/env python3\n"
+            "import sys\nfrom pathlib import Path\n"
+            f"root = Path({str(ROOT)!r})\n"
+            "url = sys.argv[sys.argv.index('-fsSL') + 1]\n"
+            "name = url.rsplit('/', 1)[1]\n"
+            "assert name in ('karpathy-wiki.sh', 'launcher_backup.py')\n"
+            "content = (root / name).read_text() + '\\n# synthetic release pair\\n'\n"
+            "Path(sys.argv[sys.argv.index('-o') + 1]).write_text(content)\n"
+        )
+        curl.chmod(0o755)
+        os.environ["PATH"] = str(binary) + os.pathsep + os.environ["PATH"]
         config: dict[str, Any] = {
             "name": name,
             "services": {
@@ -84,6 +101,9 @@ def main():
             assert not (data / "new-only").exists()
             assert (project / "secret").read_text() == "synthetic-old-secret"
             assert "KARPATHY_WIKI_VERSION=1.0.0" in (project / ".env").read_text()
+            for file in ("karpathy-wiki.sh", "launcher_backup.py"):
+                assert (project / file).read_bytes() == (ROOT / file).read_bytes()
+            assert json.loads((project / ".launcher-pair.json").read_text())["version"] == "1.0.0"
             container = run("sh", str(launcher), "ps", "-q", "writer").stdout.strip()
             actual_image = run(
                 "docker", "inspect", container, "--format", "{{.Image}}"
