@@ -10,12 +10,30 @@ audio extensions become pending work, everything else is ignored
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 from karpathy_wiki_speech.types import TranscriptionLimits, file_revision
 
 
-def synchronize(incoming: Path, path: str, rclone_binary: str = "rclone") -> None:
+def probe(path: str, rclone_binary: str = "rclone") -> None:
+    """Prove remote access before startup readiness, without listing private names."""
+    subprocess.run(
+        [rclone_binary, "lsf", f"webdav:{path}", "--max-depth", "1", "--retries", "1"],
+        check=True,
+        timeout=60,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+def synchronize(
+    incoming: Path,
+    path: str,
+    rclone_binary: str = "rclone",
+    *,
+    timeout_seconds: int = 3600,
+) -> None:
     """Mirror the upstream WebDAV folder into the private snapshot."""
     subprocess.run(
         [
@@ -32,12 +50,14 @@ def synchronize(incoming: Path, path: str, rclone_binary: str = "rclone") -> Non
             "INFO",
         ],
         check=True,
+        timeout=timeout_seconds,
     )
 
 
 def audio_inventory(
     snapshot: Path,
     limits: TranscriptionLimits,
+    progress: Callable[[], None] | None = None,
 ) -> dict[str, str]:
     """Content hashes of every supported audio file in the snapshot.
 
@@ -52,5 +72,7 @@ def audio_inventory(
         if not path.is_file() or path.suffix.lower() not in limits.allowed_extensions:
             continue
         relative = path.relative_to(snapshot).as_posix()
+        if progress is not None:
+            progress()
         inventory[relative] = file_revision(str(path))
     return inventory
