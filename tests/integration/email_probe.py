@@ -21,26 +21,27 @@ ROOT = Path("/data")
 RECIPIENT = "server+fs-wiki@example.com"
 
 
-def fixture(field: str, *, proven: bool = True) -> bytes:
+def fixture(field: str, *, sender: str = "sender@example.com") -> bytes:
     message = EmailMessage(policy=policy.SMTP)
-    message["From"] = "sender@example.com"
+    message["From"] = sender
     message["Subject"] = "Secret Person integration fixture"
-    # Received BCC mail has no BCC header; only server delivery metadata proves it.
+    # Received BCC mail has no BCC header. No delivery headers are needed.
     message["To" if field == "Bcc" else field] = (
         "reader@example.com" if field == "Bcc" else RECIPIENT
     )
-    if proven:
-        message["X-Original-To"] = RECIPIENT
     message.set_content(f"Secret Person approved the {field} fixture.")
     message.add_attachment(b"PRIVATE ATTACHMENT", maintype="application", subtype="pdf")
     return message.as_bytes()
 
 
 MESSAGES = {str(index): fixture(field) for index, field in enumerate(("To", "Cc", "Bcc"), 1)}
-# Matching To without proven envelope delivery, and another client's deleted
-# message, must survive. General EXPUNGE/CLOSE are deliberately unsupported.
-MESSAGES["4"] = fixture("To", proven=False)
-MESSAGES["5"] = fixture("To", proven=False)
+# Differing/duplicate delivery metadata must not filter folder mail. Another
+# client's non-allowlisted, deleted message must survive targeted deletion;
+# general EXPUNGE/CLOSE are deliberately unsupported.
+MESSAGES["4"] = b"X-Original-To: other@example.com\r\nX-Original-To: invalid\r\n" + fixture(
+    "Delivered-To"
+)
+MESSAGES["5"] = fixture("To", sender="other@example.com")
 COMMANDS: list[str] = []
 FIRST_DELETE = True
 
@@ -121,9 +122,6 @@ def run():
         port=server.server_address[1],
         username="fixture",
         password="integration-only",
-        recipient=RECIPIENT,
-        delivery_header="X-Original-To",
-        trusted=True,
         archive=ROOT / "incoming/email",
         sanitized=ROOT / "sources/email",
         redactions=redactions,
@@ -147,10 +145,10 @@ def run():
         ):
             assert cycle(settings) > 0  # archive succeeded; injected deletion failure
             first = json.loads((settings.sanitized / "manifest.json").read_text())
-            assert len(first["items"]) == 3
+            assert len(first["items"]) == 4
             assert cycle(settings) == 0  # persisted pending delete resumes
-        assert set(MESSAGES) == {"4", "5"}, "unproven/unrelated messages were deleted"
-        assert len(list(settings.archive.glob("*.eml"))) == 3
+        assert set(MESSAGES) == {"5"}, "non-allowlisted message was deleted"
+        assert len(list(settings.archive.glob("*.eml"))) == 4
         assert all(command.split()[1] not in {"CLOSE", "EXPUNGE"} for command in COMMANDS)
         assert client_context.check_hostname
         for item in first["items"]:

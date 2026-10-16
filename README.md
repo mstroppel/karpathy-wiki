@@ -166,7 +166,7 @@ Set `COMPOSE_PROFILES` in `.env`; profiles can be enabled independently:
 | `audio` | Transcribe WebDAV recordings and publish redacted transcripts (local by default, opt-in hosted backend) |
 | `answers` | Publish confirmed Q&A drafts from the local answer inbox |
 | `paperless` | Export tagged OCR text and redact configured personal data |
-| `email` | Privately archive matching IMAP mail, delete it on the server, publish redacted body text |
+| `email` | Trust an IMAP folder, privately archive eligible mail, delete it on the server, publish redacted body text |
 | `raw-files` | Expose source files to a trusted reverse proxy |
 
 See [configuration](docs/configuration.md),

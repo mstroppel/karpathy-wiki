@@ -108,9 +108,6 @@ class EmailTests(unittest.TestCase):
             host="imap.example.com",
             username="wiki@example.com",
             password="private-password",
-            recipient=RECIPIENT,
-            delivery_header="X-Original-To",
-            trusted=True,
             archive=self.root / "private",
             sanitized=self.root / "sources",
             redactions=self.redactions,
@@ -126,14 +123,14 @@ class EmailTests(unittest.TestCase):
     def manifest(self):
         return json.loads((self.settings.sanitized / "manifest.json").read_text())
 
-    def test_exact_plus_delivery_not_to_cc_bcc_authorizes(self):
+    def test_recipient_headers_do_not_filter_folder_mail(self):
         for field in ("To", "Cc", "Bcc"):
             message = parse(mail(delivery=None))
             if field == "To":
                 message.replace_header(field, RECIPIENT)
             else:
                 message[field] = RECIPIENT
-            self.assertFalse(authorized(message.as_bytes(), self.settings))
+            self.assertTrue(authorized(message.as_bytes(), self.settings))
             message["X-Original-To"] = RECIPIENT
             self.assertTrue(authorized(message.as_bytes(), self.settings))
         for destination in (
@@ -141,19 +138,32 @@ class EmailTests(unittest.TestCase):
             "server+other@example.com",
             "SERVER+fs-wiki@example.com",
         ):
-            self.assertFalse(authorized(mail(delivery=destination), self.settings))
+            self.assertTrue(authorized(mail(delivery=destination), self.settings))
         self.assertTrue(authorized(mail(delivery="server+fs-wiki@EXAMPLE.COM"), self.settings))
 
-    def test_missing_ambiguous_duplicate_and_untrusted_delivery_rejected(self):
-        self.assertFalse(authorized(mail(delivery=None), self.settings))
-        self.assertFalse(
-            authorized(mail(delivery=RECIPIENT + ", other@example.com"), self.settings)
+    def test_missing_ambiguous_duplicate_and_invalid_delivery_is_archived_and_deleted(self):
+        originals = [
+            mail(delivery=None),
+            mail(delivery=RECIPIENT + ", other@example.com"),
+            b"X-Original-To: " + RECIPIENT.encode() + b"\r\n" + mail(),
+            mail(delivery="not-an-address"),
+            mail(delivery="other@example.com"),
+        ]
+        client = FakeIMAP({str(index): raw for index, raw in enumerate(originals, 1)})
+        self.assertEqual(receive(client, self.settings, self.store), (5, 0))
+        self.assertFalse(client.messages)
+        self.assertEqual(
+            {path.read_bytes() for path in self.settings.archive.glob("*.eml")}, set(originals)
         )
-        raw = b"X-Original-To: " + RECIPIENT.encode() + b"\r\n" + mail()
-        self.assertFalse(authorized(raw, self.settings))
-        self.assertFalse(authorized(mail(), replace(self.settings, trusted=False)))
-        with self.assertRaises(ValueError):
-            authorized(mail(delivery="not-an-address"), self.settings)
+
+    def test_empty_allowlist_does_not_parse_headers_before_archiving(self):
+        raw = b"malformed header\r\n\r\nrecoverable body"
+        with patch(
+            "karpathy_wiki_ingest_email.mailbox.BytesHeaderParser",
+            side_effect=AssertionError("no header filter configured"),
+        ):
+            self.assertEqual(receive(FakeIMAP({"1": raw}), self.settings, self.store), (1, 0))
+        self.assertEqual(next(self.settings.archive.glob("*.eml")).read_bytes(), raw)
 
     def test_optional_sender_allowlist_requires_single_exact_from(self):
         restricted = replace(self.settings, allowlist=("sender@example.com",))
@@ -163,6 +173,17 @@ class EmailTests(unittest.TestCase):
             authorized(mail(sender="sender@example.com, other@example.com"), restricted)
         )
         self.assertTrue(authorized(mail(sender="Allowed Name <sender@example.com>"), restricted))
+        self.assertTrue(authorized(mail(delivery=None, sender="sender@EXAMPLE.COM"), restricted))
+        self.assertFalse(authorized(mail(sender="Sender@example.com"), restricted))
+        self.assertFalse(authorized(mail(sender="sender+tag@example.com"), restricted))
+        for raw in (
+            mail().replace(b"From: sender@example.com\r\n", b""),
+            b"From: sender@example.com\r\n" + mail(),
+            b"malformed header\r\n\r\nbody",
+        ):
+            self.assertFalse(authorized(raw, restricted))
+        with self.assertRaises(ValueError):
+            authorized(mail(sender="not-an-address"), restricted)
 
     def test_plain_preferred_and_attachments_and_embedded_mail_not_extracted(self):
         message = parse(mail(attachment=True))
@@ -247,7 +268,7 @@ class EmailTests(unittest.TestCase):
             receive(client, self.settings, self.store)
         self.assertFalse(any(command[0] == "STORE" for command in client.commands))
 
-    def test_unmatched_allowlist_and_oversized_are_not_archived_or_deleted(self):
+    def test_non_allowlisted_and_oversized_are_not_archived_or_deleted(self):
         messages = {
             "1": mail(delivery="other@example.com"),
             "2": mail(sender="other@example.com"),
@@ -256,15 +277,17 @@ class EmailTests(unittest.TestCase):
         }
         settings = replace(self.settings, max_bytes=2000, allowlist=("sender@example.com",))
         client = FakeIMAP(messages)
-        self.assertEqual(receive(client, settings, self.store), (1, 1))
-        self.assertEqual(set(client.messages), {"1", "2", "3"})
-        self.assertEqual(len(list(self.settings.archive.glob("*.eml"))), 1)
+        self.assertEqual(receive(client, settings, self.store), (2, 1))
+        self.assertEqual(set(client.messages), {"2", "3"})
+        self.assertEqual(len(list(self.settings.archive.glob("*.eml"))), 2)
 
     def test_cursor_rotation_prevents_poison_and_nonmatching_starvation(self):
         client = FakeIMAP(
-            {"1": mail(body="x" * 10000), "2": mail(delivery="other@example.com"), "3": mail()}
+            {"1": mail(body="x" * 10000), "2": mail(sender="other@example.com"), "3": mail()}
         )
-        settings = replace(self.settings, batch=1, max_bytes=2000)
+        settings = replace(
+            self.settings, batch=1, max_bytes=2000, allowlist=("sender@example.com",)
+        )
         self.assertEqual(receive(client, settings, self.store), (0, 1))
         self.assertEqual(receive(client, settings, self.store), (1, 0))
         self.assertEqual(receive(client, settings, self.store), (0, 0))
@@ -272,14 +295,14 @@ class EmailTests(unittest.TestCase):
         self.assertEqual(receive(client, settings, self.store), (0, 1))
 
     def test_growing_backlog_reserves_newest_slots_without_skipping_old_mail(self):
-        client = FakeIMAP({str(uid): mail(delivery="other@example.com") for uid in range(1, 101)})
+        client = FakeIMAP({str(uid): mail(sender="other@example.com") for uid in range(1, 101)})
         client.messages["3"] = mail(body="old matching message")
-        settings = replace(self.settings, batch=4)
+        settings = replace(self.settings, batch=4, allowlist=("sender@example.com",))
         for poll in range(6):
             with self.subTest(poll=poll):
                 first = 101 + 4 * poll
                 for uid in range(first, first + 4):
-                    client.messages[str(uid)] = mail(delivery="other@example.com")
+                    client.messages[str(uid)] = mail(sender="other@example.com")
                 latest = str(first + 3)
                 client.messages[latest] = mail(body=f"new message {latest}")
                 client.commands.clear()
@@ -299,9 +322,9 @@ class EmailTests(unittest.TestCase):
         self.assertNotIn("3", client.messages)
 
     def test_single_slot_alternates_newest_and_backlog_across_restarts(self):
-        client = FakeIMAP({str(uid): mail(delivery="other@example.com") for uid in range(1, 21)})
+        client = FakeIMAP({str(uid): mail(sender="other@example.com") for uid in range(1, 21)})
         client.messages["3"] = mail(body="old matching message")
-        settings = replace(self.settings, batch=1)
+        settings = replace(self.settings, batch=1, allowlist=("sender@example.com",))
         for poll in range(6):
             latest = str(21 + poll)
             client.messages[latest] = mail(body=f"new message {latest}")
@@ -376,21 +399,39 @@ class EmailTests(unittest.TestCase):
         self.assertEqual(len(self.store.sources()), 2)
         self.assertIn(new, [path.read_bytes() for path in self.settings.archive.glob("*.eml")])
 
-    def test_pending_delete_rechecks_current_allowlist_and_delivery_header(self):
-        client = FakeIMAP()
+    def test_pending_delete_rechecks_current_allowlist_without_delivery_header(self):
+        client = FakeIMAP({"1": mail(delivery=None)})
         client.fail_delete = True
         receive(client, self.settings, self.store)
         client.fail_delete = False
-        for settings in (
-            replace(self.settings, allowlist=("other@example.com",)),
-            replace(self.settings, delivery_header="Delivered-To"),
-        ):
-            client.commands.clear()
-            self.assertEqual(receive(client, settings, self.store), (0, 0))
-            self.assertFalse(any(command[0] == "STORE" for command in client.commands))
-            self.assertIn("1", client.messages)
+        self.store.close()
+        self.store = Store(self.settings.archive)
+        client.commands.clear()
+        settings = replace(self.settings, allowlist=("other@example.com",))
+        self.assertEqual(receive(client, settings, self.store), (0, 0))
+        self.assertFalse(any(command[0] == "STORE" for command in client.commands))
+        self.assertIn("1", client.messages)
         self.assertEqual(receive(client, self.settings, self.store), (0, 0))
         self.assertFalse(client.messages)
+
+    def test_changed_account_or_folder_cannot_resume_another_scopes_pending_delete(self):
+        client = FakeIMAP()
+        client.fail_delete = True
+        self.assertEqual(receive(client, self.settings, self.store), (1, 1))
+        client.fail_delete = False
+        for key, settings in (
+            ("host", replace(self.settings, host="other.example.com")),
+            ("port", replace(self.settings, port=1993)),
+            ("username", replace(self.settings, username="other@example.com")),
+            ("folder", replace(self.settings, folder="Other")),
+        ):
+            with self.subTest(key=key):
+                raw = mail(delivery=None, body=f"new delivery for {key}")
+                client.messages = {"1": raw}
+                self.assertEqual(receive(client, settings, self.store), (1, 0))
+                self.assertIn(
+                    raw, [path.read_bytes() for path in self.settings.archive.glob("*.eml")]
+                )
 
     def test_pathological_mime_cannot_block_archive_or_delete(self):
         raw = (
@@ -654,9 +695,6 @@ class SettingsTests(unittest.TestCase):
             "EMAIL_IMAP_HOST": "imap.example.com",
             "EMAIL_IMAP_USERNAME": "wiki@example.com",
             "EMAIL_IMAP_PASSWORD": " password with spaces ",
-            "EMAIL_RECIPIENT": RECIPIENT,
-            "EMAIL_DELIVERY_HEADER": "X-Original-To",
-            "EMAIL_DELIVERY_HEADER_TRUSTED": "1",
             "REDACTIONS_FILE": "/run/secrets/redactions",
         }
 
@@ -670,12 +708,10 @@ class SettingsTests(unittest.TestCase):
 
     def test_unsafe_env_rejected(self):
         for key, value in [
-            ("EMAIL_DELIVERY_HEADER_TRUSTED", "0"),
-            ("EMAIL_DELIVERY_HEADER", "To"),
-            ("EMAIL_DELIVERY_HEADER", "X\r\nInjected"),
+            ("EMAIL_IMAP_HOST", ""),
+            ("EMAIL_IMAP_USERNAME", ""),
             ("EMAIL_IMAP_PASSWORD", ""),
             ("EMAIL_BATCH_SIZE", "0"),
-            ("EMAIL_RECIPIENT", "a@example.com,b@example.com"),
             ("EMAIL_FROM_ALLOWLIST", "invalid"),
         ]:
             with (

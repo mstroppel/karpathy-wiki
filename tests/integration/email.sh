@@ -36,7 +36,7 @@ const result = await scanIngestStatus({
   sourceRoot: path.join(root, 'sources'),
   wikiSourceRoot: path.join(root, 'wiki/sources'),
 })
-assert.equal(result.summary.new, 3)
+assert.equal(result.summary.new, 4)
 assert.equal(result.summary.invalid, 0)
 console.log('email source-to-wiki scanner: OK')
 JS

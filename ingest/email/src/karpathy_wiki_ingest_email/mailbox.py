@@ -44,21 +44,18 @@ def connection(settings: Settings):
 
 
 def authorized(raw: bytes, settings: Settings) -> bool:
-    # Authorization concerns envelope/header evidence, not body validity. Bad
-    # MIME bodies can still be archived and recovered after server deletion.
+    # The configured account/folder is the trust boundary. Only the optional
+    # From filter reads headers; it is not sender authentication. Bad MIME bodies
+    # can still be archived and recovered after server deletion.
+    if not settings.allowlist:
+        return True
     message = BytesHeaderParser(policy=policy.default).parsebytes(raw)
-    if message.defects or not settings.trusted:
+    if message.defects:
         return False
-    values = message.get_all(settings.delivery_header, [])
-    # Reject duplicated/ambiguous delivery metadata, even if one value matches.
-    if len(values) != 1 or mailboxes([str(values[0])]) != [settings.recipient]:
-        return False
-    if settings.allowlist:
-        senders = message.get_all("From", [])
-        return len(senders) == 1 and mailboxes([str(senders[0])]) in [
-            [sender] for sender in settings.allowlist
-        ]
-    return True
+    senders = message.get_all("From", [])
+    return len(senders) == 1 and mailboxes([str(senders[0])]) in [
+        [sender] for sender in settings.allowlist
+    ]
 
 
 def literal(data: Any, uid: str) -> bytes:
@@ -95,9 +92,7 @@ def receive(client: Any, settings: Settings, store: Store) -> tuple[int, int]:
     if not epoch.isdecimal():
         raise ValueError("invalid UIDVALIDITY")
     scope = hashlib.sha256(
-        json.dumps(
-            [settings.host, settings.port, settings.username, settings.folder, settings.recipient]
-        ).encode()
+        json.dumps([settings.host, settings.port, settings.username, settings.folder]).encode()
     ).hexdigest()
     uids_data = checked(client.uid("SEARCH", None, "ALL"))
     uids = uids_data[0].decode("ascii").split()
