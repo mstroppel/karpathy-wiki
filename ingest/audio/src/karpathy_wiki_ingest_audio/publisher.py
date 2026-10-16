@@ -932,6 +932,38 @@ def install_stop_handler() -> threading.Event:
     return stop_event
 
 
+def restore_current_failure(
+    store: StateStore,
+    environment: Settings,
+    anonymizer: TargetedAnonymizer,
+    options: TranscriptionOptions,
+    limits: TranscriptionLimits,
+    status: Liveness,
+) -> None:
+    """Restore failures for current inputs, never historical or superseded jobs."""
+    metrics = store.metrics()
+    if not metrics["failed_jobs"] and not metrics["jobs"]["leased"]:
+        # Fresh installs need not hash their backlog before becoming ready.
+        return
+    status.enter("inventory", environment.phase_timeout)
+    inventory = audio_inventory(
+        environment.incoming,
+        limits,
+        progress=lambda: status.enter("inventory", environment.phase_timeout),
+    )
+    key = cycle_idempotency_key(
+        anonymizer.fingerprint,
+        inventory,
+        requested_options_identity(options, environment.speech_root),
+    )
+    job = store.job_by_idempotency_key(key)
+    if job is not None and (
+        job.state == JOB_DEAD
+        or (job.state not in (JOB_SUCCEEDED, JOB_SUPERSEDED) and job.last_error is not None)
+    ):
+        status.fail()
+
+
 def run(once: bool) -> None:
     environment = Settings.from_env()
     incoming, sanitized, quarantine, mapping, interval, redactions, health_path = (
@@ -968,6 +1000,16 @@ def run(once: bool) -> None:
                 options = speech_options()
                 limits = speech_limits()
                 wait_for_worker(environment.speech_root)
+                if store is not None:
+                    try:
+                        restore_current_failure(
+                            store, environment, anonymizer, options, limits, status
+                        )
+                    except sqlite3.Error:
+                        status.fail()
+                        store_failed = True
+                        LOG.error("Durable ingest failure status is unavailable")
+                status.enter("initializing", environment.phase_timeout)
                 probe(os.environ["WEBDAV_PATH"])
                 status.enter("synchronizing", environment.sync_timeout, ready=not store_failed)
                 synchronize(
@@ -998,11 +1040,11 @@ def run(once: bool) -> None:
             except KeyError as error:
                 failed = 1
                 LOG.exception("Audio configuration is incomplete: %s is missing", error)
-            except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
                 # rclone already retried internally; keep the daemon alive and
                 # retry on the next synchronization interval.
                 failed = 1
-                LOG.exception("rclone synchronization failed")
+                LOG.error("rclone operation failed: %s", type(error).__name__)
             except (OSError, RuntimeError, ValueError):
                 failed = 1
                 LOG.exception("Audio synchronization failed")

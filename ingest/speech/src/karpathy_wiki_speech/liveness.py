@@ -26,15 +26,14 @@ def positive_seconds(name: str, default: int) -> int:
     return value
 
 
-def read_healthy(path: Path, *, now: float | None = None) -> dict[str, Any]:
-    """Reject absent, malformed, failed, stale, unready or overdue records."""
+def read_live(path: Path, *, now: float | None = None) -> dict[str, Any]:
+    """Require a ready, live process within its deadline, not successful work."""
     moment = time.time() if now is None else now
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
         if (
             not isinstance(payload, dict)
             or payload.get("ready") is not True
-            or payload.get("failed") != 0
             or not isinstance(payload.get("phase"), str)
         ):
             raise ValueError("unready or failed")
@@ -49,6 +48,14 @@ def read_healthy(path: Path, *, now: float | None = None) -> dict[str, Any]:
             raise ValueError("stale or stalled")
     except (OSError, ValueError, KeyError, TypeError) as error:
         raise RuntimeError("service is unready, failed, stale or stalled") from error
+    return payload
+
+
+def read_healthy(path: Path, *, now: float | None = None) -> dict[str, Any]:
+    """Additionally reject recorded work failures (the Compose health policy)."""
+    payload = read_live(path, now=now)
+    if payload.get("failed") != 0:
+        raise RuntimeError("service is unready, failed, stale or stalled")
     return payload
 
 

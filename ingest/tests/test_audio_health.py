@@ -2,18 +2,21 @@
 
 import json
 import os
+import sqlite3
 import subprocess
 import tempfile
 import unittest
+from contextlib import nullcontext
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+from karpathy_wiki_ingest.state import StateStore
 from karpathy_wiki_ingest_audio import health, publisher, speech_client
 from karpathy_wiki_ingest_audio.connector import probe, synchronize
 from karpathy_wiki_ingest_audio.speech_client import await_result
 from karpathy_wiki_speech import worker
-from karpathy_wiki_speech.liveness import Liveness, read_healthy
-from karpathy_wiki_speech.types import TranscriptionOptions
+from karpathy_wiki_speech.liveness import Liveness, read_healthy, read_live
+from karpathy_wiki_speech.types import DEFAULT_LIMITS, TranscriptionOptions, file_revision
 
 
 class LivenessTests(unittest.TestCase):
@@ -168,12 +171,12 @@ class LivenessTests(unittest.TestCase):
 
     def test_worker_wait_is_bounded_and_allows_initialization(self):
         with (
-            patch.object(speech_client, "read_healthy", side_effect=[RuntimeError(), {}]),
+            patch.object(speech_client, "read_live", side_effect=[RuntimeError(), {}]),
             patch.object(speech_client.time, "sleep"),
         ):
             speech_client.wait_for_worker(self.root)
         with (
-            patch.object(speech_client, "read_healthy", side_effect=RuntimeError()),
+            patch.object(speech_client, "read_live", side_effect=RuntimeError()),
             patch.object(speech_client.time, "monotonic", side_effect=[0, 121]),
             self.assertRaisesRegex(RuntimeError, "did not become ready"),
         ):
@@ -182,6 +185,68 @@ class LivenessTests(unittest.TestCase):
     def test_speech_wait_detects_a_dead_dependency_before_recording_timeout(self):
         with self.assertRaisesRegex(RuntimeError, "service is unready"):
             await_result(self.root, "a" * 64, TranscriptionOptions(), 43200)
+
+    def test_failed_request_does_not_fail_an_unrelated_live_request(self):
+        options = TranscriptionOptions()
+        failed_hash, valid_hash = "a" * 64, "b" * 64
+        worker_status = Liveness(self.root / "worker-health.json")
+        self.addCleanup(worker_status.close)
+        worker_status.enter("idle", 125, ready=True)
+        (self.root / "worker-identity.json").write_text(json.dumps({"identity": "a" * 64}))
+        speech_client.ensure_requested(
+            self.root, failed_hash, options, f"recordings/{failed_hash}.wav"
+        )
+        with self.assertLogs(worker.LOG):
+            self.assertEqual(
+                worker.run_cycle(
+                    self.root,
+                    worker.FakeBackend(),
+                    options,
+                    "a" * 64,
+                    DEFAULT_LIMITS,
+                    decode=False,
+                    status=worker_status,
+                ),
+                (0, 1),
+            )
+        speech_client.wait_for_worker(self.root)
+        with self.assertRaises(speech_client.SpeechProcessingError):
+            await_result(self.root, failed_hash, options, 43200)
+
+        source = self.root / "valid.wav"
+        source.write_bytes(b"synthetic audio")
+        valid_hash = file_revision(str(source))
+        reference = speech_client.stage_recording(self.root, source, valid_hash, "wav", 1024)
+        speech_client.ensure_requested(self.root, valid_hash, options, reference)
+
+        def progress(_seconds):
+            read_live(worker_status.path)
+            with self.assertRaises(RuntimeError):
+                read_healthy(worker_status.path)
+            self.assertEqual(
+                worker.run_cycle(
+                    self.root,
+                    worker.FakeBackend(),
+                    options,
+                    "a" * 64,
+                    DEFAULT_LIMITS,
+                    decode=False,
+                    status=worker_status,
+                ),
+                (1, 0),
+            )
+
+        with patch.object(speech_client.time, "sleep", side_effect=progress) as sleep:
+            self.assertIsNotNone(await_result(self.root, valid_hash, options, 43200))
+        sleep.assert_called_once()
+        self.now += 121
+        with self.assertRaises(RuntimeError):
+            read_live(worker_status.path)
+        worker_status.enter("transcribing", 1)
+        self.now += 2
+        worker_status.write()
+        with self.assertRaises(RuntimeError):
+            read_live(worker_status.path)
 
     def test_invalid_timeout_configuration_is_rejected(self):
         for name in ("SPEECH_TIMEOUT_SEC", "AUDIO_SYNC_TIMEOUT_SEC", "AUDIO_PHASE_TIMEOUT_SEC"):
@@ -241,6 +306,138 @@ class StartupTests(unittest.TestCase):
         self.settings.redactions.write_text(
             '{"people":[{"values":["Synthetic Person"],"replacement":"[PERSON]"}]}'
         )
+        self.settings.speech_root.mkdir()
+        (self.settings.speech_root / "worker-identity.json").write_text(
+            json.dumps({"identity": "a" * 64})
+        )
+
+    def test_fresh_store_does_not_scan_backlog_before_readiness(self):
+        assert self.settings.state_path is not None
+        store = StateStore.open(self.settings.state_path)
+        self.addCleanup(store.close)
+        with patch.object(publisher, "audio_inventory") as inventory:
+            publisher.restore_current_failure(store, self.settings, Mock(), Mock(), Mock(), Mock())
+        inventory.assert_not_called()
+
+    def test_unreadable_failure_state_stays_unhealthy_during_sync(self):
+        def sync(*args, **kwargs):
+            with self.assertRaises(RuntimeError):
+                read_healthy(self.settings.health_path)
+
+        with (
+            patch.object(publisher.Settings, "from_env", return_value=self.settings),
+            patch.object(
+                publisher, "install_stop_handler", return_value=Mock(is_set=lambda: False)
+            ),
+            patch.object(
+                publisher.StateStore,
+                "job_by_idempotency_key",
+                side_effect=sqlite3.OperationalError(),
+            ),
+            patch.object(publisher.StateStore, "metrics", return_value={"failed_jobs": 1}),
+            patch.object(publisher, "probe"),
+            patch.object(publisher, "wait_for_worker"),
+            patch.object(publisher, "synchronize", side_effect=sync) as synchronization,
+            patch.object(publisher, "process_cycle", return_value=(0, 0, False)),
+            patch.dict(os.environ, {"WEBDAV_PATH": "Recordings"}),
+            self.assertLogs(publisher.LOG),
+            self.assertRaises(SystemExit),
+        ):
+            publisher.run(once=True)
+        synchronization.assert_called_once()
+
+    def test_restart_restores_only_current_unresolved_failures_before_sync(self):
+        anonymizer = publisher.TargetedAnonymizer.from_file(self.settings.redactions)
+        identity = publisher.requested_options_identity(
+            publisher.speech_options(), self.settings.speech_root
+        )
+        key = publisher.cycle_idempotency_key(anonymizer.fingerprint, {}, identity)
+        assert self.settings.state_path is not None
+        for state in ("dead", "pending", "leased", "succeeded", "superseded", "historical"):
+            with self.subTest(state=state):
+                store = StateStore.open(self.settings.state_path)
+                job, _ = store.enqueue("ingest", {"provider": "audio"}, idempotency_key=key)
+                if job.state in ("dead", "succeeded", "superseded"):
+                    job = store.rearm(job.id)
+                lease = store.claim(job.id, "test")
+                assert lease is not None
+                if state == "succeeded":
+                    store.complete(lease.id)
+                else:
+                    store.fail(lease.id, "quarantined:1", max_attempts=1 if state == "dead" else 5)
+                    if state == "superseded":
+                        store.supersede(job.id)
+                    elif state == "leased":
+                        store.claim(job.id, "retry", now=int(publisher.time.time()) + 61)
+                    elif state == "historical":
+                        # Same local inputs, but failure belongs to an old speech identity.
+                        (self.settings.speech_root / "worker-identity.json").write_text(
+                            json.dumps({"identity": "b" * 64})
+                        )
+                store.close()
+
+                def sync(*args, state=state, **kwargs):
+                    if state in ("dead", "pending", "leased"):
+                        with self.assertRaises(RuntimeError):
+                            read_healthy(self.settings.health_path)
+                    else:
+                        read_healthy(self.settings.health_path)
+
+                with (
+                    patch.object(publisher.Settings, "from_env", return_value=self.settings),
+                    patch.object(
+                        publisher, "install_stop_handler", return_value=Mock(is_set=lambda: False)
+                    ),
+                    patch.object(publisher, "probe"),
+                    patch.object(publisher, "wait_for_worker"),
+                    patch.object(publisher, "synchronize", side_effect=sync) as synchronization,
+                    patch.object(
+                        publisher,
+                        "process_cycle",
+                        side_effect=publisher.process_cycle
+                        if state in ("dead", "pending", "leased")
+                        else lambda *args, **kwargs: (0, 0, False),
+                    ),
+                    patch.dict(os.environ, {"WEBDAV_PATH": "Recordings"}),
+                    self.assertRaises(SystemExit)
+                    if state in ("dead", "pending", "leased")
+                    else nullcontext(),
+                ):
+                    publisher.run(once=True)
+                synchronization.assert_called_once()
+                if state in ("dead", "pending", "leased"):
+                    with self.assertRaises(RuntimeError):
+                        read_healthy(self.settings.health_path)
+                else:
+                    read_healthy(self.settings.health_path)
+                # Each subtest starts with an independent durable store.
+                self.settings.state_path.unlink()
+
+    def test_rclone_errors_do_not_log_private_arguments_or_tracebacks(self):
+        command = ["rclone", "sync", "webdav:PRIVATE_REMOTE", "/PRIVATE_LOCAL"]
+        for operation in ("probe", "synchronize"):
+            for error in (
+                subprocess.CalledProcessError(1, command, stderr="PRIVATE_STDERR"),
+                subprocess.TimeoutExpired(command, 60, stderr="PRIVATE_STDERR"),
+            ):
+                with (
+                    self.subTest(operation=operation, error=type(error).__name__),
+                    patch.object(publisher.Settings, "from_env", return_value=self.settings),
+                    patch.object(
+                        publisher, "install_stop_handler", return_value=Mock(is_set=lambda: False)
+                    ),
+                    patch.object(publisher, "wait_for_worker"),
+                    patch.object(publisher, "probe"),
+                    patch.object(publisher, "synchronize"),
+                    patch.object(publisher, operation, side_effect=error),
+                    patch.dict(os.environ, {"WEBDAV_PATH": "PRIVATE_REMOTE"}),
+                    self.assertLogs(publisher.LOG) as logs,
+                    self.assertRaises(SystemExit),
+                ):
+                    publisher.run(once=True)
+                self.assertIn(type(error).__name__, "\n".join(logs.output))
+                self.assertNotIn("PRIVATE_", "\n".join(logs.output))
+                self.assertTrue(all(record.exc_info is None for record in logs.records))
 
     def test_broken_state_stays_unhealthy_during_long_work(self):
         def sync(*args, **kwargs):

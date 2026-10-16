@@ -221,6 +221,12 @@ ready during synchronization/transcription, before publishing its first complete
 generation. Invalid credentials, inaccessible storage and unavailable dependencies
 do not count as successful initialization.
 
+Before advertising readiness, the provider checks durable failure status for the
+persisted local snapshot, redaction configuration and active speech identity.
+An unchanged dead or retrying job remains unhealthy across restarts, including
+during synchronization; historical jobs for different inputs and superseded jobs
+do not block readiness. Only a successful cycle clears a restored failure.
+
 Both processes write a content-free heartbeat every 10 seconds. Health requires
 `ready=true`, no recorded failure, a heartbeat no older than 120 seconds, and an
 unexpired **fixed phase deadline**. The heartbeat cannot extend that deadline.
@@ -232,8 +238,11 @@ Actual work advances phases/progress; there is no deadline for the whole backlog
 - `inventory`, `source`, `rendering`, `publication`: local work bounded by
   `AUDIO_PHASE_TIMEOUT_SEC`; inventory advances per file and sources individually;
 - `speech_wait` / worker `transcribing`: bounded by `SPEECH_TIMEOUT_SEC` per
-  recording. The provider checks dependency health at least every 10 seconds
-  while waiting. Long blocking backend calls have no finer progress proof: a
+  recording. The provider checks dependency liveness at least every 10 seconds
+  while waiting; per-recording failure reports fail only their matching request.
+  A previous worker request failure keeps Compose health failing, but does not
+  quarantine unrelated requests while the worker remains live within its deadline.
+  Long blocking backend calls have no finer progress proof: a
   wedged-but-alive backend is detected at this configured deadline, not instantly;
 - `idle`: a real completed cycle; bounded by the configured pause plus 120 seconds;
 - `failed` (including degraded state, exhausted retries and quarantine) stays
