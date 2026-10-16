@@ -5,6 +5,12 @@ installation**. It considers all existing messages, read and unread. It publishe
 only body text and decoded message headers; no attachment extraction, speech,
 OAuth, SMTP receiver, or automatic wiki commits are included.
 
+**The configured account/folder is the trust boundary. There is no recipient
+verification or strict mode.** To/Cc/Bcc and delivery headers do not filter mail.
+Enabling reception can archive and delete **all eligible existing and new
+messages in that folder**, subject to the optional From allowlist and size and
+durability safeguards below. Use a dedicated mailbox or reliably isolated folder.
+
 ## Before enabling destructive reception
 
 1. Use a dedicated mailbox or restricted account with access only to the chosen
@@ -12,12 +18,10 @@ OAuth, SMTP receiver, or automatic wiki commits are included.
 2. Confirm TLS IMAP with certificate verification (default port 993) and password
    or app-password login. Unencrypted IMAP and STARTTLS downgrade paths are not
    supported. Some providers require OAuth and cannot use this connector.
-3. Inspect actual mail delivered **To, CC and BCC** to your exact plus address.
-   The receiving server must strip sender-supplied copies of the delivery header
-   and set **exactly one** authoritative address preserving the plus tag.
-   `Delivered-To` and `X-Original-To` are examples, not inherently trusted headers.
-   Verify your server's configuration. Forwarding or repeated headers can be
-   ambiguous. To/CC/BCC alone never authorize reception; BCC usually disappears.
+3. Verify the selected folder contains only mail intended for this wiki, including
+   its backlog. If you need recipient routing, configure and verify server-side
+   delivery rules into a dedicated folder before enabling reception. Missing,
+   repeated or differing delivery headers do not prevent ingestion/deletion.
 4. Configure the shared deny-list redactions secret. Review output before model
    access: deny-list redaction is not complete anonymization.
 5. Back up the private original archive and its SQLite ledger together,
@@ -25,9 +29,9 @@ OAuth, SMTP receiver, or automatic wiki commits are included.
    attachments, and have no automatic expiry**. Never expose the archive through
    OpenCode, `raw-files`, or another public file server.
 
-Missing/repeated/multiple-address delivery metadata, other aliases and other
-plus tags do not match. Domains compare case-insensitively; local parts remain
-exact. Sender filtering requires one exact From mailbox if configured.
+Sender filtering requires one exact From mailbox if configured. Domains compare
+case-insensitively; local parts and plus tags remain exact. Without an allowlist,
+headers are not checked before archiving.
 
 The server must advertise **UIDPLUS**. Deletion uses only `UID STORE` for the
 matched UID and `UID EXPUNGE <uid>`; never general `EXPUNGE` or `CLOSE`, which could
@@ -45,10 +49,6 @@ EMAIL_IMAP_PORT=993
 EMAIL_IMAP_USERNAME=wiki@example.com
 EMAIL_IMAP_PASSWORD=replace-with-app-password
 EMAIL_IMAP_FOLDER=INBOX
-EMAIL_RECIPIENT=server+fs-wiki@example.com
-EMAIL_DELIVERY_HEADER=X-Original-To
-# Set ONLY after verifying server-specific header trust above:
-EMAIL_DELIVERY_HEADER_TRUSTED=1
 # Optional exact decoded From mailboxes, comma-separated:
 EMAIL_FROM_ALLOWLIST=sender@example.com
 EMAIL_POLL_INTERVAL=60s
@@ -71,8 +71,14 @@ single-quoted values when necessary to avoid Compose `$` interpolation.
 ./karpathy-wiki.sh up -d
 ```
 
-**Activation can delete old matching mail.** Unmatched, non-allowlisted,
-oversized, incomplete or unproven messages stay on the server. Batches reserve
+Changing `.env` requires recreating the service (`up -d` above), not just
+restarting it. To pause destructive reception, run
+`./karpathy-wiki.sh stop email-ingest`; remove `email` from `COMPOSE_PROFILES`
+to keep it disabled on future starts. Stopping cannot undo server deletion;
+verified originals remain in the private archive.
+
+**Activation can delete all eligible old mail in the folder.** Non-allowlisted,
+oversized or incomplete messages stay on the server. Batches reserve
 half their slots (rounded down) for newest UIDs; the remainder advances an
 independent rotating backlog cursor. Batch size 1 alternates backlog and newest
 turns, persisted across restarts. Growing backlogs and poison/nonmatching messages
@@ -105,9 +111,9 @@ hour, stop after five attempts, and remain unhealthy/content-free errors until
 repair/replay. An unreachable IMAP server does not prevent local extraction.
 No stateless destructive or publication fallback exists.
 
-Pending server deletes recheck the archived message against the current recipient
-proof and From allowlist. MIME identity processing occurs only after the original
-is durable; pathological MIME falls back to exact-original-byte deduplication.
+Pending server deletes recheck the archived message against the current From
+allowlist as well as archive integrity. MIME identity processing occurs only after
+the original is durable; pathological MIME falls back to exact-original-byte deduplication.
 Failed replay retains the last successful projection, subject to the current
 privacy gate, and reports the failure without discarding safe published text.
 

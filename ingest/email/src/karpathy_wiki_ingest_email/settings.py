@@ -1,4 +1,4 @@
-"""Explicit, fail-closed IMAP configuration; no provider discovery or OAuth."""
+"""Explicit IMAP account/folder configuration; no provider discovery or OAuth."""
 
 from __future__ import annotations
 
@@ -35,9 +35,6 @@ class Settings:
     host: str
     username: str
     password: str
-    recipient: str
-    delivery_header: str
-    trusted: bool
     archive: Path
     sanitized: Path
     redactions: Path
@@ -56,9 +53,6 @@ class Settings:
             host="" if offline else required_env("EMAIL_IMAP_HOST"),
             username="" if offline else required_env("EMAIL_IMAP_USERNAME"),
             password="" if offline else os.environ.get("EMAIL_IMAP_PASSWORD", ""),
-            recipient="" if offline else address(required_env("EMAIL_RECIPIENT")),
-            delivery_header=os.getenv("EMAIL_DELIVERY_HEADER", ""),
-            trusted=os.getenv("EMAIL_DELIVERY_HEADER_TRUSTED", "0") == "1",
             archive=Path(os.getenv("EMAIL_ARCHIVE_ROOT", "/data/incoming/email")),
             sanitized=Path(os.getenv("EMAIL_SANITIZED_ROOT", "/data/sanitized/email")),
             redactions=Path(required_env("REDACTIONS_FILE")),
@@ -75,13 +69,8 @@ class Settings:
                 if item.strip()
             ),
         )
-        if not offline and (
-            not result.password
-            or not result.trusted
-            or not re.fullmatch(r"[A-Za-z0-9-]+", result.delivery_header)
-            or result.delivery_header.lower() in {"to", "cc", "bcc", "from", "received"}
-        ):
-            raise ValueError("password and explicitly trusted delivery header are required")
+        if not offline and not result.password:
+            raise ValueError("EMAIL_IMAP_PASSWORD is required")
         roots = (result.archive.resolve(), result.sanitized.resolve())
         if roots[0].is_relative_to(roots[1]) or roots[1].is_relative_to(roots[0]):
             raise ValueError("original archive and published sources must be separate")
