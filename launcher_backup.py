@@ -349,7 +349,9 @@ class Instance:
                         check_file_metadata(entry)
                         if entry.is_symlink():
                             relative = (
-                                str(entry.relative_to(self.data)) if path == self.data else ""
+                                str(entry.relative_to(self.data))
+                                if within(entry, self.data)
+                                else ""
                             )
                             if (
                                 relative in CONTAINER_LINKS

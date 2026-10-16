@@ -40,6 +40,7 @@ def main():
         (project / ".env").write_text(
             f"COMPOSE_PROJECT_NAME={name}\nKARPATHY_WIKI_VERSION=1.0.0\n"
             "OPENCODE_PASSWORD=synthetic-test-only\nDATA_ROOT=./data\nTOKEN_FILE=./secret\n"
+            'KARPATHY_WIKI_BACKUP_EXTRA_PATHS=["./data/opencode"]\n'
         )
         for file in ("karpathy-wiki.sh", "launcher_backup.py"):
             shutil.copy(ROOT / file, project / file)

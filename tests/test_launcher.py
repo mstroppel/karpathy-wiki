@@ -1119,6 +1119,28 @@ class LauncherTests(unittest.TestCase):
         self.assertIn("external symlink", result.stderr)
         self.assertFalse(any("save" in c or "pull" in c for c in self.docker_calls()))
 
+    def test_container_links_allow_overlapping_extra_roots_during_update_and_rescue(self):
+        self.write_env(
+            "KARPATHY_WIKI_VERSION=0.0.1\n"
+            'KARPATHY_WIKI_BACKUP_EXTRA_PATHS=["./data/opencode",'
+            '"./data/opencode/config/plugins"]\n'
+        )
+        links = self.container_links()
+        result = self.run_launcher("update", "1.2.3")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        identifier = self.snapshot_metadata()[0]["id"]
+        result = self.run_launcher("rollback", identifier, input=f"rollback {identifier}\n")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        metadata = self.snapshot_metadata()
+        self.assertEqual(len(metadata), 2)
+        self.assertEqual(sum(m["kind"] == "rescue" for m in metadata), 1)
+        for item in metadata:
+            self.assertIn(str(self.project / "data"), item["paths"])
+            self.assertNotIn(str(self.project / "data/opencode"), item["paths"])
+            self.assertNotIn(str(self.project / "data/opencode/config/plugins"), item["paths"])
+        for relative, target in links.items():
+            self.assertEqual(os.readlink(self.project / "data" / relative), target)
+
     def test_container_link_target_is_revalidated_after_stop(self):
         self.write_env("KARPATHY_WIKI_VERSION=0.0.1\n")
         self.container_links()
