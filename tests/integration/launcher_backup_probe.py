@@ -29,6 +29,13 @@ def main():
         data.mkdir()
         (data / ".session").write_text("synthetic-old-session")
         (data / ".session").chmod(0o640)
+        links = {"opencode/config/AGENTS.md": "/etc/opencode/routing.md"}
+        for plugin in (ROOT / "config" / "plugins").glob("*.js"):
+            links[f"opencode/config/plugins/{plugin.name}"] = f"/etc/opencode/plugins/{plugin.name}"
+        for relative, target in links.items():
+            path = data / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.symlink_to(target)
         (project / "secret").write_text("synthetic-old-secret")
         (project / ".env").write_text(
             f"COMPOSE_PROJECT_NAME={name}\nKARPATHY_WIKI_VERSION=1.0.0\n"
@@ -100,6 +107,8 @@ def main():
             assert (data / ".session").stat().st_mode & 0o777 == 0o640
             assert not (data / "new-only").exists()
             assert (project / "secret").read_text() == "synthetic-old-secret"
+            for relative, target in links.items():
+                assert os.readlink(data / relative) == target
             assert "KARPATHY_WIKI_VERSION=1.0.0" in (project / ".env").read_text()
             for file in ("karpathy-wiki.sh", "launcher_backup.py"):
                 assert (project / file).read_bytes() == (ROOT / file).read_bytes()
@@ -139,7 +148,20 @@ def main():
             failed_id = next(m["id"] for m in metadata if m["status"] == "failed")
             run("sh", str(launcher), "rollback", failed_id, input=f"rollback {failed_id}\n")
             assert "KARPATHY_WIKI_VERSION=1.0.0" in (project / ".env").read_text()
-            print("launcher-backup: real Compose delayed rollback verified")
+            before = {p.name for p in (project / "backups").iterdir()}
+            run("sh", str(launcher), "update", "2.0.0", "--no-backup")
+            assert {p.name for p in (project / "backups").iterdir()} == before
+            assert "KARPATHY_WIKI_VERSION=2.0.0" in (project / ".env").read_text()
+            assert (data / ".session").read_text() == "synthetic-old-session"
+            failed = subprocess.run(
+                ["sh", str(launcher), "update", "--no-backup", "4.0.0"],
+                capture_output=True,
+                text=True,
+            )
+            assert failed.returncode != 0 and "No update backup was created" in failed.stderr
+            assert "./karpathy-wiki.sh rollback" not in failed.stderr
+            assert {p.name for p in (project / "backups").iterdir()} == before
+            print("launcher-backup: container links, delayed rollback and no-backup verified")
         finally:
             run(
                 "docker",

@@ -364,6 +364,98 @@ class LauncherTests(unittest.TestCase):
         self.assertIn(".env", result.stderr)
         self.assertEqual(self.docker_calls(), [])
 
+    def test_no_backup_update_accepts_option_order_and_release_channels(self):
+        for args, target in (
+            (("--no-backup", "1.2.3"), "1.2.3"),
+            (("1.2.3", "--no-backup"), "1.2.3"),
+            (("--no-backup",), "2.0.0-pre.1"),
+        ):
+            with self.subTest(args=args):
+                self.write_env("KARPATHY_WIKI_VERSION=0.0.1\nKARPATHY_WIKI_CHANNEL=pre\n")
+                result = self.run_launcher("update", *args, env={"STUB_CONTAINERS": "1"})
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("WARNING: --no-backup", result.stderr)
+                self.assertIn("no new rollback point", result.stderr)
+                self.assertIn(
+                    f"KARPATHY_WIKI_VERSION={target}", (self.project / ".env").read_text()
+                )
+                self.assertEqual(
+                    json.loads((self.project / ".launcher-pair.json").read_text())["version"],
+                    target,
+                )
+                self.assertFalse((self.project / "backups").exists())
+                calls = self.docker_calls()
+                self.assertFalse(any(c[:1] == ["image"] for c in calls))
+                stop = next(i for i, c in enumerate(calls) if c[0] == "stop")
+                pull = next(i for i, c in enumerate(calls) if "pull" in c)
+                self.assertLess(stop, pull)
+                self.assertTrue(any("--wait" in c for c in calls))
+                self.docker_log.write_text("")
+
+    def test_no_backup_does_not_access_storage_or_archive_data(self):
+        self.write_env("KARPATHY_WIKI_VERSION=0.0.1\n")
+        store = self.project / "not-a-directory"
+        store.write_text("preserve existing storage")
+        os.mkfifo(self.project / "data" / "not-archivable")
+        result = self.run_launcher(
+            "update",
+            "--no-backup",
+            "1.2.3",
+            env={"KARPATHY_WIKI_BACKUP_DIR": str(store), "STUB_FAIL": "save"},
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(store.read_text(), "preserve existing storage")
+        self.assertEqual(self.snapshot_metadata(), [])
+
+    def test_no_backup_failure_has_no_fictitious_snapshot_or_rollback_command(self):
+        for failure in ("pull", "up"):
+            with self.subTest(failure=failure):
+                self.write_env("KARPATHY_WIKI_VERSION=0.0.1\n")
+                result = self.run_launcher(
+                    "update", "1.2.3", "--no-backup", env={"STUB_FAIL": failure}
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("No update backup was created", result.stderr)
+                self.assertNotIn("./karpathy-wiki.sh rollback", result.stderr)
+                self.assertNotIn("synthetic-private-secret", result.stderr)
+                self.assertFalse((self.project / "backups").exists())
+                self.assertIn(
+                    "KARPATHY_WIKI_VERSION=" + ("0.0.1" if failure == "pull" else "1.2.3"),
+                    (self.project / ".env").read_text(),
+                )
+
+    def test_update_options_are_validated_before_network_or_docker(self):
+        self.write_env("KARPATHY_WIKI_VERSION=0.0.1\n")
+        for args in (
+            ("--skip-backup",),
+            ("--no-backup", "--no-backup"),
+            ("1.2.3", "2.0.0"),
+            ("--no-backup", "../bad"),
+            ("--no-backup=false",),
+        ):
+            result = self.run_launcher("update", *args)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(self.curl_urls(), [])
+            self.assertEqual(self.docker_calls(), [])
+
+    def test_no_backup_preserves_acceptance_lock_and_staging_guards(self):
+        self.write_env("KARPATHY_WIKI_VERSION=0.0.1\n")
+        (self.project / ".launcher-pair.json").unlink()
+        result = self.run_launcher("update", "1.2.3", "--no-backup")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("launcher-accept", result.stderr)
+        self.assertEqual(self.run_launcher("launcher-accept", "0.0.1").returncode, 0)
+        root = self.project / ".launcher-stage" / "data"
+        root.mkdir(parents=True)
+        sentinel = root / "keep"
+        sentinel.write_text("preserve data")
+        self.write_env(f"KARPATHY_WIKI_VERSION=0.0.1\nDATA_ROOT={root}\n")
+        result = self.run_launcher("update", "1.2.3", "--no-backup")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("staging overlaps", result.stderr)
+        self.assertEqual(sentinel.read_text(), "preserve data")
+        self.assertFalse(any("pull" in c or "up" in c for c in self.docker_calls()))
+
     def test_invalid_version_is_rejected_before_network(self):
         self.write_env("KARPATHY_WIKI_VERSION=../evil\n")
 
@@ -968,6 +1060,82 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual((self.project / ".env").read_text(), original)
         self.assertEqual(external.read_text(), "synthetic external data")
 
+    def container_links(self):
+        links = {"opencode/config/AGENTS.md": "/etc/opencode/routing.md"}
+        for plugin in (ROOT / "config" / "plugins").glob("*.js"):
+            links[f"opencode/config/plugins/{plugin.name}"] = f"/etc/opencode/plugins/{plugin.name}"
+        for relative, target in links.items():
+            path = self.project / "data" / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.symlink_to(target)
+        return links
+
+    def test_container_links_survive_repeated_updates_and_rollback_rescue(self):
+        import tarfile
+
+        self.write_env("KARPATHY_WIKI_VERSION=0.0.1\n")
+        links = self.container_links()
+        generation = self.project / "data" / "sources" / "webdav" / "generations" / "test"
+        generation.mkdir(parents=True)
+        (generation / "source.md").write_text("synthetic source")
+        (generation.parent.parent / "current").symlink_to("generations/test")
+        for version in ("1.2.3", "2.0.0"):
+            result = self.run_launcher("update", version)
+            self.assertEqual(result.returncode, 0, result.stderr)
+        identifier = self.snapshot_metadata()[0]["id"]
+        (self.project / "data" / "new-only").write_text("new state")
+        result = self.run_launcher("rollback", identifier, input=f"rollback {identifier}\n")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.project / "data" / "new-only").exists())
+        for metadata in self.snapshot_metadata():
+            with tarfile.open(
+                self.project / "backups" / metadata["id"] / "snapshot.tar"
+            ) as archive:
+                for relative, target in links.items():
+                    path = self.project / "data" / relative
+                    member = archive.getmember(str(path).lstrip("/"))
+                    self.assertTrue(member.issym())
+                    self.assertEqual(member.linkname, target)
+                    self.assertEqual(os.readlink(path), target)
+                self.assertFalse(any(m.name.startswith("etc/opencode/") for m in archive))
+        self.assertEqual(os.readlink(generation.parent.parent / "current"), "generations/test")
+
+    def test_container_link_exception_requires_exact_location_and_target(self):
+        self.write_env("KARPATHY_WIKI_VERSION=0.0.1\n")
+        links = self.container_links()
+        for relative, target in links.items():
+            path = self.project / "data" / relative
+            path.unlink()
+            path.symlink_to(target + ".unexpected")
+            result = self.run_launcher("update", "1.2.3")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("external symlink", result.stderr)
+            path.unlink()
+            path.symlink_to(target)
+        other = self.project / "data" / "elsewhere"
+        other.symlink_to("/etc/opencode/routing.md")
+        result = self.run_launcher("update", "1.2.3")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("external symlink", result.stderr)
+        self.assertFalse(any("save" in c or "pull" in c for c in self.docker_calls()))
+
+    def test_container_link_target_is_revalidated_after_stop(self):
+        self.write_env("KARPATHY_WIKI_VERSION=0.0.1\n")
+        self.container_links()
+        result = self.run_launcher(
+            "update",
+            "1.2.3",
+            env={
+                "STUB_CONTAINERS": "1",
+                "STUB_SWAP_LINK": str(self.project / "data" / "opencode/config/AGENTS.md"),
+                "STUB_LINK_TARGET": "/etc/opencode/unexpected.md",
+            },
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("external symlink", result.stderr)
+        self.assertTrue(any(c[0] == "stop" for c in self.docker_calls()))
+        self.assertFalse(any("save" in c or "pull" in c for c in self.docker_calls()))
+
     def test_launcher_cannot_start_writers_while_maintenance_lock_is_held(self):
         import fcntl
 
@@ -994,6 +1162,7 @@ class LauncherTests(unittest.TestCase):
                 ("version",),
                 ("up", "-d"),
                 ("update", "1.2.3"),
+                ("update", "1.2.3", "--no-backup"),
                 ("backup", "list"),
                 ("rollback", "invalid"),
             ):
