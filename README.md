@@ -111,6 +111,8 @@ paused, and zero-source runs use the same contract; report-creation failures are
 explicitly flagged separately from ingestion status. See
 [ingestion reports](docs/ingest-reports.md) for the budget model, resume
 behavior, and validation.
+Drafts use shallow baseline clones. For storage inspection, confirmed cleanup
+and completed-draft retention, see [journal storage](docs/ingest-journal-storage.md).
 Ingestion checks local Git changes before planning and validates source metadata
 and committed contents before recording success. Blocked runs stop on the first
 error and offer confirmed repair or a scoped rollback of the failed source's
@@ -254,6 +256,7 @@ node --test tests/test_chat_bootstrap.mjs
 node --test tests/test_trusted_publisher.mjs
 node --test tests/test_manual_ingest.mjs
 node --test tests/test_trusted_authoring.mjs
+node --test tests/test_journal_storage.mjs
 docker build --target opencode -t kw-opencode:integration -f opencode/Dockerfile .
 docker build --target openchamber -t kw-openchamber:integration -f opencode/Dockerfile .
 sh tests/integration/chat.sh  # authentication, discovery, native SSE and restart persistence

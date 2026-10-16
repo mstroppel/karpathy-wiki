@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Ingest proposals now use isolated shallow baseline clones instead of copying
+  the full wiki history per source. Operator-only journal maintenance defaults
+  to dry run; confirmed compaction with configurable completed-draft retention
+  preserves transaction proof, reports, audit records and live recovery backups.
+  Unresolved preparations are never pruned; maintenance is not auto-scheduled.
+
 - Trusted manual ingest and authoring now share a controller execution fence:
   an in-flight worker/publication/report prevents controller boot replacement,
   and an old boot cannot admit or recover writes. Private content-free

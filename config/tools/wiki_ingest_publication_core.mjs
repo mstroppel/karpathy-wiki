@@ -103,7 +103,20 @@ async function prepare(opts) {
   const directory = path.join(opts.root, 'preparations', result.preparation_id)
   await mkdir(directory, { mode: 0o700 })
   const wikiRoot = path.join(directory, 'wiki')
-  await runFile('git', ['clone', '--quiet', '--no-hardlinks', '--', opts.wikiRoot, wikiRoot])
+  // Only the baseline snapshot is needed to build the next commit. Use the
+  // transport even for a local source: local clones ignore --depth and copy
+  // the entire object database. No alternates, shared objects or hardlinks.
+  await runFile('git', [
+    'clone',
+    '--quiet',
+    '--no-local',
+    '--depth=1',
+    '--single-branch',
+    '--no-tags',
+    '--',
+    opts.wikiRoot,
+    wikiRoot,
+  ])
   if ((await git(wikiRoot, ['rev-parse', 'HEAD'])).toString().trim() !== receipt.base_commit)
     throw new Error('HEAD hat sich während prepare geändert')
   for (const setting of ['user.name', 'user.email']) {

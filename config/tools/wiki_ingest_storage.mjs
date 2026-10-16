@@ -8,15 +8,16 @@ const queues = new Map()
 
 // Linux flock is held by a child while its pipe remains open. A killed runtime
 // closes the pipe and releases the kernel lock without deleting its inode.
-export async function withIngestLock(file, action) {
+export async function withIngestLock(file, action, { create = true } = {}) {
   const previous = queues.get(file) ?? Promise.resolve()
   const task = previous.then(async () => {
     const child = spawn(
       'python3',
       [
         '-c',
-        'import fcntl, os, sys\nf = os.open(sys.argv[1], os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)\nfcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)\nprint("locked", flush=True)\nsys.stdin.buffer.read()\n',
+        'import fcntl, os, sys\nf = os.open(sys.argv[1], (os.O_CREAT if sys.argv[2] == "create" else 0) | os.O_RDWR | os.O_NOFOLLOW, 0o600)\nfcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)\nprint("locked", flush=True)\nsys.stdin.buffer.read()\n',
         file,
+        create ? 'create' : 'existing',
       ],
       { stdio: ['pipe', 'pipe', 'pipe'] },
     )
