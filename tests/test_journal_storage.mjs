@@ -92,6 +92,14 @@ async function fixture(t) {
   )
   await fs.writeFile(path.join(opts.stateRoot, 'manual.json'), JSON.stringify(manualIdle))
   await fs.writeFile(path.join(opts.stateRoot, 'authoring.json'), JSON.stringify(authoringIdle))
+  await fs.writeFile(
+    path.join(opts.stateRoot, 'controller-initialized.json'),
+    JSON.stringify({ version: 1 }),
+  )
+  await fs.writeFile(
+    path.join(opts.stateRoot, 'controller.json'),
+    JSON.stringify({ version: 1, boot_id: '1'.repeat(32) }),
+  )
   let sequence = 0
   const prepare = async () => {
     const source = `Synthetic source revision ${sequence++}.\n`
@@ -207,7 +215,14 @@ test('shallow proposals never duplicate full history or share mutable files; liv
 test('direct runtime and operator-only publisher modes do not require absent UI controller state', async (t) => {
   const f = await fixture(t)
   const p = await f.publish()
-  for (const name of ['manual.json', 'authoring.json', 'manual.lock', 'controller-execution.lock'])
+  for (const name of [
+    'manual.json',
+    'authoring.json',
+    'manual.lock',
+    'controller-execution.lock',
+    'controller.json',
+    'controller-initialized.json',
+  ])
     await fs.unlink(path.join(f.opts.stateRoot, name))
   assert.equal((await maintainJournal(f.opts)).candidates, 1)
   // A missing initialized authority is not mistaken for an unused namespace.
@@ -291,6 +306,15 @@ for (const tamper of [
   'untracked',
   'journal-extra',
   'git-extra',
+  'git-info-extra',
+  'git-hooks-extra',
+  'git-objects-info-extra',
+  'git-pack-extra',
+  'git-empty-extra',
+  'git-metadata-edit',
+  'git-ownership-missing',
+  'git-unreachable-object',
+  'draft-backup-extra',
   'symlink',
 ]) {
   test(`tampered ${tamper} evidence cannot authorize deletion`, async (t) => {
@@ -319,18 +343,90 @@ for (const tamper of [
       await fs.writeFile(path.join(p.draft, 'journal/foreign'), 'Foreign journal file.\n')
     if (tamper === 'git-extra')
       await fs.writeFile(path.join(p.draft, 'wiki/.git/foreign'), 'Foreign Git file.\n')
+    const nestedGitFiles = {
+      'git-info-extra': 'info/operator-recovery.txt',
+      'git-hooks-extra': 'hooks/operator-recovery.txt',
+      'git-objects-info-extra': 'objects/info/operator-recovery.txt',
+      'git-pack-extra': 'objects/pack/operator-recovery.txt',
+    }
+    if (nestedGitFiles[tamper])
+      await fs.writeFile(
+        path.join(p.draft, 'wiki/.git', nestedGitFiles[tamper]),
+        'Foreign recovery evidence.\n',
+      )
+    if (tamper === 'git-empty-extra')
+      await fs.mkdir(path.join(p.draft, 'wiki/.git/info/operator-recovery'))
+    if (tamper === 'git-metadata-edit')
+      await fs.appendFile(
+        path.join(p.draft, 'wiki/.git/info/exclude'),
+        '\n# Foreign recovery note.\n',
+      )
+    if (tamper === 'git-ownership-missing') {
+      const receipt = await p.receipt()
+      delete receipt.publication.git_baseline
+      await savePreparation(f.opts.root, receipt)
+    }
+    if (tamper === 'git-unreachable-object')
+      await runFile('git', ['hash-object', '-w', '--', 'config'], {
+        cwd: path.join(p.draft, 'wiki/.git'),
+      })
+    if (tamper === 'draft-backup-extra') {
+      const receipt = await p.receipt()
+      const evidence = await loadPreparation({
+        root: path.join(p.draft, 'journal'),
+        preparationId: receipt.publication.draft_id,
+      })
+      await fs.writeFile(
+        path.join(
+          p.draft,
+          'wiki/.git',
+          path.dirname(evidence.backups[0].path),
+          'operator-recovery',
+        ),
+        'Foreign backup evidence.\n',
+      )
+    }
     if (tamper === 'symlink') await fs.symlink(f.opts.wikiRoot, path.join(p.draft, 'wiki/foreign'))
     if (tamper === 'symlink')
       await assert.rejects(maintainJournal({ ...f.opts, confirmed: true }), /unsafe_symlink/)
     else {
       const before = await snapshot(f.base)
-      const result = await maintainJournal({ ...f.opts, confirmed: true })
-      assert.equal(result.candidates, 0)
-      assert.deepEqual(await snapshot(f.base), before)
+      for (const confirmed of [false, true]) {
+        const result = await maintainJournal({ ...f.opts, confirmed })
+        assert.equal(result.candidates, 0)
+        assert.deepEqual(await snapshot(f.base), before)
+      }
     }
     assert.ok((await fs.stat(p.draft)).isDirectory())
   })
 }
+
+for (const file of ['controller.json', 'controller-initialized.json']) {
+  for (const corruption of ['missing', 'invalid-json', 'invalid-shape']) {
+    test(`maintenance preserves all data with ${corruption} ${file}`, async (t) => {
+      const f = await fixture(t)
+      await f.publish()
+      const target = path.join(f.opts.stateRoot, file)
+      if (corruption === 'missing') await fs.unlink(target)
+      else await fs.writeFile(target, corruption === 'invalid-json' ? '{' : '{"version":2}')
+      const before = await snapshot(f.base)
+      for (const confirmed of [false, true]) {
+        await assert.rejects(maintainJournal({ ...f.opts, confirmed }), /invalid_controller_fence/)
+        assert.deepEqual(await snapshot(f.base), before)
+      }
+    })
+  }
+}
+
+test('maintenance requires controller authority even when both authority files are missing', async (t) => {
+  const f = await fixture(t)
+  await f.publish()
+  for (const file of ['controller.json', 'controller-initialized.json'])
+    await fs.unlink(path.join(f.opts.stateRoot, file))
+  const before = await snapshot(f.base)
+  await assert.rejects(maintainJournal({ ...f.opts, confirmed: true }), /invalid_controller_fence/)
+  assert.deepEqual(await snapshot(f.base), before)
+})
 
 test('interrupted deletion can be retried after partial unlink and refuses newly introduced files', async (t) => {
   const f = await fixture(t)
@@ -349,6 +445,16 @@ test('interrupted deletion can be retried after partial unlink and refuses newly
     syncBuiltinESMExports()
   }
   assert.equal((await p.receipt()).compaction.state, 'deleting')
+  const receipt = await p.receipt()
+  const baseline = receipt.publication.git_baseline
+  delete receipt.publication.git_baseline
+  await savePreparation(f.opts.root, receipt)
+  const interrupted = await snapshot(f.base)
+  const unowned = await maintainJournal({ ...f.opts, confirmed: true })
+  assert.equal(unowned.entries[0].reason, 'draft_git_ownership_missing')
+  assert.deepEqual(await snapshot(f.base), interrupted)
+  receipt.publication.git_baseline = baseline
+  await savePreparation(f.opts.root, receipt)
   const extra = path.join(p.draft, 'foreign')
   await fs.writeFile(extra, 'Foreign data after crash.\n')
   assert.equal((await maintainJournal({ ...f.opts, confirmed: true })).candidates, 0)

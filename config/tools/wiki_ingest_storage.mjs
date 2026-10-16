@@ -1,10 +1,43 @@
 import { spawn } from 'node:child_process'
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { constants } from 'node:fs'
-import { open, rename, rm } from 'node:fs/promises'
+import { lstat, open, readFile, readdir, rename, rm } from 'node:fs/promises'
 import path from 'node:path'
 
 const queues = new Map()
+
+// Hash private trees without following links or accepting shared mutable files.
+// An absent root is empty; a partially unreadable tree is always an error.
+export async function inventoryIngestTree(directory) {
+  const result = { files: {}, directories: [], bytes: 0, allocated_bytes: 0 }
+  async function walk(relative) {
+    const file = path.join(directory, relative)
+    const info = await lstat(file)
+    if (info.isSymbolicLink()) throw new Error('unsafe_symlink')
+    result.allocated_bytes += info.blocks * 512
+    if (info.isDirectory()) {
+      result.directories.push(relative)
+      for (const name of (await readdir(file)).sort()) await walk(path.join(relative, name))
+    } else if (info.isFile() && info.nlink === 1) {
+      result.files[relative] = createHash('sha256')
+        .update(await readFile(file))
+        .digest('hex')
+      result.bytes += info.size
+    } else throw new Error('unsafe_file_type_or_hardlink')
+  }
+  try {
+    await walk('')
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error
+    const root = await lstat(directory).catch((failure) => {
+      if (failure.code === 'ENOENT') return null
+      throw failure
+    })
+    if (root) throw error
+    return { files: {}, directories: [], bytes: 0, allocated_bytes: 0 }
+  }
+  return result
+}
 
 // Linux flock is held by a child while its pipe remains open. A killed runtime
 // closes the pipe and releases the kernel lock without deleting its inode.

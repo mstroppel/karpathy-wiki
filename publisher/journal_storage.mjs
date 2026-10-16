@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { lstat, readFile, readdir, realpath, rmdir, unlink } from 'node:fs/promises'
 import path from 'node:path'
 import { isDeepStrictEqual, promisify } from 'node:util'
+import { inflateSync } from 'node:zlib'
 import {
   assertCleanIngestWiki,
   checkRetainedBackups,
@@ -17,9 +18,13 @@ import {
   renderReport,
   RUN_ID_RE,
 } from '../config/tools/wiki_ingest_journal_core.mjs'
-import { withIngestLock } from '../config/tools/wiki_ingest_storage.mjs'
+import {
+  inventoryIngestTree as inventory,
+  withIngestLock,
+} from '../config/tools/wiki_ingest_storage.mjs'
 import { validate as validateManual } from './manual_ingest.mjs'
 import { validate as validateAuthoring } from './authoring.mjs'
+import { loadControllerFence } from './controller_fence.mjs'
 
 const runFile = promisify(execFile)
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex')
@@ -131,36 +136,56 @@ export async function verifyAcceptedPublication({ root, wikiRoot, receipt }) {
   return { commit: pub.commit, verified: true, run_completed_at: run.updated_at }
 }
 
-// Never follow symlinks or delete multiply-linked files. Logical byte counts
-// measure archive inputs; allocated_bytes also includes directory blocks.
-async function inventory(directory) {
-  const result = { files: {}, directories: [], bytes: 0, allocated_bytes: 0 }
-  async function walk(relative) {
-    const file = path.join(directory, relative)
-    const info = await lstat(file)
-    if (info.isSymbolicLink()) refuse('unsafe_symlink')
-    result.allocated_bytes += info.blocks * 512
-    if (info.isDirectory()) {
-      result.directories.push(relative)
-      for (const name of (await readdir(file)).sort()) await walk(path.join(relative, name))
-    } else if (info.isFile() && info.nlink === 1) {
-      result.files[relative] = digest(await readFile(file))
-      result.bytes += info.size
-    } else refuse('unsafe_file_type_or_hardlink')
+async function verifyGitOwnership(wiki, receipt, evidence, tree) {
+  const baseline = receipt.publication.git_baseline
+  if (!baseline?.files || !Array.isArray(baseline.directories))
+    refuse('draft_git_ownership_missing')
+  const expected = { ...baseline.files }
+  const directories = new Set(baseline.directories)
+  for (const backup of evidence.backups) {
+    expected[backup.path] = backup.hash
+    for (let parent = path.dirname(backup.path); parent !== '.'; parent = path.dirname(parent))
+      directories.add(parent)
   }
-  try {
-    await walk('')
-  } catch (error) {
-    if (error.code !== 'ENOENT') throw error
-    // Only a wholly absent root is an empty inventory, not a partially unreadable tree.
-    const root = await lstat(directory).catch((failure) => {
-      if (failure.code === 'ENOENT') return null
-      throw failure
-    })
-    if (root) throw error
-    return { files: {}, directories: [], bytes: 0, allocated_bytes: 0 }
+  // Only new objects reachable from the verified accepted commit are owned.
+  // Unknown/dangling objects (including earlier draft revisions) are retained,
+  // not adopted just because they look like Git object filenames.
+  const addedObjects = []
+  const prefix = 'wiki/.git/'
+  for (const [file, hash] of Object.entries(tree.files)) {
+    if (!file.startsWith(prefix)) continue
+    const relative = file.slice(prefix.length)
+    // The index is intentionally changed by staging; verifyDraft separately
+    // checks its complete contents and flags against the accepted commit.
+    if (relative === 'index') continue
+    if (Object.hasOwn(expected, relative)) {
+      if (hash !== expected[relative]) refuse('foreign_git_metadata')
+      continue
+    }
+    const object = /^objects\/([0-9a-f]{2})\/([0-9a-f]{38})$/.exec(relative)
+    if (!object) refuse('unknown_draft_entries')
+    addedObjects.push({ relative, oid: object[1] + object[2] })
+    directories.add(`objects/${object[1]}`)
   }
-  return result
+  for (const directory of tree.directories) {
+    if (directory.startsWith(prefix) && !directories.has(directory.slice(prefix.length)))
+      refuse('unknown_draft_entries')
+  }
+  for (const file of Object.keys(expected)) {
+    if (!Object.hasOwn(tree.files, prefix + file)) refuse('foreign_git_metadata')
+  }
+  // Check immutable metadata (especially config) before consulting Git.
+  const reachable = new Set(
+    (await git(wiki, 'rev-list', '--objects', '--no-object-names', receipt.publication.commit))
+      .toString()
+      .trim()
+      .split('\n'),
+  )
+  for (const { relative, oid } of addedObjects) {
+    if (!reachable.has(oid)) refuse('unknown_draft_entries')
+    const bytes = inflateSync(await readFile(path.join(wiki, '.git', relative)))
+    if (createHash('sha1').update(bytes).digest('hex') !== oid) refuse('foreign_git_metadata')
+  }
 }
 
 async function verifyDraft(opts, receipt, tree) {
@@ -192,32 +217,7 @@ async function verifyDraft(opts, receipt, tree) {
     evidence.applied !== receipt.applied
   )
     refuse('draft_evidence_mismatch')
-  const gitEntries = new Set([
-    'HEAD',
-    'config',
-    'description',
-    'hooks',
-    'info',
-    'objects',
-    'packed-refs',
-    'refs',
-    'logs',
-    'shallow',
-    'index',
-    'branches',
-    ...evidence.backups.map((backup) => backup.path.split('/')[0]),
-  ])
-  if ((await readdir(path.join(wiki, '.git'))).some((name) => !gitEntries.has(name)))
-    refuse('unknown_draft_entries')
-  if (
-    (
-      await readdir(path.join(wiki, '.git', 'branches')).catch((error) => {
-        if (error.code === 'ENOENT') return []
-        throw error
-      })
-    ).length
-  )
-    refuse('unknown_draft_entries')
+  await verifyGitOwnership(wiki, receipt, evidence, tree)
   await checkRetainedBackups(wiki, evidence)
   for (const args of [
     ['diff', '--name-only', '-z', pub.commit],
@@ -284,6 +284,7 @@ async function compact(opts, receipt, tree) {
     allocated_bytes: marker.allocated_bytes,
     draft_evidence: marker.draft_evidence,
   }
+  delete receipt.publication.git_baseline
   await savePreparation(opts.root, receipt)
 }
 
@@ -323,6 +324,7 @@ async function inspectAndCompact(opts) {
     )
   )
     refuse('controller_lock_missing')
+  if (controllers) await loadControllerFence(opts.stateRoot, { required: true })
   for (const [file, validate] of [
     ['manual.json', validateManual],
     ['authoring.json', validateAuthoring],
@@ -411,8 +413,10 @@ async function inspectAndCompact(opts) {
             entry.reason = 'already_compacted'
             return
           }
-          if (receipt.compaction) checkRemaining(tree, receipt.compaction)
-          else await verifyDraft(opts, receipt, tree)
+          if (receipt.compaction) {
+            if (!receipt.publication.git_baseline) refuse('draft_git_ownership_missing')
+            checkRemaining(tree, receipt.compaction)
+          } else await verifyDraft(opts, receipt, tree)
           candidates.push({ receipt, tree, entry, runLock, completedAt: accepted.run_completed_at })
           entry.reason = 'completed_verified'
         },

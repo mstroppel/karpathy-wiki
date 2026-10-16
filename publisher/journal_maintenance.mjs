@@ -27,6 +27,7 @@ try {
     'controller_lock_missing',
     'unreadable_publisher_state',
     'invalid_controller_state',
+    'invalid_controller_fence',
     'invalid_authoring_state',
     'wiki_index_lock_requires_operator',
   ]

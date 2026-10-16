@@ -65,10 +65,15 @@ Only preparations satisfying **all** of these checks are candidates:
    complete changed-page set and every validated page hash match the receipt.
 4. Live retained backups and nested draft evidence are intact. The draft has no
    foreign tracked, untracked or ignored edits, changed refs, hidden index flags,
-   lock files, symlinks or multiply-linked files.
+   lock files, symlinks or multiply-linked files. Nested Git metadata must match
+   the ownership hashes recorded when the clone was created. Only exact recorded
+   backup files and integrity-checked objects reachable from the accepted commit
+   may be added; unknown files or directories anywhere below `.git` retain the draft.
 5. Exclusive existing controller/admission, trusted-writer and wiki-publication
    locks for the deployed writer mode are held, and existing publisher/controller
-   state is readable and idle. Report writers use the same per-run lock.
+   state is readable and idle. The controller initialization marker and boot
+   authority must both validate, without creating or rewriting either file.
+   Report writers use the same per-run lock.
 
 Active, interrupted, blocked, failed, rolled-back, incomplete and orphaned work
 is retained, regardless of age. Missing or inconsistent proof never becomes
@@ -96,7 +101,9 @@ with periodic cleanup, add the work completed between maintenance windows.
 
 This is not a fixed bound on the whole data directory. Live wiki history,
 receipts, reports/audit records, publisher replay data, unresolved attempts and
-live `.git/ingest-backup-*` files still grow. Backups can include displaced inodes
+live `.git/ingest-backup-*` files still grow. Drafts without creation-time Git
+ownership evidence, with changed metadata or with unreachable extra objects also
+remain untouched; maintenance never manufactures ownership for them. Backups can include displaced inodes
 that another process still has open: cleanup **never removes live publication
 backups or index candidates**. Inspect them separately with writers stopped;
 never delete them merely because a commit is old. Keep verified private backups
@@ -110,6 +117,8 @@ covering these categories; do not exclude the journal to accelerate archiving.
 | `writer_lock_unavailable`, `wiki_index_lock_requires_operator` | A writer or unresolved Git operation prevents cleanup. Do not remove lock files to force progress. |
 | `unresolved_preparation`, `run_not_successfully_closed` | Inspect the private transaction/run and complete explicit recovery; age is irrelevant. |
 | `live_backup_evidence_changed` | Preserve the backup and investigate missing data or late writes through old descriptors. |
+| `invalid_controller_fence` | Restore/repair the controller marker and boot authority with the writer stopped; maintenance never initializes authority. |
+| `draft_git_ownership_missing`, `foreign_git_metadata` | Keep the draft and inspect its metadata privately; no deletion intent is created without creation-time ownership proof. |
 | `commit_*`, `journal_evidence_mismatch`, `report_evidence_mismatch` | Compare the private receipt, journal, report and verified backup. Do not rerun ingestion just to manufacture proof. |
 | `foreign_draft_*`, `hidden_draft_changes`, `unknown_draft_entries` | Preserve and inspect foreign work; it is not adopted or overwritten. |
 | `cleanup_manifest_mismatch` | Preserve changed/new files after interrupted cleanup; restore intact evidence before retrying. |
@@ -131,11 +140,11 @@ on IDs and paths):
 
 | Measure | Before compaction | After compaction |
 | --- | ---: | ---: |
-| Journal allocated disk | 1,912,832 B | 159,744 B |
-| Journal gzip backup | 92,599 B / 11.0 ms | 6,426 B / 2.9 ms |
-| Proposal Git / page payload | 166,054 / 4,878 B | 0 / 0 B |
+| Journal allocated disk | 1,937,408 B | 159,744 B |
+| Journal gzip backup | 95,888 B / 14.0 ms | 6,409 B / 2.9 ms |
+| Proposal Git / page payload | 166,043 / 4,878 B | 0 / 0 B |
 | Draft evidence payload | 12,352 B | 0 B |
-| Compact-parent receipt payload | 23,468 B | 36,408 B |
+| Compact-parent receipt payload | 40,802 B | 36,408 B |
 | Run/report payload | 14,259 B | 14,259 B |
 | Live recovery-backup payload (not reclaimed) | 3,330 B | 3,330 B |
 

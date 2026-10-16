@@ -29,7 +29,7 @@ import {
 } from './wiki_ingest_journal_core.mjs'
 import { checkRelativePath, scanIngestStatus } from './wiki_ingest_status_core.mjs'
 import { IngestInputError, ingestFailure } from './wiki_ingest_errors.mjs'
-import { withIngestLock } from './wiki_ingest_storage.mjs'
+import { inventoryIngestTree, withIngestLock } from './wiki_ingest_storage.mjs'
 
 const runFile = promisify(execFile)
 const SHA = (bytes) => createHash('sha256').update(bytes).digest('hex')
@@ -128,12 +128,16 @@ async function prepare(opts) {
   }
   const root = path.join(directory, 'journal')
   const draft = await prepareIngest({ ...opts, root, wikiRoot })
+  // Record ownership at creation, before any proposal edits. Maintenance must
+  // never infer ownership of nested Git metadata from its directory name alone.
+  const { files, directories } = await inventoryIngestTree(path.join(wikiRoot, '.git'))
   // Only create an implicit run once all draft setup has succeeded. If the
   // final receipt write fails, close only this call's run, never a supplied one.
   const runId = opts.runId ?? (await startRun({ root: opts.root, resume: false })).run.run_id
   receipt.publication = {
     single_source: opts.runId === undefined,
     draft_id: draft.preparation_id,
+    git_baseline: { files, directories },
     run_id: runId,
     references: {},
     stage_requests: {},
