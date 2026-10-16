@@ -144,6 +144,22 @@ run_compose() {
 
 cmd_update() {
   require_backup_runtime
+  cu_target=""
+  cu_no_backup=""
+  for cu_arg in "$@"; do
+    case "$cu_arg" in
+      --no-backup)
+        [ -z "$cu_no_backup" ] || die "duplicate --no-backup"
+        cu_no_backup=--no-backup
+        ;;
+      -*) die "unknown update option: $cu_arg" ;;
+      *)
+        [ -z "$cu_target" ] || die "usage: karpathy-wiki.sh update [version] [--no-backup]"
+        validate_version "$cu_arg" || die "invalid version: $cu_arg"
+        cu_target=$cu_arg
+        ;;
+    esac
+  done
   [ -f "$env_file" ] || die "missing .env"
   cu_current=$(resolve_version)
   compose_file_for "$cu_current"
@@ -154,9 +170,8 @@ cmd_update() {
     pre) cu_channel=pre ;;
     *) die "unsupported KARPATHY_WIKI_CHANNEL: $cu_requested" ;;
   esac
-  if [ -n "${1:-}" ]; then
-    validate_version "$1" || die "invalid version: $1"
-    cu_target=$1
+  if [ -n "$cu_target" ]; then
+    : # Explicit version already validated above.
   elif [ "$cu_channel" = pre ]; then
     cu_target=$(resolve_pre_version) ||
       die "cannot resolve the latest pre-release"
@@ -165,8 +180,12 @@ cmd_update() {
   fi
   # Download before touching .env so a failed update leaves it unchanged.
   compose_file_for "$cu_target"
+  set -- "$cu_current_compose" "$cu_current" "$cu_target" "$compose_file"
+  if [ -n "$cu_no_backup" ]; then
+    set -- "$@" "$cu_no_backup"
+  fi
   exec python3 "$script_dir/launcher_backup.py" update "$project_dir" \
-    "$cu_current_compose" "$cu_current" "$cu_target" "$compose_file"
+    "$@"
 }
 
 require_backup_runtime() {
@@ -185,10 +204,13 @@ next to this script is applied automatically.
 
 Usage:
   karpathy-wiki.sh <compose args...>   Forward to docker compose (up -d, ps, logs, ...)
-  karpathy-wiki.sh update [version]    Pin version (default: latest release, or
+  karpathy-wiki.sh update [version] [--no-backup]
+                                      Pin version (default: latest release, or
                                        latest pre-release when the pre channel is
-                                       set); mandatory whole-instance backup,
+                                       set); whole-instance backup by default,
                                        pull images, restart and verify health
+                                      --no-backup explicitly skips the snapshot;
+                                       no new rollback point, manual recovery risk
   karpathy-wiki.sh backup list         List local update and rescue snapshots
   karpathy-wiki.sh launcher-accept <version>  Explicitly trust the installed pair
   karpathy-wiki.sh rollback <id>       Confirm full data/config/software rollback;
@@ -236,8 +258,7 @@ case "$command" in
     ;;
   update)
     shift
-    [ $# -le 1 ] || die "usage: karpathy-wiki.sh update [version]"
-    cmd_update "${1:-}"
+    cmd_update "$@"
     ;;
   launcher-accept)
     shift

@@ -196,13 +196,18 @@ To pin a release:
 ./karpathy-wiki.sh update 0.2.0
 ```
 
-Launcher updates always stop the instance for a verified full backup of
+By default, launcher updates stop the instance for a verified full backup of
 `DATA_ROOT`, configuration, external file secrets, and installed images **before**
 changing the version. Backup failure blocks the update; update failure never
 automatically resets data. Local Compose changes belong in `compose.override.yaml`.
 Use private local storage outside `DATA_ROOT` (`KARPATHY_WIKI_BACKUP_DIR`, default
 `./backups`), preferably on an encrypted disk. Backups contain plaintext secrets.
 Direct Compose calls bypass this guarantee. Review release notes before upgrading.
+
+To explicitly skip the update snapshot, use `./karpathy-wiki.sh update [version]
+--no-backup` (omit `[version]` to use the configured release channel). **This creates
+no new rollback point.** Writers still stop and startup health is checked; failures
+require manual recovery or an existing backup. Rollback rescue backups cannot be skipped.
 
 ```bash
 ./karpathy-wiki.sh backup list

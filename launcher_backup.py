@@ -19,6 +19,14 @@ from pathlib import Path
 LAUNCHER_PROTOCOL = 1
 PAIR = ("karpathy-wiki.sh", "launcher_backup.py")
 LAUNCHER_DIR = Path(__file__).resolve().parent
+# Exact links installed by opencode/entrypoint.sh; archive links, never host targets.
+CONTAINER_LINKS = {
+    "opencode/config/AGENTS.md": "/etc/opencode/routing.md",
+    **{
+        f"opencode/config/plugins/{name}.js": f"/etc/opencode/plugins/{name}.js"
+        for name in ("wiki-ingest-journal", "wiki-ingest-status", "wiki-ingest-transaction")
+    },
+}
 
 
 class BackupError(Exception):
@@ -96,9 +104,14 @@ def validate_pair(directory):
         raise BackupError("target helper does not support launcher protocol 1")
 
 
-def reset_pair_stage(instance, destinations=()):
+def reset_pair_stage(instance, destinations=(), *, inspect_contents=True):
     stage = instance.path(str(LAUNCHER_DIR / ".launcher-stage"))
-    for path in (*instance.paths(), instance.data, instance.store, *destinations):
+    for path in (
+        *instance.paths(inspect_contents=inspect_contents),
+        instance.data,
+        instance.store,
+        *destinations,
+    ):
         if within(path, stage) or within(stage, path):
             raise BackupError("launcher staging overlaps data, backup storage or a snapshot root")
     if stage.exists():
@@ -107,11 +120,11 @@ def reset_pair_stage(instance, destinations=()):
     return stage
 
 
-def stage_pair(instance, target):
+def stage_pair(instance, target, *, backup=True):
     if not re.fullmatch(r"[0-9][0-9A-Za-z.-]*", target):
         raise BackupError("self-update requires a release version, not a PR preview")
     accepted_pair(LAUNCHER_DIR)
-    stage = reset_pair_stage(instance)
+    stage = reset_pair_stage(instance, inspect_contents=backup)
     for name in PAIR:
         run(
             [
@@ -255,8 +268,8 @@ class Instance:
             "up", "-d", "--remove-orphans", "--pull", "never", "--wait", "--wait-timeout", "600"
         )
 
-    def paths(self):
-        if b"GNU tar" not in run(["tar", "--version"]):
+    def paths(self, *, inspect_contents=True):
+        if inspect_contents and b"GNU tar" not in run(["tar", "--version"]):
             raise BackupError("GNU tar with ACL/xattr support is required")
         if not self.data.is_dir() or self.data == self.project or within(self.project, self.data):
             raise BackupError("DATA_ROOT must be an existing dedicated data directory")
@@ -324,6 +337,8 @@ class Instance:
                 raise BackupError(
                     "snapshot roots require writable parents and cannot be mountpoints"
                 )
+            if not inspect_contents:
+                continue
             check_file_metadata(path)
             if path.is_file() and path.stat().st_nlink > 1:
                 raise BackupError("hard-linked configuration roots must be independent copies")
@@ -332,8 +347,19 @@ class Instance:
                     for name in directories + files:
                         entry = Path(root) / name
                         check_file_metadata(entry)
-                        if entry.is_symlink() and not within(entry.resolve(), path):
-                            raise BackupError("snapshot contains an external symlink")
+                        if entry.is_symlink():
+                            relative = (
+                                str(entry.relative_to(self.data))
+                                if within(entry, self.data)
+                                else ""
+                            )
+                            if (
+                                relative in CONTAINER_LINKS
+                                and os.readlink(entry) == CONTAINER_LINKS[relative]
+                            ):
+                                continue
+                            if not within(entry.resolve(), path):
+                                raise BackupError("snapshot contains an external symlink")
         return sorted(p for p in paths if not any(p != q and within(p, q) for q in paths))
 
     def images(self, rescue=False):
@@ -536,18 +562,28 @@ def set_version(project, version, ensure_password=True):
     sync_directory(path.parent)
 
 
-def update(instance, target, target_compose):
+def update(instance, target, target_compose, *, backup=True):
     if instance.project != LAUNCHER_DIR:
         raise BackupError("safe updates require the launcher pair in the project directory")
-    stage = stage_pair(instance, target)
+    if not backup:
+        print(
+            "WARNING: --no-backup: no update snapshot will be created. "
+            "This update has no new rollback point; recovery requires an existing "
+            "backup or manual recovery. No automatic rollback.",
+            file=sys.stderr,
+            flush=True,
+        )
+    stage = stage_pair(instance, target, backup=backup)
     record = prepare_activation(stage, target)
-    metadata = snapshot(instance, "update")
-    directory = instance.store / metadata["id"]
+    metadata = snapshot(instance, "update") if backup else None
     updated = None
-    phase = "configuration preflight"
+    phase = "stopping writers"
     try:
+        if not backup:
+            instance.stop()
+        phase = "configuration preflight"
         updated = Instance(instance.project, target_compose, target)
-        updated.paths()
+        updated.paths(inspect_contents=backup)
         if updated.name != instance.name or updated.data != instance.data:
             raise BackupError("update changed instance identity or DATA_ROOT")
         phase = "image pull"
@@ -557,8 +593,9 @@ def update(instance, target, target_compose):
         set_version(instance.project, target)
         phase = "startup/health verification"
         updated.start()
-        metadata["status"] = "success"
-        write_json(directory / "metadata.json", metadata)
+        if metadata is not None:
+            metadata["status"] = "success"
+            write_json(instance.store / metadata["id"] / "metadata.json", metadata)
         print(f"Update to {target} verified")
     except BaseException:
         try:
@@ -568,16 +605,24 @@ def update(instance, target, target_compose):
                 "Could not stop all containers after update failure; stop writers manually.",
                 file=sys.stderr,
             )
-        metadata["status"] = "failed"
-        write_json(directory / "metadata.json", metadata)
-        print(
-            f"Update failed during {phase}. Backup {metadata['id']} retained. Explicit recovery: "
-            f"./karpathy-wiki.sh rollback {metadata['id']}",
-            file=sys.stderr,
-        )
+        if metadata is not None:
+            metadata["status"] = "failed"
+            write_json(instance.store / metadata["id"] / "metadata.json", metadata)
+            recovery = (
+                f"Backup {metadata['id']} retained. Explicit recovery: "
+                f"./karpathy-wiki.sh rollback {metadata['id']}"
+            )
+        else:
+            recovery = (
+                "No update backup was created (--no-backup). Stack may be stopped; "
+                "inspect configuration, data and launcher state before manual recovery "
+                "or selecting an existing backup."
+            )
+        print(f"Update failed during {phase}. {recovery}", file=sys.stderr)
         raise
     try:
-        prune(instance)
+        if backup:
+            prune(instance)
     except (BackupError, OSError, ValueError, KeyError):
         print(
             "Update succeeded, but backup cleanup failed; inspect private storage.", file=sys.stderr
@@ -751,9 +796,13 @@ def main():
         action, project, compose, version, *args = sys.argv[1:]
         with project_lock(Path(project).resolve()):
             instance = Instance(project, compose, version)
-            secure_store(instance.store)
+            no_backup = action == "update" and args[-1:] == ["--no-backup"]
+            if no_backup:
+                args.pop()
+            else:
+                secure_store(instance.store)
             if action == "update":
-                update(instance, *args)
+                update(instance, *args, backup=not no_backup)
             elif action == "rollback":
                 rollback(instance, *args)
             elif action == "list":
