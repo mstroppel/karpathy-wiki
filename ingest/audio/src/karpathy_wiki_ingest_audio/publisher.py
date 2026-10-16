@@ -52,7 +52,6 @@ from karpathy_wiki_ingest.shared import (
     atomic_write,
     interval_seconds,
     required_env,
-    write_health,
 )
 from karpathy_wiki_ingest.state import (
     JOB_DEAD,
@@ -61,7 +60,7 @@ from karpathy_wiki_ingest.state import (
     StateError,
     StateStore,
 )
-from karpathy_wiki_ingest_audio.connector import audio_inventory, synchronize
+from karpathy_wiki_ingest_audio.connector import audio_inventory, probe, synchronize
 from karpathy_wiki_ingest_audio.identity import load_mapping, resolve_identity, save_mapping
 from karpathy_wiki_ingest_audio.redaction import redact_transcript
 from karpathy_wiki_ingest_audio.render import render_transcript_document
@@ -72,7 +71,9 @@ from karpathy_wiki_ingest_audio.speech_client import (
     ensure_requested,
     load_result,
     stage_recording,
+    wait_for_worker,
 )
+from karpathy_wiki_speech.liveness import Liveness, positive_seconds
 from karpathy_wiki_speech.types import (
     DEFAULT_LIMITS,
     TranscriptionLimits,
@@ -106,6 +107,8 @@ class Settings:
     redactions: Path
     health_path: Path
     state_path: Path | None = None
+    sync_timeout: int = 3600
+    phase_timeout: int = 600
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -116,11 +119,13 @@ class Settings:
             quarantine=Path(os.getenv("AUDIO_QUARANTINE_ROOT", "/data/quarantine/audio")),
             mapping=Path(os.getenv("AUDIO_MAPPING_ROOT", "/data/state/audio-identity")),
             speech_root=Path(os.getenv("SPEECH_ROOT", "/data/speech")),
-            speech_timeout=int(os.getenv("SPEECH_TIMEOUT_SEC", "43200")),
+            speech_timeout=positive_seconds("SPEECH_TIMEOUT_SEC", 43200),
             interval=interval_seconds(os.getenv("AUDIO_SYNC_INTERVAL", "1h")),
             redactions=Path(required_env("REDACTIONS_FILE")),
             health_path=Path(os.getenv("HEALTH_PATH", "/tmp/health.json")),
             state_path=Path(state_path) if state_path else None,
+            sync_timeout=positive_seconds("AUDIO_SYNC_TIMEOUT_SEC", 3600),
+            phase_timeout=positive_seconds("AUDIO_PHASE_TIMEOUT_SEC", 600),
         )
 
 
@@ -270,6 +275,8 @@ def sanitize_into_generation(
     speech_timeout: int,
     *,
     job_id: str | None = None,
+    status: Liveness | None = None,
+    phase_timeout: int = 600,
 ) -> tuple[list[ManifestItem], int, int]:
     """Render, redact, and validate every source into the fresh generation.
 
@@ -282,6 +289,8 @@ def sanitize_into_generation(
     failed = 0
     changed = 0
     for work in build_sources(mapping, inventory, source_ids):
+        if status is not None:
+            status.enter("source", phase_timeout)
         target = staging / TRANSCRIPT_DIRECTORY / f"{work.source_id}.md"
         stage = "metadata_redaction"
         try:
@@ -291,7 +300,11 @@ def sanitize_into_generation(
             safe_title, _ = anonymizer.anonymize(title_of(work.relative))
             safe_origin, _ = anonymizer.anonymize(work.relative)
             stage = "speech"
+            if status is not None:
+                status.enter("speech_wait", speech_timeout)
             result = transcribe_source(work, snapshot, speech_root, options, limits, speech_timeout)
+            if status is not None:
+                status.enter("rendering", phase_timeout)
             stage = "transcript_redaction"
             segments, counts = redact_transcript(result.segments, anonymizer)
             stage = "rendering"
@@ -333,6 +346,8 @@ def sanitize_into_generation(
             stage = "quarantine_cleanup"
             (quarantine / f"{work.source_id}.error").unlink(missing_ok=True)
         except (OSError, RuntimeError, ValueError) as error:
+            if status is not None:
+                status.fail()
             failed += 1
             report_quarantine(quarantine, work.source_id, type(error).__name__, generation_name)
             errors.append(
@@ -499,6 +514,8 @@ def publish_generation(
     commit_guard: Callable[[], None] | None = None,
     *,
     job_id: str | None = None,
+    status: Liveness | None = None,
+    phase_timeout: int = 600,
 ) -> tuple[int, int]:
     """Build a complete generation and publish it in one atomic step."""
     speech_identity = requested_options_identity(options, speech_root)
@@ -531,7 +548,11 @@ def publish_generation(
             quarantine,
             speech_timeout,
             job_id=job_id,
+            status=status,
+            phase_timeout=phase_timeout,
         )
+        if status is not None:
+            status.enter("publication", phase_timeout)
         write_generation_metadata(
             staging,
             generation.name,
@@ -674,6 +695,7 @@ def publish_with_heartbeat(
     store: StateStore,
     lease_id: str,
     lease_seconds: int,
+    status: Liveness | None = None,
 ) -> tuple[int, int]:
     """Run the publication while continuously renewing the job's lease."""
     outcome: dict[str, Any] = {}
@@ -700,6 +722,8 @@ def publish_with_heartbeat(
             store.heartbeat(lease_id, lease_seconds=lease_seconds)
         except (sqlite3.Error, StateError, ValueError):
             renewed.clear()
+            if status is not None:
+                status.fail()
             LOG.exception("Could not renew the audio ingest lease %s", lease_id)
             break
     thread.join()
@@ -735,6 +759,8 @@ def process_cycle(
     *,
     interval: int,
     now: int | None = None,
+    status: Liveness | None = None,
+    phase_timeout: int = 600,
 ) -> tuple[int, int, bool]:
     """Run one ingest cycle as a durable, idempotent job.
 
@@ -744,7 +770,13 @@ def process_cycle(
     and degraded stateless publication when the store is unavailable.
     """
     moment = int(time.time() if now is None else now)
-    inventory = audio_inventory(snapshot, limits)
+    if status is not None:
+        status.enter("inventory", phase_timeout)
+    inventory = audio_inventory(
+        snapshot,
+        limits,
+        progress=(lambda: status.enter("inventory", phase_timeout)) if status is not None else None,
+    )
     speech_identity = requested_options_identity(options, speech_root)
     if store is None:
         changed, failed = publish_generation(
@@ -759,6 +791,8 @@ def process_cycle(
             source_ids,
             limits,
             speech_timeout,
+            status=status,
+            phase_timeout=phase_timeout,
         )
         return changed, failed, False
     key = cycle_idempotency_key(anonymizer.fingerprint, inventory, speech_identity)
@@ -831,11 +865,15 @@ def process_cycle(
                 speech_timeout,
                 commit_guard=guard,
                 job_id=job.id,
+                status=status,
+                phase_timeout=phase_timeout,
             )
 
         publication_started = True
         try:
-            changed, failed = publish_with_heartbeat(run_publish, store, lease.id, lease_seconds)
+            changed, failed = publish_with_heartbeat(
+                run_publish, store, lease.id, lease_seconds, status=status
+            )
         except StateError:
             raise
         except Exception as error:
@@ -858,6 +896,8 @@ def process_cycle(
         # in the same cycle and never outside the lease when the work already
         # ran. The degraded cycle stays visible through the returned flag.
         LOG.exception("Durable ingest state is unavailable; publishing without state")
+        if status is not None:
+            status.fail()
         if publication_started and published is None:
             raise
         if published is not None:
@@ -875,6 +915,8 @@ def process_cycle(
             source_ids,
             limits,
             speech_timeout,
+            status=status,
+            phase_timeout=phase_timeout,
         )
         return changed, failed, True
 
@@ -890,6 +932,38 @@ def install_stop_handler() -> threading.Event:
     return stop_event
 
 
+def restore_current_failure(
+    store: StateStore,
+    environment: Settings,
+    anonymizer: TargetedAnonymizer,
+    options: TranscriptionOptions,
+    limits: TranscriptionLimits,
+    status: Liveness,
+) -> None:
+    """Restore failures for current inputs, never historical or superseded jobs."""
+    metrics = store.metrics()
+    if not metrics["failed_jobs"] and not metrics["jobs"]["leased"]:
+        # Fresh installs need not hash their backlog before becoming ready.
+        return
+    status.enter("inventory", environment.phase_timeout)
+    inventory = audio_inventory(
+        environment.incoming,
+        limits,
+        progress=lambda: status.enter("inventory", environment.phase_timeout),
+    )
+    key = cycle_idempotency_key(
+        anonymizer.fingerprint,
+        inventory,
+        requested_options_identity(options, environment.speech_root),
+    )
+    job = store.job_by_idempotency_key(key)
+    if job is not None and (
+        job.state == JOB_DEAD
+        or (job.state not in (JOB_SUCCEEDED, JOB_SUPERSEDED) and job.last_error is not None)
+    ):
+        status.fail()
+
+
 def run(once: bool) -> None:
     environment = Settings.from_env()
     incoming, sanitized, quarantine, mapping, interval, redactions, health_path = (
@@ -902,6 +976,7 @@ def run(once: bool) -> None:
         environment.health_path,
     )
     stop_event = install_stop_handler()
+    status = Liveness(health_path)
     incoming.mkdir(parents=True, exist_ok=True)
     store: StateStore | None = None
     try:
@@ -916,12 +991,32 @@ def run(once: bool) -> None:
                     LOG.exception("Durable ingest state is unavailable; continuing without state")
                     store_failed = True
             try:
+                status.enter("initializing", environment.phase_timeout)
+                if store_failed:
+                    status.fail()
                 # The redaction configuration is reloaded every cycle so a
                 # changed redactions file regenerates every publication.
                 anonymizer = TargetedAnonymizer.from_file(redactions)
                 options = speech_options()
                 limits = speech_limits()
-                synchronize(incoming, os.environ["WEBDAV_PATH"])
+                wait_for_worker(environment.speech_root)
+                if store is not None:
+                    try:
+                        restore_current_failure(
+                            store, environment, anonymizer, options, limits, status
+                        )
+                    except sqlite3.Error:
+                        status.fail()
+                        store_failed = True
+                        LOG.error("Durable ingest failure status is unavailable")
+                status.enter("initializing", environment.phase_timeout)
+                probe(os.environ["WEBDAV_PATH"])
+                status.enter("synchronizing", environment.sync_timeout, ready=not store_failed)
+                synchronize(
+                    incoming,
+                    os.environ["WEBDAV_PATH"],
+                    timeout_seconds=environment.sync_timeout,
+                )
                 source_ids = load_mapping(mapping)
                 changed, failed, degraded = process_cycle(
                     incoming,
@@ -936,6 +1031,8 @@ def run(once: bool) -> None:
                     environment.speech_timeout,
                     store,
                     interval=interval,
+                    status=status,
+                    phase_timeout=environment.phase_timeout,
                 )
                 LOG.info(
                     "Audio synchronization complete: %s changed, %s quarantined", changed, failed
@@ -943,11 +1040,11 @@ def run(once: bool) -> None:
             except KeyError as error:
                 failed = 1
                 LOG.exception("Audio configuration is incomplete: %s is missing", error)
-            except subprocess.CalledProcessError:
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
                 # rclone already retried internally; keep the daemon alive and
                 # retry on the next synchronization interval.
                 failed = 1
-                LOG.exception("rclone synchronization failed")
+                LOG.error("rclone operation failed: %s", type(error).__name__)
             except (OSError, RuntimeError, ValueError):
                 failed = 1
                 LOG.exception("Audio synchronization failed")
@@ -961,7 +1058,8 @@ def run(once: bool) -> None:
             if degraded or store_failed:
                 # A cycle without durable coordination is a real failure.
                 failed = 1
-            write_health(health_path, failed, metrics)
+            status.metrics = metrics
+            status.finish(failed, interval + 120)
             if once:
                 if failed:
                     raise SystemExit(1)
@@ -969,6 +1067,7 @@ def run(once: bool) -> None:
             if stop_event.wait(interval):
                 break
     finally:
+        status.close()
         if store is not None:
             store.close()
 

@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any
 
 from karpathy_wiki_speech.backends import FakeBackend, FasterWhisperBackend, SpeechBackend
+from karpathy_wiki_speech.liveness import Liveness, positive_seconds, read_healthy
 from karpathy_wiki_speech.mistral import MistralBackend
 from karpathy_wiki_speech.types import (
     DecodedAudio,
@@ -121,6 +122,8 @@ def run_cycle(
     worker_tag: str,
     limits: Any,
     decode: bool = True,
+    status: Liveness | None = None,
+    processing_timeout: int = 43200,
 ) -> tuple[int, int]:
     """Process every queued request; returns ``(completed, failed)``."""
     from karpathy_wiki_speech.cache import requests_dir
@@ -130,11 +133,15 @@ def run_cycle(
     completed = 0
     failed = 0
     for request in sorted(requests_dir(root).glob("*.json")):
+        if status is not None:
+            status.enter("transcribing", processing_timeout, ready=True)
         identifier = request.stem
         if not identifier_be_valid(identifier):
             LOG.warning("Speech request %s has a malformed name; dropping", request.name)
             request.unlink(missing_ok=True)
             failed += 1
+            if status is not None:
+                status.fail()
             continue
         try:
             payload = parse_request(request)
@@ -142,11 +149,15 @@ def run_cycle(
             LOG.warning("Speech request %s is unreadable; dropping", request.name)
             request.unlink(missing_ok=True)
             failed += 1
+            if status is not None:
+                status.fail()
             continue
         if payload is None:
             LOG.warning("Speech request %s is malformed; dropping", identifier)
             request.unlink(missing_ok=True)
             failed += 1
+            if status is not None:
+                status.fail()
             continue
         try:
             completed += process_request(
@@ -160,6 +171,8 @@ def run_cycle(
             )
             write_failure(root, identifier, f"processing:{type(error).__name__}")
             failed += 1
+            if status is not None:
+                status.fail()
         request.unlink(missing_ok=True)
     return completed, failed
 
@@ -362,10 +375,6 @@ def atomic_json(path: Path, payload: object) -> None:
             temporary.unlink(missing_ok=True)
 
 
-def write_health(root: Path, failed: int) -> None:
-    atomic_json(root / "worker-health.json", {"checked_at": int(time.time()), "failed": failed})
-
-
 def install_stop_handler() -> threading.Event:
     stop_event = threading.Event()
 
@@ -378,6 +387,14 @@ def install_stop_handler() -> threading.Event:
 
 
 def run(speech_root: Path, once: bool) -> None:
+    status = Liveness(speech_root / "worker-health.json")
+    try:
+        run_monitored(speech_root, once, status)
+    finally:
+        status.close()
+
+
+def run_monitored(speech_root: Path, once: bool, status: Liveness) -> None:
     backend = worker_backend()
     pipeline = worker_pipeline_options()
     worker_tag = worker_identity(backend, pipeline)
@@ -385,11 +402,14 @@ def run(speech_root: Path, once: bool) -> None:
     poll_seconds = int(os.getenv("SPEECH_POLL_SECONDS", "5"))
     if poll_seconds <= 0:
         raise ValueError("SPEECH_POLL_SECONDS must be positive")
+    processing_timeout = positive_seconds("SPEECH_TIMEOUT_SEC", 43200)
     speech_root.mkdir(parents=True, exist_ok=True)
     from karpathy_wiki_speech.cache import requests_dir
 
     requests_dir(speech_root).mkdir(parents=True, exist_ok=True)
     stop_event = install_stop_handler()
+    atomic_json(speech_root / "worker-identity.json", {"identity": worker_tag})
+    status.enter("idle", poll_seconds + 120, ready=True)
     while not stop_event.is_set():
         failure_count = 0
         try:
@@ -400,13 +420,15 @@ def run(speech_root: Path, once: bool) -> None:
                 worker_tag,
                 limits,
                 decode=not isinstance(backend, FakeBackend),
+                status=status,
+                processing_timeout=processing_timeout,
             )
             if completed or failure_count:
                 LOG.info("Speech cycle completed: %s done, %s failed", completed, failure_count)
         except (OSError, ValueError, RuntimeError):
             LOG.exception("Speech worker cycle failed")
             failure_count = 1
-        write_health(speech_root, failure_count)
+        status.finish(failure_count, poll_seconds + 120)
         if once:
             if failure_count:
                 raise SystemExit(1)
@@ -418,11 +440,9 @@ def run(speech_root: Path, once: bool) -> None:
 def health_check(path: Path) -> None:
     """Exit nonzero when the worker heartbeat is missing or failing."""
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as error:
+        read_healthy(path)
+    except RuntimeError as error:
         raise SystemExit(1) from error
-    if int(payload.get("failed", 1)) != 0:
-        raise SystemExit(1)
 
 
 def main() -> None:
