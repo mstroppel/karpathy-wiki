@@ -346,6 +346,9 @@ export async function scanIngestStatus({ sourceRoot, wikiSourceRoot, includeCurr
   for (const entry of sourceDirectories) {
     const sourceDirectoryRoot = path.join(sourceRoot, entry.name)
     try {
+      // Initialization/Compose may create roots for disabled providers. An empty
+      // root has no published sources yet; it is not a broken publication.
+      if ((await readdir(sourceDirectoryRoot)).length === 0) continue
       const raw = JSON.parse(
         await readFile(path.join(sourceDirectoryRoot, MANIFEST_FILENAME), 'utf8'),
       )

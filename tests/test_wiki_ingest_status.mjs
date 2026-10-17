@@ -574,10 +574,39 @@ test('reports conflicting Paperless pages', async () => {
   }
 })
 
-test('rejects sources without a manifest', async () => {
+test('ignores empty provider roots while planning published sources', async () => {
+  const { root, sourceRoot, wikiSourceRoot } = await fixture()
+  try {
+    for (const source of ['email', 'audio', 'custom']) {
+      await mkdir(path.join(sourceRoot, source))
+    }
+    const scan = () => scanIngestStatus({ sourceRoot, wikiSourceRoot })
+    const empty = await scan()
+    assert.deepEqual(empty.adapters, {})
+    assert.ok(Object.values(empty.summary).every((count) => count === 0))
+
+    await writeManifest(sourceRoot, 'webdav', {
+      wiki_root: 'webdav',
+      items: [webdavItem('new.txt')],
+    })
+    const status = await scan()
+    assert.deepEqual(Object.keys(status.adapters), ['webdav'])
+    assert.equal(status.summary.new, 1)
+    assert.equal(status.summary.invalid, 0)
+    assert.equal(status.adapters.webdav.new[0].source_key, 'new.txt')
+
+    await writeManifest(sourceRoot, 'email', { wiki_root: 'email' })
+    assert.deepEqual(Object.keys((await scan()).adapters), ['email', 'webdav'])
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('rejects nonempty sources without a manifest', async () => {
   const { root, sourceRoot, wikiSourceRoot } = await fixture()
   try {
     await mkdir(path.join(sourceRoot, 'unsupported'), { recursive: true })
+    await writeFile(path.join(sourceRoot, 'unsupported', 'source.txt'), 'synthetic source')
     await mkdir(path.join(wikiSourceRoot, 'unsupported'), { recursive: true })
 
     const status = await scanIngestStatus({ sourceRoot, wikiSourceRoot })
@@ -585,6 +614,25 @@ test('rejects sources without a manifest', async () => {
     assert.deepEqual(Object.keys(status.adapters), ['unsupported'])
     assert.equal(status.adapters.unsupported.summary.invalid, 1)
     assert.match(status.adapters.unsupported.invalid[0].error, /ENOENT|manifest/)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('does not treat hidden files, subdirectories or empty manifests as unused roots', async () => {
+  const { root, sourceRoot, wikiSourceRoot } = await fixture()
+  try {
+    for (const source of ['hidden', 'nested', 'broken']) {
+      await mkdir(path.join(sourceRoot, source))
+    }
+    await writeFile(path.join(sourceRoot, 'hidden', '.keep'), '')
+    await mkdir(path.join(sourceRoot, 'nested', 'empty'))
+    await writeFile(path.join(sourceRoot, 'broken', 'manifest.json'), '')
+    const status = await scanIngestStatus({ sourceRoot, wikiSourceRoot })
+    assert.equal(status.summary.invalid, 3)
+    for (const source of ['hidden', 'nested', 'broken']) {
+      assert.equal(status.adapters[source].summary.invalid, 1)
+    }
   } finally {
     await rm(root, { recursive: true, force: true })
   }

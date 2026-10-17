@@ -56,9 +56,13 @@ The `answers` profile starts the local answer provider for
 
 Ingest tracking discovers sources from directories below `/knowledge/sources`.
 A directory is compared against its provider manifest (`manifest.json`), which
-every ingest cycle writes into the sanitized source tree; directories without a
-valid, supported manifest are reported as invalid. Adding another source type
-therefore requires only its source directory, its manifest-producing ingest
+every ingest cycle writes into the sanitized source tree. Empty directories are
+ignored: initialization or Compose may create roots for disabled providers that
+have never published sources. Nonempty directories without a valid, supported
+manifest are still reported as invalid, including roots containing only hidden
+files or subdirectories. A valid manifest is scanned even if it lists no items;
+disabling a profile does not hide previously published sources. Adding another
+source type therefore requires only its source directory, its manifest-producing ingest
 module, and source-specific ingest validation — not a change to `/ingest-new`,
 its skill, the generic status tool, or the OpenCode image.
 
