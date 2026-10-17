@@ -20,10 +20,13 @@ locally and match the installed containers; no registry access is needed to rest
 saved images. Reconcile mismatched/orphan containers before a new update.
 
 For update snapshots, required software means every unprofiled service, every
-service enabled by saved `COMPOSE_PROFILES` (including `*`), their dependencies,
+service enabled by saved `COMPOSE_PROFILES` (including `*`, with whitespace around
+comma-separated names ignored), their required dependencies,
 and every service with an existing project container, even stopped or in a disabled
 profile. Only disabled services without containers are excluded from the image
 archive; enabling them later requires installing their software separately.
+An optional dependency (`required: false`) does not enable a disabled service;
+its edge may remain in the resolved model even when that service is absent.
 Configuration/data/file secrets remain fully covered, including disabled profiles.
 Rescue snapshots retain all locally available declared images and all existing
 container images, including partially updated software; they do not invent images

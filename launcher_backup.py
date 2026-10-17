@@ -429,7 +429,9 @@ class Instance:
             for container in json.loads(run(["docker", "inspect", *ids])):
                 service = container["Config"]["Labels"].get("com.docker.compose.service")
                 containers[service] = container
-        profiles = set(self.values.get("COMPOSE_PROFILES", "").split(",")) - {""}
+        profiles = {
+            profile.strip() for profile in self.values.get("COMPOSE_PROFILES", "").split(",")
+        } - {""}
         required = {
             name
             for name, service in self.config["services"].items()
@@ -441,7 +443,17 @@ class Instance:
         # Include dependencies even if Compose configuration came from an override.
         pending = list(required)
         while pending:
-            for dependency in self.config["services"][pending.pop()].get("depends_on", {}):
+            dependencies = self.config["services"][pending.pop()].get("depends_on", {})
+            for dependency, settings in dependencies.items():
+                # Compose retains optional edges even when their disabled service
+                # is absent from the resolved model. Independently enabled services
+                # are already required; an optional edge must not enable a profile.
+                if not settings.get("required", True):
+                    continue
+                if dependency not in self.config["services"]:
+                    raise BackupError(
+                        "required Compose dependency is absent; validate service profiles"
+                    )
                 if dependency not in required:
                     required.add(dependency)
                     pending.append(dependency)

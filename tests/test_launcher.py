@@ -499,6 +499,7 @@ class LauncherTests(unittest.TestCase):
         for values, extra, config in (
             ("COMPOSE_PROFILES=optional\n", {}, self.profile_config()),
             ("COMPOSE_PROFILES=other,optional\n", {}, self.profile_config()),
+            ("COMPOSE_PROFILES=other, optional\n", {}, self.profile_config()),
             ("COMPOSE_PROFILES=*\n", {}, self.profile_config()),
             (
                 "",
@@ -526,6 +527,55 @@ class LauncherTests(unittest.TestCase):
                 self.assertIn("synthetic:optional", result.stderr)
                 self.assertIn("failed during backup image checks", result.stderr)
                 self.assertFalse(any(c[0] == "stop" or "pull" in c for c in self.docker_calls()))
+
+    def test_disabled_optional_dependency_may_be_absent_from_resolved_model(self):
+        self.write_env("KARPATHY_WIKI_VERSION=0.0.1\nCOMPOSE_PROFILES=\n")
+        for filtered in (True, False):
+            with self.subTest(filtered=filtered):
+                config = json.loads(
+                    self.profile_config(
+                        depends_on={
+                            "optional": {"condition": "service_started", "required": False},
+                        }
+                    )
+                )
+                if filtered:
+                    # Compose keeps this edge but removes the disabled service.
+                    del config["services"]["optional"]
+                result = self.run_launcher(
+                    "update",
+                    "1.2.3",
+                    env={
+                        "STUB_CONFIG": json.dumps(config),
+                        "STUB_MISSING_IMAGE": "synthetic:optional",
+                    },
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(
+                    self.snapshot_metadata()[0]["images"], {"synthetic:0.0.1": "sha256:" + "a" * 64}
+                )
+                self.assertFalse(
+                    any(
+                        c == ["image", "inspect", "synthetic:optional"] for c in self.docker_calls()
+                    )
+                )
+
+    def test_absent_required_dependency_fails_closed_before_staging(self):
+        self.write_env("KARPATHY_WIKI_VERSION=0.0.1\n")
+        config = json.loads(
+            self.profile_config(
+                depends_on={
+                    "optional": {"condition": "service_started", "required": True},
+                }
+            )
+        )
+        del config["services"]["optional"]
+        result = self.run_launcher("update", "1.2.3", env={"STUB_CONFIG": json.dumps(config)})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("required Compose dependency is absent", result.stderr)
+        self.assertIn("failed during backup image checks", result.stderr)
+        self.assertFalse((self.project / ".launcher-stage").exists())
+        self.assertFalse(any(c[0] == "stop" for c in self.docker_calls()))
 
     def test_retagged_and_orphan_containers_block_before_staging(self):
         self.write_env("KARPATHY_WIKI_VERSION=0.0.1\n")

@@ -71,6 +71,9 @@ def main():
                     "volumes": [{"type": "bind", "source": str(data), "target": "/data"}],
                     "healthcheck": {"test": ["CMD", "python", "-c", "pass"], "interval": "1s"},
                     "network_mode": "none",
+                    "depends_on": {
+                        "never-installed": {"condition": "service_started", "required": False}
+                    },
                 },
                 "never-installed": {
                     "image": "localhost.invalid/kw-synthetic-never-installed:227",
@@ -97,7 +100,7 @@ def main():
                 "assert open('/data/.session').read() == 'synthetic-old-session'",
             )
             original_env = (project / ".env").read_text()
-            (project / ".env").write_text(original_env + "COMPOSE_PROFILES=optional\n")
+            (project / ".env").write_text(original_env + "COMPOSE_PROFILES=other, optional\n")
             failed = subprocess.run(
                 ["sh", str(launcher), "update", "2.0.0", "--verbose"],
                 capture_output=True,
