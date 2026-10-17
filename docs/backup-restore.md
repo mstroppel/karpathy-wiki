@@ -19,6 +19,41 @@ installed release and cache its Compose file before updating. Images must exist
 locally and match the installed containers; no registry access is needed to restore
 saved images. Reconcile mismatched/orphan containers before a new update.
 
+For update snapshots, required software means every unprofiled service, every
+service enabled by saved `COMPOSE_PROFILES` (including `*`, with whitespace around
+comma-separated names ignored), their required dependencies,
+and every service with an existing project container, even stopped or in a disabled
+profile. Only disabled services without containers are excluded from the image
+archive; enabling them later requires installing their software separately.
+An optional dependency (`required: false`) does not enable a disabled service;
+its edge may remain in the resolved model even when that service is absent.
+Configuration/data/file secrets remain fully covered, including disabled profiles.
+Rescue snapshots retain all locally available declared images and all existing
+container images, including partially updated software; they do not invent images
+for never-installed services. Restore loads saved image IDs and retags them before
+starting the saved configuration with its saved profiles and `--pull never`.
+
+Required-image and pinned/container consistency checks run before launcher staging,
+backup storage creation, or stopping writers. A failed inspection names the image
+and the phase: check Docker access first, then restore the exact originally
+installed image from a trusted saved archive or an independently verified immutable
+digest and reconcile the configured tag with container image IDs. Do not pull a
+mutable tag and assume it is the installed software. The launcher never acquires
+missing recovery images automatically and never bypasses a required-image failure.
+Compose downloads may populate `.cache` during earlier version resolution; the
+installed pair, `.env`, data and running containers stay untouched on preflight failure.
+
+Updates print concise phases on stderr in execution order, including early
+resolution/configuration/staging failures. Use `update -v`, `update --verbose`, or
+`update <version> --verbose` for elapsed phase/operation times and safe operation
+names. Options belong after `update`, on either side of the optional version;
+`--no-backup` can appear anywhere there too. Repeated verbose flags are idempotent.
+Startup and health verification are one Compose `up --wait` phase. Verbose mode
+does not disable secret protection: arguments, raw stdout/stderr, Compose config,
+environment values and secret files are never dumped. Failures report curated
+context and exit codes instead. Inspect Docker state privately when these safe
+diagnostics are insufficient; do not publish private configuration or command output.
+
 ### Launcher bootstrap and recovery
 
 Older launchers cannot update themselves. Once, with no launcher operations or

@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Launcher updates preflight required recovery images before staging or stopping
+  writers, with actionable image-specific errors. Disabled services without
+  containers no longer require unused images. Updates show ordered progress and
+  support `-v`/`--verbose` for safe operation context and timings without exposing
+  private subprocess output (#227).
+
 - Ingest proposals now use isolated shallow baseline clones instead of copying
   the full wiki history per source. Operator-only journal maintenance defaults
   to dry run; confirmed compaction with configurable completed-draft retention

@@ -198,6 +198,11 @@ To pin a release:
 ./karpathy-wiki.sh update 0.2.0
 ```
 
+Updates report each phase on stderr. Add `-v` or `--verbose` **after `update`**,
+before or after the version, for safe operation context and elapsed times:
+`./karpathy-wiki.sh update --verbose 0.2.0`. This also combines with `--no-backup`.
+Verbose mode never prints raw subprocess output, configuration or environment values.
+
 By default, launcher updates stop the instance for a verified full backup of
 `DATA_ROOT`, configuration, external file secrets, and installed images **before**
 changing the version. Backup failure blocks the update; update failure never

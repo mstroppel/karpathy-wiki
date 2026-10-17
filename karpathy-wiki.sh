@@ -11,6 +11,26 @@ env_file=$project_dir/.env
 cache_dir=${KARPATHY_WIKI_CACHE_DIR:-$project_dir/.cache}
 override_file=$project_dir/compose.override.yaml
 latest_pointer=$cache_dir/latest
+update_phase=""
+update_verbose=""
+update_started=""
+
+update_progress() {
+  if [ -n "$update_verbose" ] && [ -n "$update_started" ]; then
+    printf 'karpathy-wiki: %s: elapsed %ss\n' "$update_phase" \
+      "$(($(date +%s) - update_started))" >&2
+  fi
+  update_phase=$1
+  update_started=$(date +%s)
+  printf 'karpathy-wiki: %s\n' "$update_phase" >&2
+}
+
+update_exit() {
+  ue_status=$?
+  if [ "$ue_status" -ne 0 ] && [ -n "$update_phase" ]; then
+    printf 'karpathy-wiki: failed during %s\n' "$update_phase" >&2
+  fi
+}
 
 die() {
   printf 'karpathy-wiki: %s\n' "$*" >&2
@@ -41,7 +61,7 @@ validate_version() {
 resolve_pre_version() {
   require_curl
   rp_json=$(curl -fsSL \
-    "https://api.github.com/repos/$repository/tags?per_page=100") || return 1
+    "https://api.github.com/repos/$repository/tags?per_page=100" 2>/dev/null) || return 1
   rp_tag=$(printf '%s' "$rp_json" |
     grep -o '"name": *"v[0-9][0-9A-Za-z.-]*-pre\.[0-9]*"' |
     head -n 1 | sed 's/.*"v/v/;s/"//') || rp_tag=""
@@ -54,7 +74,7 @@ resolve_pre_version() {
 resolve_latest_version() {
   require_curl
   rlv_url=$(curl -fsSL -o /dev/null -w '%{url_effective}' \
-    "https://github.com/$repository/releases/latest") || return 1
+    "https://github.com/$repository/releases/latest" 2>/dev/null) || return 1
   rlv_tag=${rlv_url##*/}
   rlv_version=${rlv_tag#v}
   validate_version "$rlv_version" || return 1
@@ -75,7 +95,7 @@ fetch_compose() {
   mkdir -p "$cache_dir"
   fc_tmp="$fc_target.tmp.$$"
   if curl -fsSL "https://raw.githubusercontent.com/$repository/$fc_ref/compose.yaml" \
-    -o "$fc_tmp"; then
+    -o "$fc_tmp" 2>/dev/null; then
     chmod 0644 "$fc_tmp"
     mv -f "$fc_tmp" "$fc_target"
   else
@@ -90,7 +110,7 @@ resolve_version() {
   rv_requested=${rv_requested:-latest}
   if [ "$rv_requested" != "latest" ] && [ "$rv_requested" != "pre" ]; then
     validate_version "$rv_requested" ||
-      die "invalid KARPATHY_WIKI_VERSION: $rv_requested"
+      die "invalid KARPATHY_WIKI_VERSION"
     printf '%s\n' "$rv_requested"
     return 0
   fi
@@ -143,24 +163,28 @@ run_compose() {
 }
 
 cmd_update() {
+  trap update_exit 0
+  update_progress "update argument/runtime preflight"
   require_backup_runtime
   cu_target=""
   cu_no_backup=""
   for cu_arg in "$@"; do
     case "$cu_arg" in
+      -v|--verbose) update_verbose=--verbose ;;
       --no-backup)
         [ -z "$cu_no_backup" ] || die "duplicate --no-backup"
         cu_no_backup=--no-backup
         ;;
-      -*) die "unknown update option: $cu_arg" ;;
+      -*) die "unknown update option" ;;
       *)
-        [ -z "$cu_target" ] || die "usage: karpathy-wiki.sh update [version] [--no-backup]"
-        validate_version "$cu_arg" || die "invalid version: $cu_arg"
+        [ -z "$cu_target" ] || die "usage: karpathy-wiki.sh update [version] [--no-backup] [-v|--verbose]"
+        validate_version "$cu_arg" || die "invalid version"
         cu_target=$cu_arg
         ;;
     esac
   done
   [ -f "$env_file" ] || die "missing .env"
+  update_progress "version resolution"
   cu_current=$(resolve_version)
   compose_file_for "$cu_current"
   cu_current_compose=$compose_file
@@ -168,7 +192,7 @@ cmd_update() {
   case "${cu_requested:-}" in
     ''|stable) cu_channel=stable ;;
     pre) cu_channel=pre ;;
-    *) die "unsupported KARPATHY_WIKI_CHANNEL: $cu_requested" ;;
+    *) die "unsupported KARPATHY_WIKI_CHANNEL" ;;
   esac
   if [ -n "$cu_target" ]; then
     : # Explicit version already validated above.
@@ -179,11 +203,16 @@ cmd_update() {
     cu_target=$(resolve_latest_version) || die "cannot resolve the latest release"
   fi
   # Download before touching .env so a failed update leaves it unchanged.
+  update_progress "Compose cache preflight"
   compose_file_for "$cu_target"
   set -- "$cu_current_compose" "$cu_current" "$cu_target" "$compose_file"
   if [ -n "$cu_no_backup" ]; then
     set -- "$@" "$cu_no_backup"
   fi
+  if [ -n "$update_verbose" ]; then
+    set -- "$@" "$update_verbose"
+  fi
+  update_progress "handing off to update preflight"
   exec python3 "$script_dir/launcher_backup.py" update "$project_dir" \
     "$@"
 }
@@ -204,13 +233,15 @@ next to this script is applied automatically.
 
 Usage:
   karpathy-wiki.sh <compose args...>   Forward to docker compose (up -d, ps, logs, ...)
-  karpathy-wiki.sh update [version] [--no-backup]
+  karpathy-wiki.sh update [version] [--no-backup] [-v|--verbose]
                                       Pin version (default: latest release, or
                                        latest pre-release when the pre channel is
                                        set); whole-instance backup by default,
                                        pull images, restart and verify health
                                       --no-backup explicitly skips the snapshot;
                                        no new rollback point, manual recovery risk
+                                      -v/--verbose adds safe context and timings;
+                                       options go after update, before/after version
   karpathy-wiki.sh backup list         List local update and rescue snapshots
   karpathy-wiki.sh launcher-accept <version>  Explicitly trust the installed pair
   karpathy-wiki.sh rollback <id>       Confirm full data/config/software rollback;
@@ -235,6 +266,10 @@ EOF
 }
 
 command=${1:-help}
+if [ "$command" = update ]; then
+  trap update_exit 0
+  update_progress "launcher runtime and lock preflight"
+fi
 # Never import a potentially mixed helper after interrupted activation.
 if [ -f "$script_dir/.launcher-activation.json" ]; then
   die "interrupted launcher activation; run: python3 $script_dir/.launcher-stage/launcher_backup.py recover $project_dir"
