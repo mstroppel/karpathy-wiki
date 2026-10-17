@@ -29,7 +29,7 @@ import {
 } from './wiki_ingest_journal_core.mjs'
 import { checkRelativePath, scanIngestStatus } from './wiki_ingest_status_core.mjs'
 import { IngestInputError, ingestFailure } from './wiki_ingest_errors.mjs'
-import { withIngestLock } from './wiki_ingest_storage.mjs'
+import { inventoryIngestTree, withIngestLock } from './wiki_ingest_storage.mjs'
 
 const runFile = promisify(execFile)
 const SHA = (bytes) => createHash('sha256').update(bytes).digest('hex')
@@ -103,7 +103,20 @@ async function prepare(opts) {
   const directory = path.join(opts.root, 'preparations', result.preparation_id)
   await mkdir(directory, { mode: 0o700 })
   const wikiRoot = path.join(directory, 'wiki')
-  await runFile('git', ['clone', '--quiet', '--no-hardlinks', '--', opts.wikiRoot, wikiRoot])
+  // Only the baseline snapshot is needed to build the next commit. Use the
+  // transport even for a local source: local clones ignore --depth and copy
+  // the entire object database. No alternates, shared objects or hardlinks.
+  await runFile('git', [
+    'clone',
+    '--quiet',
+    '--no-local',
+    '--depth=1',
+    '--single-branch',
+    '--no-tags',
+    '--',
+    opts.wikiRoot,
+    wikiRoot,
+  ])
   if ((await git(wikiRoot, ['rev-parse', 'HEAD'])).toString().trim() !== receipt.base_commit)
     throw new Error('HEAD hat sich während prepare geändert')
   for (const setting of ['user.name', 'user.email']) {
@@ -115,12 +128,16 @@ async function prepare(opts) {
   }
   const root = path.join(directory, 'journal')
   const draft = await prepareIngest({ ...opts, root, wikiRoot })
+  // Record ownership at creation, before any proposal edits. Maintenance must
+  // never infer ownership of nested Git metadata from its directory name alone.
+  const { files, directories } = await inventoryIngestTree(path.join(wikiRoot, '.git'))
   // Only create an implicit run once all draft setup has succeeded. If the
   // final receipt write fails, close only this call's run, never a supplied one.
   const runId = opts.runId ?? (await startRun({ root: opts.root, resume: false })).run.run_id
   receipt.publication = {
     single_source: opts.runId === undefined,
     draft_id: draft.preparation_id,
+    git_baseline: { files, directories },
     run_id: runId,
     references: {},
     stage_requests: {},

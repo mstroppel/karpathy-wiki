@@ -190,7 +190,7 @@ runs use the same delivery contract.
 ```text
 incoming/ingest-journal/                   # private, 0700
 ├── preparations/<prep-id>.json            # provenance, phases, owned hashes, read budget
-├── preparations/<prep-id>/wiki/           # isolated wiki/Git proposal and history
+├── preparations/<prep-id>/wiki/           # isolated baseline snapshot and proposal
 ├── preparations/<prep-id>/journal/        # private draft transaction evidence
 └── runs/<run-id>/
     ├── run.json                          # lifecycle, budget, recovery decisions
@@ -200,16 +200,18 @@ incoming/ingest-journal/                   # private, 0700
 ```
 
 The content-free SQLite state store remains outside the model's mount. Draft
-clones contain wiki history and source-derived content; include them and receipts
+clones contain a baseline snapshot and source-derived content; include them and receipts
 in private journal backups, and include retained `.git` evidence in wiki backups.
-They cost disk proportional to sources/history, not just receipt bytes.
+New drafts use independent shallow clones, not full-history copies.
 `publication.draft_id` belongs to the nested private
 `preparations/<prep-id>/journal/preparations/<draft-id>.json`, not the top-level
 preparations directory. A successful publisher response already verifies commit
 and journal; workers do not manually reconstruct internal IDs or repeat that check.
-No automatic draft/backup cleanup, migration, path alias or data-layout move is added.
-Cleanup is explicitly confirmed maintenance with writers stopped and backups
-verified. Tool, configuration and skills must be deployed together.
+The operator-only [journal maintenance command](ingest-journal-storage.md) defaults
+to a non-mutating dry run and can compact verified completed drafts after explicit
+confirmation. Durable receipts, records, reports and live publication backups
+remain covered by backups. Unresolved drafts are never pruned by age. Cleanup is
+not scheduled automatically. Tool, configuration and skills must be deployed together.
 
 ## Working-context budget
 

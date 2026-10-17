@@ -1,22 +1,56 @@
 import { spawn } from 'node:child_process'
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { constants } from 'node:fs'
-import { open, rename, rm } from 'node:fs/promises'
+import { lstat, open, readFile, readdir, rename, rm } from 'node:fs/promises'
 import path from 'node:path'
 
 const queues = new Map()
 
+// Hash private trees without following links or accepting shared mutable files.
+// An absent root is empty; a partially unreadable tree is always an error.
+export async function inventoryIngestTree(directory) {
+  const result = { files: {}, directories: [], bytes: 0, allocated_bytes: 0 }
+  async function walk(relative) {
+    const file = path.join(directory, relative)
+    const info = await lstat(file)
+    if (info.isSymbolicLink()) throw new Error('unsafe_symlink')
+    result.allocated_bytes += info.blocks * 512
+    if (info.isDirectory()) {
+      result.directories.push(relative)
+      for (const name of (await readdir(file)).sort()) await walk(path.join(relative, name))
+    } else if (info.isFile() && info.nlink === 1) {
+      result.files[relative] = createHash('sha256')
+        .update(await readFile(file))
+        .digest('hex')
+      result.bytes += info.size
+    } else throw new Error('unsafe_file_type_or_hardlink')
+  }
+  try {
+    await walk('')
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error
+    const root = await lstat(directory).catch((failure) => {
+      if (failure.code === 'ENOENT') return null
+      throw failure
+    })
+    if (root) throw error
+    return { files: {}, directories: [], bytes: 0, allocated_bytes: 0 }
+  }
+  return result
+}
+
 // Linux flock is held by a child while its pipe remains open. A killed runtime
 // closes the pipe and releases the kernel lock without deleting its inode.
-export async function withIngestLock(file, action) {
+export async function withIngestLock(file, action, { create = true } = {}) {
   const previous = queues.get(file) ?? Promise.resolve()
   const task = previous.then(async () => {
     const child = spawn(
       'python3',
       [
         '-c',
-        'import fcntl, os, sys\nf = os.open(sys.argv[1], os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)\nfcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)\nprint("locked", flush=True)\nsys.stdin.buffer.read()\n',
+        'import fcntl, os, sys\ntry:\n f = os.open(sys.argv[1], (os.O_CREAT if sys.argv[2] == "create" else 0) | os.O_RDWR | os.O_NOFOLLOW, 0o600)\nexcept FileNotFoundError:\n sys.exit(3)\nfcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)\nprint("locked", flush=True)\nsys.stdin.buffer.read()\n',
         file,
+        create ? 'create' : 'existing',
       ],
       { stdio: ['pipe', 'pipe', 'pipe'] },
     )
@@ -29,7 +63,13 @@ export async function withIngestLock(file, action) {
             ? resolve()
             : reject(new Error('Publikationslock fehlgeschlagen')),
         )
-        child.once('exit', () => reject(new Error('Ein anderer Schreiber hält den Ingest-Lock')))
+        child.once('exit', (code) =>
+          reject(
+            new Error(
+              code === 3 ? 'lock_file_missing' : 'Ein anderer Schreiber hält den Ingest-Lock',
+            ),
+          ),
+        )
       })
       return await action()
     } finally {

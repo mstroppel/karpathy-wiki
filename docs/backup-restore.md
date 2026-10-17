@@ -246,6 +246,11 @@ git -C /path/to/restored/data/wiki fsck --full
 
 Check the restored `index.md` and a representative committed source page in
 SilverBullet, verify the Git history, and confirm OpenCode can read the wiki.
+After [journal compaction](ingest-journal-storage.md), retain the complete journal
+and wiki `.git` in backups: compact parent receipts contain the nested transaction
+proof; removed draft clones need not be reconstructed. Never omit unresolved
+drafts or live publication backups. Run journal maintenance without `--confirm`
+on the restored idle stack to verify completed publication/report evidence.
 Then stop the test stack and remove only its own resources. A missing or corrupt
 SQLite state file should be investigated before re-enabling providers: deleting
 it resets ingest bookkeeping and may cause upstream sources to be reprocessed.

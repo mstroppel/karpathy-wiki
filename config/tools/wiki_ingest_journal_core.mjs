@@ -720,7 +720,19 @@ function normalizeUnfinished(unfinished, blockedRecords) {
 
 // Assemble the authoritative private report from durable records. The orchestrator
 // links it after ingestion (or at rollover); bounded reads are available on request.
-export async function assembleReport({
+export async function assembleReport(options = {}) {
+  const { root, runId } = options
+  const directory = runDirectory(root, runId)
+  await confinedIngestPath(root, path.relative(root, path.join(directory, RUN_FILENAME)))
+  const lock = await confinedIngestPath(
+    root,
+    path.relative(root, path.join(directory, 'records.lock')),
+    true,
+  )
+  return withIngestLock(lock, () => assembleReportLocked(options))
+}
+
+async function assembleReportLocked({
   root,
   runId,
   finalStatus,
