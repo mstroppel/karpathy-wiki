@@ -24,6 +24,9 @@ if failure and failure in args:
     print('synthetic-private-secret', file=sys.stderr)
     sys.exit(17)
 if args[:2] == ['image', 'inspect']:
+    if args[-1] == os.environ.get('STUB_MISSING_IMAGE'):
+        print('No such image: synthetic-private-secret', file=sys.stderr)
+        sys.exit(1)
     print(json.dumps([{'Id': 'sha256:' + 'a' * 64}]))
 elif args[:2] == ['image', 'save']:
     if os.environ.get('STUB_INCOMPLETE'):
@@ -36,7 +39,9 @@ elif args[:2] == ['image', 'save']:
         archive.addfile(member, io.BytesIO(data))
 elif args[0] == 'inspect':
     print(json.dumps([{'State': {'Running': False}, 'Image': 'sha256:' + 'a' * 64,
-                      'Config': {'Labels': {'com.docker.compose.service': 'writer'}}}]))
+                      'Config': {'Image': os.environ.get('STUB_CONTAINER_IMAGE', 'synthetic:0.0.1'),
+                                 'Labels': {'com.docker.compose.service':
+                                 os.environ.get('STUB_CONTAINER_SERVICE', 'writer')}}}]))
 elif args[0] == 'ps':
     if os.environ.get('STUB_CONTAINERS'): print('synthetic-container')
 elif args[0] == 'stop' and os.environ.get('STUB_SWAP_LINK'):
@@ -437,6 +442,184 @@ class LauncherTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(self.curl_urls(), [])
             self.assertEqual(self.docker_calls(), [])
+
+    def test_required_missing_image_fails_before_staging_storage_or_stop(self):
+        original = "KARPATHY_WIKI_VERSION=0.0.1\n"
+        self.write_env(original)
+        pair = (self.project / ".launcher-pair.json").read_bytes()
+        for options in ((), ("--verbose",)):
+            with self.subTest(options=options):
+                result = self.run_launcher(
+                    "update",
+                    "1.2.3",
+                    *options,
+                    env={"STUB_MISSING_IMAGE": "synthetic:0.0.1", "STUB_CONTAINERS": "1"},
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("failed during backup image checks", result.stderr)
+                self.assertIn("synthetic:0.0.1", result.stderr)
+                self.assertIn("verified immutable digest", result.stderr)
+                self.assertNotIn("synthetic-private-secret", result.stdout + result.stderr)
+                self.assertEqual((self.project / ".env").read_text(), original)
+                self.assertEqual((self.project / ".launcher-pair.json").read_bytes(), pair)
+                self.assertFalse((self.project / ".launcher-stage").exists())
+                self.assertFalse((self.project / "backups").exists())
+                self.assertFalse(any(c[0] == "stop" or "pull" in c for c in self.docker_calls()))
+
+    def profile_config(self, **writer):
+        return json.dumps(
+            {
+                "services": {
+                    "writer": {"image": "synthetic:0.0.1", **writer},
+                    "optional": {"image": "synthetic:optional", "profiles": ["optional"]},
+                }
+            }
+        )
+
+    def test_inactive_never_installed_service_is_not_required_for_restore(self):
+        self.write_env("KARPATHY_WIKI_VERSION=0.0.1\nCOMPOSE_PROFILES=\n")
+        environment = {
+            "STUB_CONFIG": self.profile_config(),
+            "STUB_MISSING_IMAGE": "synthetic:optional",
+        }
+        result = self.run_launcher("update", "1.2.3", env=environment)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        metadata = self.snapshot_metadata()[0]
+        self.assertEqual(metadata["images"], {"synthetic:0.0.1": "sha256:" + "a" * 64})
+        self.assertFalse(
+            any(c == ["image", "inspect", "synthetic:optional"] for c in self.docker_calls())
+        )
+        result = self.run_launcher(
+            "rollback", metadata["id"], input=f"rollback {metadata['id']}\n", env=environment
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(any(c[:2] == ["image", "load"] for c in self.docker_calls()))
+
+    def test_active_profiles_dependencies_and_stopped_containers_require_images(self):
+        for values, extra, config in (
+            ("COMPOSE_PROFILES=optional\n", {}, self.profile_config()),
+            ("COMPOSE_PROFILES=other,optional\n", {}, self.profile_config()),
+            ("COMPOSE_PROFILES=*\n", {}, self.profile_config()),
+            (
+                "",
+                {"STUB_CONTAINERS": "1", "STUB_CONTAINER_SERVICE": "optional"},
+                self.profile_config(),
+            ),
+            (
+                "",
+                {},
+                self.profile_config(depends_on={"optional": {"condition": "service_started"}}),
+            ),
+        ):
+            with self.subTest(values=values, extra=extra, config=config):
+                self.write_env("KARPATHY_WIKI_VERSION=0.0.1\n" + values)
+                result = self.run_launcher(
+                    "update",
+                    "1.2.3",
+                    env={
+                        "STUB_CONFIG": config,
+                        "STUB_MISSING_IMAGE": "synthetic:optional",
+                        **extra,
+                    },
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("synthetic:optional", result.stderr)
+                self.assertIn("failed during backup image checks", result.stderr)
+                self.assertFalse(any(c[0] == "stop" or "pull" in c for c in self.docker_calls()))
+
+    def test_retagged_and_orphan_containers_block_before_staging(self):
+        self.write_env("KARPATHY_WIKI_VERSION=0.0.1\n")
+        for config in (
+            {"services": {"writer": {"image": "synthetic:0.0.1"}}},
+            {"services": {"different": {"image": "synthetic:0.0.1"}}},
+        ):
+            with self.subTest(config=config):
+                # A different local image ID must not be accepted for an installed container.
+                stub = self.bin / "docker"
+                stub.write_text(
+                    DOCKER_STUB.replace("'Id': 'sha256:' + 'a' * 64", "'Id': 'sha256:' + 'b' * 64")
+                )
+                result = self.run_launcher(
+                    "update",
+                    "1.2.3",
+                    env={
+                        "STUB_CONTAINERS": "1",
+                        "STUB_CONFIG": json.dumps(config),
+                    },
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("containers do not match pinned software", result.stderr)
+                self.assertFalse((self.project / ".launcher-stage").exists())
+                self.assertFalse(any(c[0] == "stop" for c in self.docker_calls()))
+
+    def test_verbose_options_accept_either_side_of_version_and_no_backup(self):
+        for args in (
+            ("-v", "1.2.3"),
+            ("1.2.3", "--verbose"),
+            ("--verbose", "--no-backup", "1.2.3"),
+            ("1.2.3", "--no-backup", "-v"),
+            ("-v", "--verbose"),
+        ):
+            with self.subTest(args=args):
+                self.write_env("KARPATHY_WIKI_VERSION=0.0.1\n")
+                result = self.run_launcher("update", *args)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("operation docker compose config: elapsed", result.stderr)
+                self.assertIn("private arguments/output withheld", result.stderr)
+
+    def test_progress_order_and_safe_subprocess_failures_in_both_modes(self):
+        self.write_env("KARPATHY_WIKI_VERSION=0.0.1\nTOKEN=synthetic-env-secret\n")
+        result = self.run_launcher("update", "1.2.3")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        phases = [
+            "version resolution",
+            "installed configuration preflight",
+            "configuration preflight",
+            "backup image checks",
+            "launcher staging",
+            "backup preflight and image checks",
+            "stopping writers",
+            "backup creation and verification",
+            "image pull",
+            "launcher activation",
+            "startup and health verification",
+        ]
+        positions = [result.stderr.index("karpathy-wiki: " + name) for name in phases]
+        self.assertEqual(positions, sorted(positions))
+        self.assertNotIn("elapsed", result.stderr)
+        for options in ((), ("--verbose",)):
+            for failure, expected in (
+                ("config", "installed configuration preflight"),
+                ("pull", "image pull"),
+                ("up", "startup and health verification"),
+                ("save", "backup creation and verification"),
+            ):
+                with self.subTest(options=options, failure=failure):
+                    self.write_env("KARPATHY_WIKI_VERSION=0.0.1\nTOKEN=synthetic-env-secret\n")
+                    result = self.run_launcher(
+                        "update", "1.2.3", *options, env={"STUB_FAIL": failure}
+                    )
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("failed during " + expected, result.stderr)
+                    self.assertNotIn("synthetic-private-secret", result.stdout + result.stderr)
+                    self.assertNotIn("synthetic-env-secret", result.stdout + result.stderr)
+                    self.assertNotIn("Traceback", result.stderr)
+
+    def test_early_shell_and_staging_failures_report_phase(self):
+        self.write_env("KARPATHY_WIKI_VERSION=0.0.1\n")
+        result = self.run_launcher("update", "--verbose", env={"STUB_OFFLINE": "1"})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("failed during version resolution", result.stderr)
+        self.assertEqual(self.docker_calls(), [])
+        result = self.run_launcher(
+            "update",
+            "1.2.3",
+            "-v",
+            env={"STUB_DOWNLOAD_FAIL": "launcher_backup.py", "STUB_CONTAINERS": "1"},
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("failed during launcher staging", result.stderr)
+        self.assertFalse(any(c[0] == "stop" for c in self.docker_calls()))
 
     def test_no_backup_preserves_acceptance_lock_and_staging_guards(self):
         self.write_env("KARPATHY_WIKI_VERSION=0.0.1\n")

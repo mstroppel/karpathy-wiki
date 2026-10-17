@@ -71,7 +71,12 @@ def main():
                     "volumes": [{"type": "bind", "source": str(data), "target": "/data"}],
                     "healthcheck": {"test": ["CMD", "python", "-c", "pass"], "interval": "1s"},
                     "network_mode": "none",
-                }
+                },
+                "never-installed": {
+                    "image": "localhost.invalid/kw-synthetic-never-installed:227",
+                    "profiles": ["optional"],
+                    "network_mode": "none",
+                },
             },
         }
         for version in ("1.0.0", "2.0.0", "3.0.0"):
@@ -91,11 +96,31 @@ def main():
                 "-c",
                 "assert open('/data/.session').read() == 'synthetic-old-session'",
             )
-            run("sh", str(launcher), "update", "2.0.0")
+            original_env = (project / ".env").read_text()
+            (project / ".env").write_text(original_env + "COMPOSE_PROFILES=optional\n")
+            failed = subprocess.run(
+                ["sh", str(launcher), "update", "2.0.0", "--verbose"],
+                capture_output=True,
+                text=True,
+            )
+            assert failed.returncode != 0, failed.stderr
+            assert "failed during backup image checks" in failed.stderr
+            assert "localhost.invalid/kw-synthetic-never-installed:227" in failed.stderr
+            assert not (project / ".launcher-stage").exists()
+            assert not (project / "backups").exists()
+            container = run("sh", str(launcher), "ps", "-q", "writer").stdout.strip()
+            assert (
+                run("docker", "inspect", container, "--format", "{{.State.Running}}").stdout.strip()
+                == "true"
+            )
+            (project / ".env").write_text(original_env)
+            updated = run("sh", str(launcher), "update", "2.0.0", "-v")
+            assert "operation docker compose pull: elapsed" in updated.stderr
             metadata = [
                 json.loads(p.read_text()) for p in (project / "backups").glob("*/metadata.json")
             ]
             identifier = metadata[0]["id"]
+            assert "localhost.invalid/kw-synthetic-never-installed:227" not in metadata[0]["images"]
             (data / ".session").write_text("synthetic-new-session")
             (data / "new-only").write_text("must disappear")
             (project / "secret").write_text("synthetic-new-secret")

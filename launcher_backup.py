@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 from pathlib import Path
 
 LAUNCHER_PROTOCOL = 1
@@ -33,11 +34,68 @@ class BackupError(Exception):
     pass
 
 
+VERBOSE = False
+
+
+@contextlib.contextmanager
+def phase(name):
+    """Only caller-owned labels, never command arguments or captured output."""
+    print(f"karpathy-wiki: {name}", file=sys.stderr, flush=True)
+    started = time.monotonic()
+    try:
+        yield
+    except BaseException:
+        print(f"karpathy-wiki: failed during {name}", file=sys.stderr, flush=True)
+        raise
+    finally:
+        if VERBOSE:
+            print(
+                f"karpathy-wiki: {name}: elapsed {time.monotonic() - started:.2f}s",
+                file=sys.stderr,
+                flush=True,
+            )
+
+
+def operation(args):
+    # Do not render arbitrary executable names, paths, flags or values.
+    if args[:2] == ["docker", "compose"]:
+        for command in ("config", "pull", "up", "down"):
+            if command in args:
+                return f"docker compose {command}"
+        return "docker compose"
+    for prefix in (
+        ["docker", "image", "inspect"],
+        ["docker", "image", "save"],
+        ["docker", "image", "load"],
+        ["docker", "image", "tag"],
+        ["docker", "inspect"],
+        ["docker", "ps"],
+        ["docker", "stop"],
+        ["tar"],
+        ["curl"],
+        ["sh", "-n"],
+    ):
+        if args[: len(prefix)] == prefix:
+            return " ".join(prefix)
+    return "launcher runtime probe"
+
+
 def run(args, **kwargs):
-    result = subprocess.run(args, capture_output=True, **kwargs)
-    if result.returncode:
-        raise BackupError(f"{args[0]} failed (exit {result.returncode}); private output withheld")
-    return result.stdout
+    label = operation(args)
+    started = time.monotonic()
+    try:
+        result = subprocess.run(args, capture_output=True, **kwargs)
+        if result.returncode:
+            raise BackupError(f"{label} failed (exit {result.returncode}); private output withheld")
+        return result.stdout
+    finally:
+        if VERBOSE:
+            print(
+                f"karpathy-wiki: operation {label}: elapsed {time.monotonic() - started:.2f}s; "
+                "private arguments/output withheld",
+                file=sys.stderr,
+                flush=True,
+            )
 
 
 def digest(path):
@@ -264,9 +322,10 @@ class Instance:
                 raise BackupError("not all instance writers stopped")
 
     def start(self):
-        self.call(
-            "up", "-d", "--remove-orphans", "--pull", "never", "--wait", "--wait-timeout", "600"
-        )
+        with phase("startup and health verification (Compose up --wait)"):
+            self.call(
+                "up", "-d", "--remove-orphans", "--pull", "never", "--wait", "--wait-timeout", "600"
+            )
 
     def paths(self, *, inspect_contents=True):
         if inspect_contents and b"GNU tar" not in run(["tar", "--version"]):
@@ -370,7 +429,25 @@ class Instance:
             for container in json.loads(run(["docker", "inspect", *ids])):
                 service = container["Config"]["Labels"].get("com.docker.compose.service")
                 containers[service] = container
+        profiles = set(self.values.get("COMPOSE_PROFILES", "").split(",")) - {""}
+        required = {
+            name
+            for name, service in self.config["services"].items()
+            if not service.get("profiles")
+            or "*" in profiles
+            or profiles.intersection(service["profiles"])
+            or name in containers
+        }
+        # Include dependencies even if Compose configuration came from an override.
+        pending = list(required)
+        while pending:
+            for dependency in self.config["services"][pending.pop()].get("depends_on", {}):
+                if dependency not in required:
+                    required.add(dependency)
+                    pending.append(dependency)
         for name, service in self.config["services"].items():
+            if not rescue and name not in required:
+                continue
             image = service.get("image")
             if not image:
                 raise BackupError("every service must have an image")
@@ -386,7 +463,20 @@ class Instance:
                     images[image] = info[0]["Id"]
                 except BackupError:
                     if not rescue:
-                        raise
+                        reference = (
+                            image
+                            if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,254}", image)
+                            else "[unsafe image reference withheld]"
+                        )
+                        raise BackupError(
+                            "backup image checks: cannot inspect required local image "
+                            f"{reference}. "
+                            "Check Docker access and restore the exact originally installed image "
+                            "from a trusted image archive or verified immutable digest; reconcile "
+                            "its tag with installed container image IDs, then retry. Do not pull "
+                            "a mutable tag as a repair or bypass the backup. "
+                            "Private output withheld."
+                        ) from None
                     # A failed pull/start can leave a declared service never installed.
                     # Rescue still saves all present software and complete current files.
         if not rescue:
@@ -455,70 +545,77 @@ def verify(directory, metadata):
 
 
 def snapshot(instance, kind):
-    paths = instance.paths()
-    images = instance.images(rescue=kind == "rescue")
+    with phase("backup preflight and image checks"):
+        instance.paths()
+        images = instance.images(rescue=kind == "rescue")
     now = dt.datetime.now(dt.UTC)
     identifier = now.strftime("%Y%m%dT%H%M%SZ") + "-" + secrets.token_hex(6)
     temporary = instance.store / (".partial-" + identifier)
     temporary.mkdir(mode=0o700)
-    instance.stop()
+    with phase("stopping writers"):
+        instance.stop()
     try:
-        # Writers may have changed entries after the running-state preflight.
-        paths = instance.paths()
-        run(
-            [
-                "tar",
-                "--create",
-                "--file",
-                str(temporary / "snapshot.tar"),
-                "--acls",
-                "--xattrs",
-                "--numeric-owner",
-                "--directory",
-                "/",
-                "--",
-                *(str(p).lstrip("/") for p in paths),
-            ]
-        )
-        run(
-            [
-                "docker",
-                "image",
-                "save",
-                "--output",
-                str(temporary / "images.tar"),
-                *sorted(set(images.values())),
-            ]
-        )
-        metadata = {
-            "id": identifier,
-            "created": now.isoformat(),
-            "instance": instance.identity,
-            "version": instance.version,
-            "kind": kind,
-            "status": "verified" if kind == "rescue" else "pending",
-            "paths": [str(p) for p in paths],
-            "data": str(instance.data),
-            "compose": str(instance.compose),
-            "images": images,
-            "launcher": accepted_pair(LAUNCHER_DIR),
-            "sha256": {name: digest(temporary / name) for name in ("snapshot.tar", "images.tar")},
-        }
-        verify(temporary, metadata)
-        for entry in temporary.iterdir():
-            entry.chmod(0o600)
-            with entry.open("rb") as stream:
-                os.fsync(stream.fileno())
-        write_json(temporary / "metadata.json", metadata)
-        temporary.rename(instance.store / identifier)
-        sync_directory(instance.store)
-        print(f"Backup {identifier} ({kind}, version {instance.version}) verified", flush=True)
-        return metadata
+        with phase("backup creation and verification"):
+            return archive_snapshot(instance, kind, images, now, identifier, temporary)
     except BaseException:
         print(
             "Snapshot failed; data/configuration unchanged; stack remains stopped.", file=sys.stderr
         )
         raise
+
+
+def archive_snapshot(instance, kind, images, now, identifier, temporary):
+    # Writers may have changed entries after the running-state preflight.
+    paths = instance.paths()
+    run(
+        [
+            "tar",
+            "--create",
+            "--file",
+            str(temporary / "snapshot.tar"),
+            "--acls",
+            "--xattrs",
+            "--numeric-owner",
+            "--directory",
+            "/",
+            "--",
+            *(str(p).lstrip("/") for p in paths),
+        ]
+    )
+    run(
+        [
+            "docker",
+            "image",
+            "save",
+            "--output",
+            str(temporary / "images.tar"),
+            *sorted(set(images.values())),
+        ]
+    )
+    metadata = {
+        "id": identifier,
+        "created": now.isoformat(),
+        "instance": instance.identity,
+        "version": instance.version,
+        "kind": kind,
+        "status": "verified" if kind == "rescue" else "pending",
+        "paths": [str(p) for p in paths],
+        "data": str(instance.data),
+        "compose": str(instance.compose),
+        "images": images,
+        "launcher": accepted_pair(LAUNCHER_DIR),
+        "sha256": {name: digest(temporary / name) for name in ("snapshot.tar", "images.tar")},
+    }
+    verify(temporary, metadata)
+    for entry in temporary.iterdir():
+        entry.chmod(0o600)
+        with entry.open("rb") as stream:
+            os.fsync(stream.fileno())
+    write_json(temporary / "metadata.json", metadata)
+    temporary.rename(instance.store / identifier)
+    sync_directory(instance.store)
+    print(f"Backup {identifier} ({kind}, version {instance.version}) verified", flush=True)
+    return metadata
 
 
 def backups(instance):
@@ -573,25 +670,33 @@ def update(instance, target, target_compose, *, backup=True):
             file=sys.stderr,
             flush=True,
         )
-    stage = stage_pair(instance, target, backup=backup)
-    record = prepare_activation(stage, target)
-    metadata = snapshot(instance, "update") if backup else None
-    updated = None
-    phase = "stopping writers"
-    try:
-        if not backup:
-            instance.stop()
-        phase = "configuration preflight"
+    # All non-mutating checks precede staging and stopping. Failure here must not
+    # enter the post-stop cleanup path, which deliberately stops all writers.
+    with phase("configuration preflight"):
+        accepted_pair(LAUNCHER_DIR)
+        instance.paths(inspect_contents=backup)
         updated = Instance(instance.project, target_compose, target)
         updated.paths(inspect_contents=backup)
         if updated.name != instance.name or updated.data != instance.data:
             raise BackupError("update changed instance identity or DATA_ROOT")
-        phase = "image pull"
-        updated.call("pull")
-        phase = "launcher activation (use staged helper recover if interrupted)"
-        activate_pair(LAUNCHER_DIR, stage, record, instance.project)
-        set_version(instance.project, target)
-        phase = "startup/health verification"
+    if backup:
+        with phase("backup image checks"):
+            instance.images()
+        with phase("backup storage preflight"):
+            secure_store(instance.store)
+    with phase("launcher staging"):
+        stage = stage_pair(instance, target, backup=backup)
+        record = prepare_activation(stage, target)
+    metadata = snapshot(instance, "update") if backup else None
+    try:
+        if not backup:
+            with phase("stopping writers"):
+                instance.stop()
+        with phase("image pull"):
+            updated.call("pull")
+        with phase("launcher activation (use staged helper recover if interrupted)"):
+            activate_pair(LAUNCHER_DIR, stage, record, instance.project)
+            set_version(instance.project, target)
         updated.start()
         if metadata is not None:
             metadata["status"] = "success"
@@ -599,7 +704,7 @@ def update(instance, target, target_compose, *, backup=True):
         print(f"Update to {target} verified")
     except BaseException:
         try:
-            (updated or instance).stop()
+            updated.stop()
         except BackupError:
             print(
                 "Could not stop all containers after update failure; stop writers manually.",
@@ -618,7 +723,7 @@ def update(instance, target, target_compose, *, backup=True):
                 "inspect configuration, data and launcher state before manual recovery "
                 "or selecting an existing backup."
             )
-        print(f"Update failed during {phase}. {recovery}", file=sys.stderr)
+        print(f"Update failed. {recovery}", file=sys.stderr)
         raise
     try:
         if backup:
@@ -749,6 +854,7 @@ def rollback(instance, identifier):
 
 
 def main():
+    global VERBOSE
     if sys.version_info < (3, 11):  # noqa: UP036 -- standalone launcher supports Python 3.11+
         print("karpathy-wiki: Python 3.11+ is required", file=sys.stderr)
         return 1
@@ -794,12 +900,20 @@ def main():
                     environment["KARPATHY_WIKI_LOCK_FD"] = str(descriptor)
                 return subprocess.run(command, env=environment, pass_fds=(descriptor,)).returncode
         action, project, compose, version, *args = sys.argv[1:]
+        if action == "update":
+            VERBOSE = "--verbose" in args or "-v" in args
+            no_backup = "--no-backup" in args
+            args = [arg for arg in args if arg not in {"--verbose", "-v", "--no-backup"}]
+            if len(args) != 2 or any(arg.startswith("-") for arg in args):
+                raise BackupError(
+                    "usage: update project compose version target target-compose [options]"
+                )
+        else:
+            no_backup = False
         with project_lock(Path(project).resolve()):
-            instance = Instance(project, compose, version)
-            no_backup = action == "update" and args[-1:] == ["--no-backup"]
-            if no_backup:
-                args.pop()
-            else:
+            with phase("installed configuration preflight"):
+                instance = Instance(project, compose, version)
+            if action != "update":
                 secure_store(instance.store)
             if action == "update":
                 update(instance, *args, backup=not no_backup)
