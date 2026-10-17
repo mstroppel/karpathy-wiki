@@ -212,6 +212,84 @@ test('shallow proposals never duplicate full history or share mutable files; liv
   assert.equal(draft.nlink, 1)
 })
 
+test('hardlinked live recovery backups do not block inspection or unrelated cleanup', async (t) => {
+  const f = await fixture(t)
+  const p = await f.publish()
+  const backup = path.join(f.opts.wikiRoot, '.git', (await p.receipt()).backups[0].path)
+  const recovery = path.join(f.base, 'operator-recovery')
+  await fs.link(backup, recovery)
+  const before = await snapshot(f.base)
+  const dry = await maintainJournal(f.opts)
+  assert.equal(dry.candidates, 1, JSON.stringify(dry))
+  assert.ok(dry.storage.live_backups > 0)
+  assert.deepEqual(await snapshot(f.base), before)
+  const result = await maintainJournal({ ...f.opts, confirmed: true })
+  assert.equal(result.entries[0].reason, 'compacted')
+  assert.equal((await fs.stat(backup)).nlink, 2)
+  assert.deepEqual(await fs.readFile(backup), await fs.readFile(recovery))
+})
+
+test('uncountable live backup entries mark partial counts without following links or blocking cleanup', async (t) => {
+  const f = await fixture(t)
+  await f.publish()
+  const foreign = path.join(f.opts.wikiRoot, '.git/ingest-backup-abcdef')
+  await fs.symlink(f.opts.sourceRoot, foreign)
+  const before = await fs.lstat(foreign)
+  const dry = await maintainJournal(f.opts)
+  assert.equal(dry.storage.live_backups_unreadable, true)
+  assert.equal(dry.candidates, 1)
+  const result = await maintainJournal({ ...f.opts, confirmed: true })
+  assert.equal(result.entries[0].reason, 'compacted')
+  assert.equal((await fs.lstat(foreign)).ino, before.ino)
+  assert.equal(await fs.readlink(foreign), f.opts.sourceRoot)
+})
+
+test('maintenance CLI preserves safe cleanup refusal codes but hides arbitrary errors', async () => {
+  for (const reason of [
+    'lock_file_missing',
+    'Ein anderer Schreiber hält den Ingest-Lock',
+    'cleanup_manifest_mismatch',
+    'draft_changed_during_cleanup',
+    'receipt_changed_during_cleanup',
+    'commit_parent_mismatch',
+    'commit_paths_mismatch',
+    'commit_blob_mismatch',
+    'source_identity_mismatch',
+    'live_backup_evidence_changed',
+    'journal_evidence_mismatch',
+    'report_evidence_mismatch',
+    'run_not_successfully_closed',
+    'private path /synthetic/secret',
+  ]) {
+    // Inject at the filesystem boundary, not into the CLI's error formatter.
+    const preload = `import fs from 'node:fs/promises'; import { syncBuiltinESMExports } from 'node:module'; fs.realpath = async () => { throw new Error(${JSON.stringify(reason)}) }; syncBuiltinESMExports();`
+    await assert.rejects(
+      runFile(process.execPath, [
+        '--import',
+        `data:text/javascript,${encodeURIComponent(preload)}`,
+        'publisher/journal_maintenance.mjs',
+        '--confirm',
+      ]),
+      (error) => {
+        assert.equal(error.code, 1)
+        assert.equal(error.stderr, '')
+        const output = JSON.parse(error.stdout)
+        assert.equal(output.error, 'journal_maintenance_refused')
+        assert.equal(
+          output.reason,
+          reason.startsWith('private ')
+            ? 'writer_lock_or_evidence_unavailable'
+            : reason === 'Ein anderer Schreiber hält den Ingest-Lock'
+              ? 'writer_lock_unavailable'
+              : reason,
+        )
+        assert.ok(!error.stdout.includes('/synthetic/secret'))
+        return true
+      },
+    )
+  }
+})
+
 test('direct runtime and operator-only publisher modes do not require absent UI controller state', async (t) => {
   const f = await fixture(t)
   const p = await f.publish()
@@ -463,6 +541,34 @@ test('interrupted deletion can be retried after partial unlink and refuses newly
   assert.equal((await p.receipt()).compaction.state, 'done')
 })
 
+test('evidence changed between scan and deletion refuses before deleting the draft', async (t) => {
+  const f = await fixture(t)
+  const p = await f.publish()
+  const report = path.join(f.opts.root, 'runs', p.result.run_id, 'report.md')
+  const beforeDraft = await snapshot(p.draft)
+  const readFile = fs.readFile
+  let reads = 0
+  fs.readFile = async (file, ...args) => {
+    // Inventory hashes it first, then scan verification reads it, then the
+    // confirmed deletion pass must verify again under the run lock.
+    if (file === report && ++reads === 3) await fs.appendFile(report, 'Synthetic late edit.\n')
+    return readFile(file, ...args)
+  }
+  syncBuiltinESMExports()
+  try {
+    await assert.rejects(
+      maintainJournal({ ...f.opts, confirmed: true }),
+      /report_evidence_mismatch/,
+    )
+  } finally {
+    fs.readFile = readFile
+    syncBuiltinESMExports()
+  }
+  assert.equal(reads, 3)
+  assert.deepEqual(await snapshot(p.draft), beforeDraft)
+  assert.equal((await p.receipt()).compaction, undefined)
+})
+
 test('backup/restore retains compact proofs, reports and publication verification', async (t) => {
   const f = await fixture(t)
   const p = await f.publish()
@@ -565,7 +671,7 @@ test('maintenance refuses active controller, missing ownership locks and concurr
   }
   await fs.unlink(lock)
   const before = await snapshot(f.base)
-  await assert.rejects(maintainJournal(f.opts), /Ingest-Lock/)
+  await assert.rejects(maintainJournal(f.opts), /lock_file_missing/)
   assert.deepEqual(await snapshot(f.base), before)
 })
 

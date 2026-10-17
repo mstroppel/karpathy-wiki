@@ -49,6 +49,11 @@ top-level receipts, run/report data, other journal files and live publication
 backups. `candidate_bytes` is the removable file payload, not a promise about
 filesystem blocks or compressed backup savings. Inspection hashes files and
 verifies commits, so large journals can take time to inspect.
+Live backup counts accept hardlinked regular files and count each directory entry's
+logical size, not unique inode storage. If a backup cannot be counted safely,
+`storage.live_backups_unreadable` is true and its byte count is partial; other
+candidates can still be inspected. This never relaxes draft ownership or retained
+backup evidence checks.
 
 The observed production total of **3.8 GiB has not been independently broken
 down**. Use this dry run on that installation; synthetic results below are not a
@@ -73,7 +78,10 @@ Only preparations satisfying **all** of these checks are candidates:
    locks for the deployed writer mode are held, and existing publisher/controller
    state is readable and idle. The controller initialization marker and boot
    authority must both validate, without creating or rewriting either file.
-   Report writers use the same per-run lock.
+   Report writers use the same per-run lock. This includes the model-facing
+   journal `report` tool: it creates `records.lock` when absent, queues behind
+   record appends/run completion in the same process, and refuses concurrent
+   cross-process writers with `Ein anderer Schreiber hält den Ingest-Lock`.
 
 Active, interrupted, blocked, failed, rolled-back, incomplete and orphaned work
 is retained, regardless of age. Missing or inconsistent proof never becomes
@@ -115,6 +123,8 @@ covering these categories; do not exclude the journal to accelerate archiving.
 | --- | --- |
 | `journal_maintenance_refused` | Check initialized publisher/controller state, existing locks, idle writers and a clean wiki. The command is operator-only, not a model/HTTP tool. |
 | `writer_lock_unavailable`, `wiki_index_lock_requires_operator` | A writer or unresolved Git operation prevents cleanup. Do not remove lock files to force progress. |
+| `lock_file_missing` | Required lock initialization is absent (including a never-published installation). Initialize through the normal writer lifecycle; maintenance never creates missing lock inodes. |
+| `live_backups_unreadable` (storage marker) | The live-backup byte count is partial. Inspect backups privately with writers stopped; cleanup never follows their symlinks or removes them. |
 | `unresolved_preparation`, `run_not_successfully_closed` | Inspect the private transaction/run and complete explicit recovery; age is irrelevant. |
 | `live_backup_evidence_changed` | Preserve the backup and investigate missing data or late writes through old descriptors. |
 | `invalid_controller_fence` | Restore/repair the controller marker and boot authority with the writer stopped; maintenance never initializes authority. |
@@ -122,6 +132,7 @@ covering these categories; do not exclude the journal to accelerate archiving.
 | `commit_*`, `journal_evidence_mismatch`, `report_evidence_mismatch` | Compare the private receipt, journal, report and verified backup. Do not rerun ingestion just to manufacture proof. |
 | `foreign_draft_*`, `hidden_draft_changes`, `unknown_draft_entries` | Preserve and inspect foreign work; it is not adopted or overwritten. |
 | `cleanup_manifest_mismatch` | Preserve changed/new files after interrupted cleanup; restore intact evidence before retrying. |
+| `draft_changed_during_cleanup`, `receipt_changed_during_cleanup` | Stop external edits and preserve changed evidence. Earlier candidates may already have been compacted; inspect before retrying. |
 | `unverified_evidence`, orphan directories | Ownership or evidence cannot be established. Inspect privately; nothing authorizes automatic deletion. |
 
 ## Reproducible synthetic check

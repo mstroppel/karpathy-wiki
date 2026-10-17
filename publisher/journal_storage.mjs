@@ -380,9 +380,22 @@ async function inspectAndCompact(opts) {
               : 'other'
     result.storage[category] += bytes
   }
+  // Live backups are never deletion candidates. Count regular files without
+  // hashing or rejecting shared recovery inodes; never follow symlinks.
+  async function countLiveBackup(file) {
+    const info = await lstat(file)
+    if (info.isDirectory()) {
+      for (const name of await readdir(file)) await countLiveBackup(path.join(file, name))
+    } else if (info.isFile()) result.storage.live_backups += info.size
+    else refuse('unsafe_file_type_or_hardlink')
+  }
   for (const name of await readdir(path.join(opts.wikiRoot, '.git'))) {
-    if (/^ingest-backup-[0-9a-f]+$/.test(name))
-      result.storage.live_backups += (await inventory(path.join(opts.wikiRoot, '.git', name))).bytes
+    if (!/^ingest-backup-[0-9a-f]+$/.test(name)) continue
+    try {
+      await countLiveBackup(path.join(opts.wikiRoot, '.git', name))
+    } catch {
+      result.storage.live_backups_unreadable = true
+    }
   }
   const candidates = []
   const receipts = names.filter((name) => /^prep-[0-9a-f]{32}\.json$/.test(name))

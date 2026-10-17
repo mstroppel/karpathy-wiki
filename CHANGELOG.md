@@ -17,6 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Cleanup requires creation-time ownership proof for nested Git metadata and
   validates existing controller boot authority without rewriting it. Drafts with
   unknown metadata, extra backup files or missing ownership proof are retained.
+  Live-backup accounting tolerates hardlinks without relaxing deletion checks;
+  missing locks and delete-phase evidence failures have distinct safe diagnostics.
+
+- Journal report assembly, including the model-facing `report` tool, now shares
+  the exclusive per-run `records.lock` with record appends and run completion.
+  It creates the lock when absent, queues in-process and refuses cross-process
+  contention instead of interleaving report writes.
 
 - Trusted manual ingest and authoring now share a controller execution fence:
   an in-flight worker/publication/report prevents controller boot replacement,

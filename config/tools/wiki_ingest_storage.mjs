@@ -48,7 +48,7 @@ export async function withIngestLock(file, action, { create = true } = {}) {
       'python3',
       [
         '-c',
-        'import fcntl, os, sys\nf = os.open(sys.argv[1], (os.O_CREAT if sys.argv[2] == "create" else 0) | os.O_RDWR | os.O_NOFOLLOW, 0o600)\nfcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)\nprint("locked", flush=True)\nsys.stdin.buffer.read()\n',
+        'import fcntl, os, sys\ntry:\n f = os.open(sys.argv[1], (os.O_CREAT if sys.argv[2] == "create" else 0) | os.O_RDWR | os.O_NOFOLLOW, 0o600)\nexcept FileNotFoundError:\n sys.exit(3)\nfcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)\nprint("locked", flush=True)\nsys.stdin.buffer.read()\n',
         file,
         create ? 'create' : 'existing',
       ],
@@ -63,7 +63,13 @@ export async function withIngestLock(file, action, { create = true } = {}) {
             ? resolve()
             : reject(new Error('Publikationslock fehlgeschlagen')),
         )
-        child.once('exit', () => reject(new Error('Ein anderer Schreiber hält den Ingest-Lock')))
+        child.once('exit', (code) =>
+          reject(
+            new Error(
+              code === 3 ? 'lock_file_missing' : 'Ein anderer Schreiber hält den Ingest-Lock',
+            ),
+          ),
+        )
       })
       return await action()
     } finally {
