@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Ingest recovery can isolate a failed private draft even when a worker mistypes
+  its preparation ID, using a unique persisted run/wiki/source match rather than
+  fuzzy ID matching. Original error evidence and all publication safety checks
+  remain intact; unrelated sources continue without a confirmation prompt.
+
 - Launcher updates preflight required recovery images before staging or stopping
   writers, with actionable image-specific errors. Disabled services without
   containers no longer require unused images. Updates show ordered progress and

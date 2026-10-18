@@ -735,6 +735,40 @@ export async function pendingIngestPublications({ root, wikiRoot, runId }) {
   return pending
 }
 
+// Recover only an absent/malformed model-supplied reference, never substitute
+// for an existing receipt. Exact persisted run/wiki/source identity is required;
+// fuzzy ID matching would risk releasing another source's draft.
+export async function resolveBlockedPreparation({ root, wikiRoot, runId, record }) {
+  const reported = record.preparation_id
+  if (!reported) return null
+  if (PREPARATION_RE.test(reported)) {
+    try {
+      await loadPreparation({ root, preparationId: reported })
+      return reported
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error
+    }
+  }
+  const matches = []
+  for (const file of await readdir(path.join(root, 'preparations'))) {
+    if (!/^prep-[0-9a-f]{32}\.json$/.test(file)) continue
+    const preparationId = file.slice(0, -5)
+    const receipt = await loadPreparation({ root, preparationId })
+    if (
+      receipt.preparation_id === preparationId &&
+      receipt.wiki_root === path.resolve(wikiRoot) &&
+      receipt.publication?.run_id === runId &&
+      ['adapter', 'source_key', 'source_revision', 'source_path', 'wiki_path'].every(
+        (field) => receipt.source?.[field] === record[field],
+      )
+    )
+      matches.push(preparationId)
+  }
+  if (matches.length !== 1)
+    throw new Error('Keine eindeutige gespeicherte Vorbereitung zum blockierten Datensatz')
+  return matches[0]
+}
+
 export async function assertIngestReleased(input) {
   const opts = options(input)
   const receipt = await loadPreparation(opts)
