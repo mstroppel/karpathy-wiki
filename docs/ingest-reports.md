@@ -122,7 +122,8 @@ revisions, and remains blocked in the report. A new run retries pending sources.
 Failures before preparation can also be skipped after checking clean Git.
 Foreign changes, mismatched receipts, changed HEAD, global `invalid`/`conflict`
 and non-draft publication state still require maintenance or verified resume.
-The planner never silently skips failures or continues against foreign work.
+Every automatic skip appears in planner warnings and the report. Unsafe failures
+block planning; the planner never continues against foreign work.
 
 Use `stage` for exactly one proposal: `draft`, `append`, or
 `reference` with `replacement`. Use the separate `review` operation with `page`
