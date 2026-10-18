@@ -297,8 +297,17 @@ async function stage(opts, receipt) {
       'invalid_stage',
       'stage: genau draft, append oder reference mit replacement; unveränderte Seite mit review bestätigen',
     )
+  // Keep non-review requests encoded with null, not false, so persisted
+  // completed and pending requests retain their idempotency keys.
   const requestHash = SHA(
-    JSON.stringify([page, opts.draft, opts.append, opts.reference, opts.replacement, reviewed]),
+    JSON.stringify([
+      page,
+      opts.draft,
+      opts.append,
+      opts.reference,
+      opts.replacement,
+      reviewed || undefined,
+    ]),
   )
   const previous = receipt.publication.stage_requests[requestHash]
   if (previous) return previous

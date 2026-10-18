@@ -88,6 +88,11 @@ bleiben schreibgeschützt; Code-/Providerfehler gehören an den Betreiber.
    und füge `record.text` vor JSON-Auswertung zusammen. Keine Worker-Erinnerungen,
    Quellenlektüre oder vollständige Berichtseinlesung als Ersatz. Weitere Details
    nur auf Nachfrage über `read`, `report: true`.
+   Ersetzte Audit-Datensätze nicht erneut aufführen. Jeder effektive Datensatz,
+   einschließlich blockierter Quellen, erscheint genau einmal; ältere bleiben Audit.
+   Die vollständigen Detailblöcke enthalten Quellenpfad, Quellrevision, Commit,
+   geänderte Seiten, Inhalt, Widersprüche, Extraktionsgrenzen, Quellenintegrität
+   und Status/Blocker; die Dateiübersicht ersetzt sie nicht.
 4. Gib je effektivem Datensatz einen kurzen Dateiblock aus:
    - **Name:** Dateiname; bei gleichen Namen mit Adapter und `source_key`.
    - **Inhalt:** ein Satz aus `content`.

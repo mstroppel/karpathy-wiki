@@ -168,6 +168,7 @@ test('manual trusted driver publishes one source from a fresh deny-all child', a
       }),
       create: async (parentID) => ({ id: 'ses_worker', parentID }),
       generate: async (_id, prompt) => {
+        assert.match(prompt, /für read_source, inspect, declare, stage, review oder state/)
         if (!prompt.includes('Vorschlag:'))
           return JSON.stringify({ proposal: { operation: 'read_source', offset: 1, limit: 80 } })
         if (!prompt.includes('"operation":"inspect"'))

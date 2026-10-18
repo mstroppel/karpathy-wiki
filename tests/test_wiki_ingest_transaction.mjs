@@ -634,6 +634,37 @@ for (const afterAppend of [false, true]) {
   })
 }
 
+test('stage and review retain stable persisted request hashes and cached append retries', async (t) => {
+  const f = await publicationFixture(t)
+  const append = '\nOne finding.\n'
+  const result = await f.call('stage', { page: 'overview.md', append })
+  const file = path.join(f.root, 'preparations', `${result.preparation_id}.json`)
+  const receipt = JSON.parse(await readFile(file, 'utf8'))
+  const hash = SHA(
+    JSON.stringify(['overview.md', undefined, append, undefined, undefined, undefined]),
+  )
+  assert.deepEqual(receipt.publication.stage_requests[hash], {
+    preparation_id: result.preparation_id,
+    page: 'overview.md',
+    staged: true,
+    live_unchanged: true,
+  })
+  const reviewHash = SHA(
+    JSON.stringify(['overview.md', undefined, undefined, undefined, undefined, true]),
+  )
+  assert.equal(receipt.publication.stage_requests[reviewHash].staged, true)
+  const retry = await f.call('stage', { page: 'overview.md', append })
+  assert.equal(retry.staged, true)
+  const retried = JSON.parse(await readFile(file, 'utf8'))
+  assert.deepEqual(retried.publication.stage_requests, receipt.publication.stage_requests)
+  assert.equal(retried.publication.proposal_bytes, receipt.publication.proposal_bytes)
+  await f.publish()
+  assert.equal(
+    (await readFile(path.join(f.wikiRoot, 'overview.md'), 'utf8')).split('One finding.').length - 1,
+    1,
+  )
+})
+
 test('lost stage acknowledgement does not repeat an append or require a copied text anchor', async (t) => {
   const f = await publicationFixture(t)
   const rename = fs.rename
@@ -662,6 +693,28 @@ test('lost stage acknowledgement does not repeat an append or require a copied t
     fs.rename = rename
     syncBuiltinESMExports()
   }
+  const files = await readdir(path.join(f.root, 'preparations'))
+  const receipts = await Promise.all(
+    files
+      .filter((file) => file.endsWith('.json'))
+      .map(async (file) =>
+        JSON.parse(await readFile(path.join(f.root, 'preparations', file), 'utf8')),
+      ),
+  )
+  const pending = receipts.find((receipt) => receipt.publication?.stage_pending)
+  assert.equal(
+    pending.publication.stage_pending.request,
+    SHA(
+      JSON.stringify([
+        'overview.md',
+        undefined,
+        '\nOne finding.\n',
+        undefined,
+        undefined,
+        undefined,
+      ]),
+    ),
+  )
   await f.call('stage', { page: 'overview.md', append: '\nOne finding.\n' })
   await f.publish()
   assert.equal(
