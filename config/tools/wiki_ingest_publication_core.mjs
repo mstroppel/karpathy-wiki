@@ -285,17 +285,20 @@ async function stage(opts, receipt) {
   const page = opts.page ?? receipt.source.page
   if (page === 'index.md' || page === 'log.md')
     throw new IngestInputError('generated_page', 'Index und Log erzeugt der Publisher')
+  const reviewed = opts.operation === 'review'
   const supplied = [
     opts.draft !== undefined,
     opts.append !== undefined,
     opts.reference !== undefined,
-    opts.reviewed === true,
+    reviewed,
   ].filter(Boolean).length
   if (supplied !== 1 || (opts.replacement !== undefined && opts.reference === undefined))
     throw new IngestInputError(
       'invalid_stage',
-      'Genau draft, append, reference mit replacement oder reviewed verwenden',
+      'stage: genau draft, append oder reference mit replacement; unveränderte Seite mit review bestätigen',
     )
+  // Keep non-review requests encoded with null, not false, so persisted
+  // completed and pending requests retain their idempotency keys.
   const requestHash = SHA(
     JSON.stringify([
       page,
@@ -303,7 +306,7 @@ async function stage(opts, receipt) {
       opts.append,
       opts.reference,
       opts.replacement,
-      opts.reviewed,
+      reviewed || undefined,
     ]),
   )
   const previous = receipt.publication.stage_requests[requestHash]
@@ -369,7 +372,7 @@ async function stage(opts, receipt) {
       ],
     }
     if (!old && !text) request = { ...draft, page, append: opts.replacement }
-  } else if (opts.reviewed === true) request = { ...draft, page, edits: [] }
+  } else if (reviewed) request = { ...draft, page, edits: [] }
   const current = await readFile(
     await confinedIngestPath(draft.wikiRoot, page, true),
     'utf8',
@@ -848,6 +851,33 @@ async function closeSingleRun(opts, pub, unfinished = []) {
   })
 }
 
+// Retain failed private proposals as evidence. This never restores live pages,
+// rewrites commits or deletes draft bytes, and cannot abandon publication intent.
+export async function abandonFailedDraft(input) {
+  const opts = { ...DEFAULTS, ...input }
+  return withWikiLock(opts, async () => {
+    await assertCleanIngestWiki(opts.wikiRoot)
+    const receipt = await loadPreparation(opts)
+    if (receipt.wiki_root !== path.resolve(opts.wikiRoot))
+      throw new Error('Vorbereitung gehört nicht zu diesem Publisher/Wiki')
+    for (const field of ['adapter', 'source_key', 'source_revision', 'source_path', 'wiki_path']) {
+      if (receipt.source[field] !== opts.record[field])
+        throw new Error(`Vorbereitung gehört nicht zum blockierten Datensatz: ${field}`)
+    }
+    if (
+      receipt.publication?.run_id !== opts.runId ||
+      !['draft', 'abandoned'].includes(receipt.publication?.phase) ||
+      receipt.rollback_started ||
+      receipt.publication.commit ||
+      receipt.publication.index_lock ||
+      (await git(opts.wikiRoot, ['rev-parse', 'HEAD'])).toString().trim() !== receipt.base_commit
+    )
+      throw new Error('Kein isolierter Entwurf; Zustand prüfen und Publikation wiederaufnehmen')
+    receipt.publication.phase = 'abandoned'
+    await savePreparation(opts.root, receipt)
+  })
+}
+
 export async function ingestPublication(input) {
   const opts = { ...DEFAULTS, ...input }
   // Missing/malformed identity is rejected before locks, receipts or wiki
@@ -890,12 +920,14 @@ export async function ingestPublication(input) {
       }
       if (!receipt.publication)
         throw new Error('Initialisierung unvollständig; bestätigtes Rücksetzen erforderlich')
+      if (receipt.publication.phase === 'abandoned' && opts.operation !== 'state')
+        throw new Error('Fehlgeschlagener Entwurf ist stillgelegt; neuer Lauf erforderlich')
       if (
-        ['stage', 'publish'].includes(opts.operation) &&
+        ['stage', 'review', 'publish'].includes(opts.operation) &&
         (receipt.publication.input_errors?.[opts.operation] ?? 0) >= 2
       )
         throw new Error('Eingabekorrektur-Limit erreicht; Quelle als Blocker melden')
-      if (['inspect', 'read_source', 'stage', 'declare'].includes(opts.operation)) {
+      if (['inspect', 'read_source', 'stage', 'review', 'declare'].includes(opts.operation)) {
         if (receipt.rolled_back || receipt.rollback_started)
           throw new Error('Vorbereitung ist zurückgesetzt')
         receipt.publication.tool_calls = (receipt.publication.tool_calls ?? 0) + 1
@@ -921,6 +953,7 @@ export async function ingestPublication(input) {
         case 'inspect':
           return withBudget(await inspect(opts, receipt))
         case 'stage':
+        case 'review':
           return withBudget(await stage(opts, receipt))
         case 'publish':
         case 'resume':

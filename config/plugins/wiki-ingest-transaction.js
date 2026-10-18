@@ -8,7 +8,7 @@ export default {
       tools.add({
         name: 'wiki_ingest_transaction',
         description:
-          'Eine Quelle in einem privaten Entwurf bearbeiten: prepare, read_source (vollständig paginiert), inspect (gezielte Wiki-Abschnitte mit Referenz), stage (Quellseiten-draft, neue Seite, append oder Referenz+replacement; reviewed bestätigt unveränderte Übersicht), publish (prüft alle Seiten, erzeugt Index/Log, genau einen Commit und Journal). Keine eigenen Git-/Wiki-Schreibaufrufe. state prüft unterbrochene Arbeit; resume gleicht gespeicherte Publikation ohne doppelte Commits ab. rollback nur bestätigt. Bei error nur correctable Eingaben einmal korrigieren; unbekannte Zustände zuerst prüfen.',
+          'Private Quellenaufnahme: prepare, read_source, inspect, stage (genau draft, append oder reference+replacement), review (unveränderte Seite), publish (validiert und erzeugt Commit/Journal). state/resume gleichen unterbrochene Publikation ab; rollback nur bestätigt. Keine direkten Wiki-/Git-Schreibaufrufe.',
         input: {
           type: 'object',
           properties: {
@@ -19,6 +19,7 @@ export default {
                 'read_source',
                 'inspect',
                 'stage',
+                'review',
                 'publish',
                 'state',
                 'resume',
@@ -43,7 +44,7 @@ export default {
             page: {
               type: 'string',
               description:
-                'Relativer deklarierter Wiki-Pfad; Standard Quellseite. Index/Log sind codegeneriert.',
+                'Relativer deklarierter Wiki-Pfad; review bestätigt diese Seite ohne Änderung. Standard Quellseite. Index/Log sind codegeneriert.',
             },
             offset: { type: 'integer', minimum: 1 },
             limit: { type: 'integer', minimum: 1, maximum: 80 },
@@ -72,11 +73,6 @@ export default {
               type: 'string',
               description:
                 'stage: an eine bestehende thematische Seite anhängen, mit benötigten Zeilenumbrüchen.',
-            },
-            reviewed: {
-              type: 'boolean',
-              description:
-                'stage: unveränderte thematische Seite nach gezielter Prüfung bestätigen.',
             },
             title: {
               type: 'string',

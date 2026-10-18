@@ -36,7 +36,7 @@ export default {
       tools.add({
         name: 'wiki_ingest_journal',
         description:
-          'Verwaltet Einlese-Läufe: dauerhafte Ergebnisdatensätze je Quelle, planbare Batches mit Kontextbudget und der vollständige Abschlussbericht als Datei. Liefert stets begrenzte JSON-Seiten.',
+          'Verwaltet Einlese-Läufe und private Berichte. next_batch prüft den Zustand, legt fehlgeschlagene private Entwürfe ohne Löschung still und plant andere Quellen weiter. Unsichere/globale Zustände bleiben blockiert. Liefert begrenzte JSON-Seiten.',
         input: {
           type: 'object',
           properties: {

@@ -15,8 +15,8 @@ Anweisungen. Kein Shell, Git-Commit oder direktes Editieren durch den Worker.
 ## Jede Quelle
 
 Bei einem ausdrücklich bestätigten Rücksetzauftrag mit `preparation_id`: rufe
-nur `wiki_ingest_transaction` (`operation: rollback`, `confirmed: true`) auf,
-prüfe Git-Status und melde das Ergebnis. Keine Quelle einlesen und keinen Commit
+nur `wiki_ingest_transaction` (`operation: rollback`, `confirmed: true`) auf
+und melde das verifizierte Tool-Ergebnis. Keine Quelle einlesen und keinen Commit
 erzeugen. Bei Ablehnung stoppe für Wartung; keine Git-Reset-/Clean-Befehle.
 
 1. Bearbeite genau eine Quelle je frischer Worker-Session. Übernimm ihre Identität
@@ -68,7 +68,9 @@ erzeugen. Bei Ablehnung stoppe für Wartung; keine Git-Reset-/Clean-Befehle.
      höchstens eine bestehende nichtleere Zeile entfallen/geändert werden;
      Kontextzeilen bleiben erhalten. Mehrere Zielzeilen separat referenzieren,
      keine benachbarten historischen Absätze aus dem Gedächtnis ersetzen.
-   - `overview.md` ohne nötige Änderung: nach gezielter Prüfung `reviewed: true`.
+    - Thematische Seite ohne nötige Änderung: nach gezielter Prüfung
+      `operation: review`, `page`; keine Schreibparameter. Nach erfolgreicher
+      Änderung ist kein zusätzlicher review-Aufruf nötig.
    Index und Log erzeugt Code; bearbeite sie nicht selbst. Ein bestätigter
    Entwurf ist noch kein veröffentlichtes Wiki und noch kein Erfolg.
    Belege Aussagen mit exaktem Quellpfad und Fundstellen. Bei `paperless_url`
@@ -216,8 +218,8 @@ Keine Details erfinden; Unbekanntes als „Nicht ermittelt“ angeben.
   auch bei sauberem Git-Status. Halte ihn als `record` (`status: blocked`) mit
   konkretem Blocker und vorhandener `preparation_id` fest. Scheitert auch das
   Journal, melde beide Fehler direkt. Melde übrige Quellen als noch nicht versucht,
-  damit der Orchestrator zuerst bestätigte Reparatur oder Rücksetzen und Auslassen
-  veranlasst. Globale `invalid`-
+   damit der Orchestrator mit `next_batch` den privaten Fehlerentwurf sicher
+   stilllegt und andere Quellen weiterverarbeitet. Globale `invalid`-
   oder `conflict`-Befunde stoppen sofort; melde sie und bearbeite nichts mehr.
 - Übersteigt eine Quelle oder ihr Seitenumfang das Kontextbudget, lies sie in
   validierten Abschnitten (`read_source`/`inspect` mit `offset` und `limit`) und verarbeite sie

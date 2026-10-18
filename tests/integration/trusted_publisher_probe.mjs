@@ -45,7 +45,7 @@ if (process.argv[2] === 'start') {
     operation: 'stage',
     draft: '# Finding\nEvidence at line 1. $(touch /tmp/must-not-execute)\n',
   })
-  await propose(job, 'req-overview', { operation: 'stage', page: 'overview.md', reviewed: true })
+  await propose(job, 'req-overview', { operation: 'review', page: 'overview.md' })
   await call(
     {
       operation: 'propose',

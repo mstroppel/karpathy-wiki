@@ -168,6 +168,7 @@ test('manual trusted driver publishes one source from a fresh deny-all child', a
       }),
       create: async (parentID) => ({ id: 'ses_worker', parentID }),
       generate: async (_id, prompt) => {
+        assert.match(prompt, /für read_source, inspect, declare, stage, review oder state/)
         if (!prompt.includes('Vorschlag:'))
           return JSON.stringify({ proposal: { operation: 'read_source', offset: 1, limit: 80 } })
         if (!prompt.includes('"operation":"inspect"'))
@@ -181,9 +182,9 @@ test('manual trusted driver publishes one source from a fresh deny-all child', a
               draft: '# Synthetic finding\n\nFinding at source line 1.\n',
             },
           })
-        if (!prompt.includes('"reviewed":true'))
+        if (!prompt.includes('"operation":"review"'))
           return JSON.stringify({
-            proposal: { operation: 'stage', page: 'overview.md', reviewed: true },
+            proposal: { operation: 'review', page: 'overview.md' },
           })
         return JSON.stringify({ report: REPORT })
       },
@@ -421,7 +422,7 @@ test('lost summary acknowledgement survives restart; explicit resume delivers ve
       { proposal: { operation: 'read_source', offset: 1, limit: 80 } },
       { proposal: { operation: 'inspect', page: 'overview.md', offset: 1, limit: 80 } },
       { proposal: { operation: 'stage', draft: '# Synthetic finding\n\nFinding at line 1.\n' } },
-      { proposal: { operation: 'stage', page: 'overview.md', reviewed: true } },
+      { proposal: { operation: 'review', page: 'overview.md' } },
       { report: REPORT },
     ]
     runtime.generate = async () => {

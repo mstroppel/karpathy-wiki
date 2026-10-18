@@ -41,8 +41,8 @@ createServer(async (req, res) => {
           draft: '# Synthetic finding\n\nFinding from source line 1.\n',
         },
       }
-    else if (!prompt.includes('\\"reviewed\\":true'))
-      output = { proposal: { operation: 'stage', page: 'overview.md', reviewed: true } }
+    else if (!prompt.includes('\\"operation\\":\\"review\\"'))
+      output = { proposal: { operation: 'review', page: 'overview.md' } }
     else
       output = {
         report: {
