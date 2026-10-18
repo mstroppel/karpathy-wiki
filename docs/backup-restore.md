@@ -33,6 +33,13 @@ container images, including partially updated software; they do not invent image
 for never-installed services. Restore loads saved image IDs and retags them before
 starting the saved configuration with its saved profiles and `--pull never`.
 
+If a configured tag is missing locally, the launcher can still save the exact
+installed image by ID when a container of this project and service was created
+from that same configured reference and its image ID remains locally inspectable.
+This does not pull software or recreate tags during preflight; rollback recreates
+the saved tag. Containers created from another reference (including `latest`) do
+not prove which image belongs to the configured version and are not substituted.
+
 Required-image and pinned/container consistency checks run before launcher staging,
 backup storage creation, or stopping writers. A failed inspection names the image
 and the phase: check Docker access first, then restore the exact originally

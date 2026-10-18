@@ -23,6 +23,8 @@ def main():
     with tempfile.TemporaryDirectory(prefix="kw-backup-probe-") as temporary:
         project = Path(temporary)
         name = f"kw-backup-{os.getpid()}-{int(time.time())}"
+        source_image = image
+        image = f"{name}:installed"
         cache = project / ".cache"
         cache.mkdir()
         data = project / "data"
@@ -87,6 +89,7 @@ def main():
             (cache / f"compose-v{version}.yaml").write_text(json.dumps(config))
         launcher = project / "karpathy-wiki.sh"
         try:
+            run("docker", "image", "tag", source_image, image)
             run("sh", str(launcher), "up", "-d", "--wait", "--wait-timeout", "30")
             # Prove that the live writer and the archived data use the same bind.
             run(
@@ -117,12 +120,20 @@ def main():
                 == "true"
             )
             (project / ".env").write_text(original_env)
+            installed_image = run(
+                "docker", "inspect", container, "--format", "{{.Image}}"
+            ).stdout.strip()
+            # Remove only this probe's private tag, retaining the installed image.
+            run("docker", "image", "rm", image)
             updated = run("sh", str(launcher), "update", "2.0.0", "-v")
             assert "operation docker compose pull: elapsed" in updated.stderr
             metadata = [
                 json.loads(p.read_text()) for p in (project / "backups").glob("*/metadata.json")
             ]
             identifier = metadata[0]["id"]
+            assert metadata[0]["images"][image] == installed_image
+            missing_tag = subprocess.run(["docker", "image", "inspect", image], capture_output=True)
+            assert missing_tag.returncode != 0
             assert "localhost.invalid/kw-synthetic-never-installed:227" not in metadata[0]["images"]
             (data / ".session").write_text("synthetic-new-session")
             (data / "new-only").write_text("must disappear")
@@ -202,6 +213,7 @@ def main():
                 "down",
                 "--remove-orphans",
             )
+            subprocess.run(["docker", "image", "rm", image], capture_output=True)
 
 
 if __name__ == "__main__":

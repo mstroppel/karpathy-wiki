@@ -471,7 +471,21 @@ class Instance:
                 images[image] = containers[name]["Image"]
             else:
                 try:
-                    info = json.loads(run(["docker", "image", "inspect", image]))
+                    try:
+                        info = json.loads(run(["docker", "image", "inspect", image]))
+                    except BackupError:
+                        container = containers.get(name)
+                        if container is None or container["Config"].get("Image") != image:
+                            raise
+                        # A removed tag need not lose the installed software. Save
+                        # its immutable ID; restore() recreates the configured tag.
+                        # Never substitute a container created from another reference.
+                        installed_id = container["Image"]
+                        info = json.loads(run(["docker", "image", "inspect", installed_id]))
+                        if info[0]["Id"] != installed_id:
+                            raise BackupError(
+                                "installed container image ID does not match"
+                            ) from None
                     images[image] = info[0]["Id"]
                 except BackupError:
                     if not rescue:

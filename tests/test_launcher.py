@@ -27,7 +27,10 @@ if args[:2] == ['image', 'inspect']:
     if args[-1] == os.environ.get('STUB_MISSING_IMAGE'):
         print('No such image: synthetic-private-secret', file=sys.stderr)
         sys.exit(1)
-    print(json.dumps([{'Id': 'sha256:' + 'a' * 64}]))
+    info = {'Id': 'sha256:' + 'a' * 64}
+    if os.environ.get('STUB_INSPECTED_IMAGE_ID'):
+        info['Id'] = os.environ['STUB_INSPECTED_IMAGE_ID']
+    print(json.dumps([info]))
 elif args[:2] == ['image', 'save']:
     if os.environ.get('STUB_INCOMPLETE'):
         Path(args[args.index('--output') + 1]).write_bytes(b'incomplete archive')
@@ -453,7 +456,11 @@ class LauncherTests(unittest.TestCase):
                     "update",
                     "1.2.3",
                     *options,
-                    env={"STUB_MISSING_IMAGE": "synthetic:0.0.1", "STUB_CONTAINERS": "1"},
+                    env={
+                        "STUB_MISSING_IMAGE": "synthetic:0.0.1",
+                        "STUB_CONTAINERS": "1",
+                        "STUB_CONTAINER_IMAGE": "synthetic:other",
+                    },
                 )
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("failed during backup image checks", result.stderr)
@@ -465,6 +472,57 @@ class LauncherTests(unittest.TestCase):
                 self.assertFalse((self.project / ".launcher-stage").exists())
                 self.assertFalse((self.project / "backups").exists())
                 self.assertFalse(any(c[0] == "stop" or "pull" in c for c in self.docker_calls()))
+
+    def test_missing_tag_uses_matching_container_image_id_and_remains_restorable(self):
+        self.write_env("KARPATHY_WIKI_VERSION=0.0.1\n")
+        image_id = "sha256:" + "a" * 64
+        environment = {"STUB_MISSING_IMAGE": "synthetic:0.0.1", "STUB_CONTAINERS": "1"}
+        result = self.run_launcher("update", "1.2.3", env=environment)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        metadata = self.snapshot_metadata()[0]
+        self.assertEqual(metadata["images"], {"synthetic:0.0.1": image_id})
+        calls = self.docker_calls()
+        self.assertIn(["image", "inspect", image_id], calls)
+        save = next(c for c in calls if c[:2] == ["image", "save"])
+        self.assertEqual(save[-1], image_id)
+        self.assertFalse(any(c[:2] == ["image", "tag"] for c in calls))
+        save_index = calls.index(save)
+        self.assertFalse(any("pull" in c for c in calls[:save_index]))
+        self.assertIn(
+            "label=com.docker.compose.project=test-wiki", next(c for c in calls if c[0] == "ps")
+        )
+
+        self.docker_log.write_text("")
+        result = self.run_launcher(
+            "rollback", metadata["id"], input=f"rollback {metadata['id']}\n", env=environment
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(["image", "tag", image_id, "synthetic:0.0.1"], self.docker_calls())
+
+    def test_missing_tag_without_proven_local_container_image_fails_closed(self):
+        self.write_env("KARPATHY_WIKI_VERSION=0.0.1\n")
+        for extra in (
+            {},
+            {"STUB_CONTAINERS": "1", "STUB_CONTAINER_IMAGE": "synthetic:latest"},
+            {"STUB_CONTAINERS": "1", "STUB_FAIL": "sha256:" + "a" * 64},
+            {"STUB_CONTAINERS": "1", "STUB_INSPECTED_IMAGE_ID": "sha256:" + "b" * 64},
+        ):
+            with self.subTest(extra=extra):
+                self.docker_log.write_text("")
+                result = self.run_launcher(
+                    "update", "1.2.3", env={"STUB_MISSING_IMAGE": "synthetic:0.0.1", **extra}
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("cannot inspect required local image", result.stderr)
+                self.assertNotIn("synthetic-private-secret", result.stdout + result.stderr)
+                self.assertFalse((self.project / ".launcher-stage").exists())
+                self.assertFalse((self.project / "backups").exists())
+                self.assertFalse(
+                    any(
+                        c[0] == "stop" or "pull" in c or c[:2] == ["image", "tag"]
+                        for c in self.docker_calls()
+                    )
+                )
 
     def profile_config(self, **writer):
         return json.dumps(
