@@ -252,7 +252,6 @@ export async function publisherControl(input, configuration = {}) {
           'append',
           'reference',
           'replacement',
-          'reviewed',
           'offset',
           'limit',
           'query',
@@ -260,7 +259,11 @@ export async function publisherControl(input, configuration = {}) {
         ],
         ['operation'],
       )
-      if (!['read_source', 'inspect', 'stage', 'declare', 'state'].includes(proposal.operation))
+      if (
+        !['read_source', 'inspect', 'stage', 'review', 'declare', 'state'].includes(
+          proposal.operation,
+        )
+      )
         throw new Error('invalid_proposal')
       args = { ...proposal, changedPages: proposal.changed_pages }
     } else {

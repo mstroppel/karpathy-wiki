@@ -5,7 +5,7 @@ import { withIngestLock, writeIngestFile } from './wiki_ingest_storage.mjs'
 import {
   PREPARATION_RE,
   assertCleanIngestWiki,
-  assertIngestRolledBack,
+  assertIngestReleased,
   confinedIngestPath,
   pendingIngestPublications,
   verifyIngestCommit,
@@ -815,8 +815,8 @@ async function fileSize(filePath) {
   }
 }
 
-// A skip is an explicit recovery decision, not a successful ingestion. It only
-// acknowledges this exact record: a later failure stops planning again.
+// A skip acknowledges a released failed preparation, never successful ingestion.
+// The planner may release private drafts; live rollback still needs confirmation.
 export async function skipBlockedSource({
   root,
   runId,
@@ -835,7 +835,7 @@ export async function skipBlockedSource({
   if (!record) throw new Error('Kein aktueller blockierter Datensatz an record_index')
   await assertCleanIngestWiki(wikiRoot)
   if (record.preparation_id) {
-    await assertIngestRolledBack({ root, wikiRoot, preparationId: record.preparation_id, record })
+    await assertIngestReleased({ root, wikiRoot, preparationId: record.preparation_id, record })
   }
   const skipped = [...new Set([...(run.recovery?.skipped_records ?? []), recordIndex])]
   await writeRunFile(
@@ -869,7 +869,7 @@ export async function planNextBatch({
   scan = scanIngestStatus,
   now = Date.now(),
 } = {}) {
-  const run = await loadRun({ root, runId })
+  let run = await loadRun({ root, runId })
   if (run.state !== 'running') throw new Error(`Lauf ${runId} ist bereits abgeschlossen`)
   const budget = {
     budget_tokens: checkBudgetField(budgetTokens ?? run.budget.budget_tokens, 'budget_tokens'),
@@ -928,18 +928,42 @@ export async function planNextBatch({
     (record) =>
       record.status === 'blocked' && !run.recovery?.skipped_records.includes(record.record_index),
   )
-  if (unacknowledged.length) {
-    return {
-      ...base,
-      batch: [],
-      remaining: base.pending_total,
-      blocked: true,
-      recovery_required: true,
-      reasons: [
-        'Quellenfehler: Reparatur oder bestätigtes Auslassen erforderlich; keine weiteren Batches',
-      ],
+  for (const record of unacknowledged) {
+    try {
+      if (!wikiSourceRoot) throw new Error('Wiki-Wurzel zur Zustandsprüfung erforderlich')
+      const wikiRoot = path.dirname(wikiSourceRoot)
+      if (record.preparation_id) {
+        const { abandonFailedDraft } = await import('./wiki_ingest_publication_core.mjs')
+        await abandonFailedDraft({
+          root,
+          wikiRoot,
+          runId,
+          preparationId: record.preparation_id,
+          record,
+        })
+      }
+      await skipBlockedSource({
+        root,
+        wikiRoot,
+        runId,
+        recordIndex: record.record_index,
+        confirmed: true,
+      })
+      base.warnings.push(
+        `Fehlgeschlagene Quelle für diesen Lauf ausgelassen: ${record.source_path}`,
+      )
+    } catch (error) {
+      return {
+        ...base,
+        batch: [],
+        remaining: base.pending_total,
+        blocked: true,
+        recovery_required: true,
+        reasons: [`Quellenfehler nicht sicher isolierbar: ${errorMessage(error)}`],
+      }
     }
   }
+  if (unacknowledged.length) run = await loadRun({ root, runId })
 
   const excluded = new Set()
   const skippedSources = new Set()

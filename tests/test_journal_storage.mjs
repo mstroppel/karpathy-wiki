@@ -151,7 +151,7 @@ async function fixture(t) {
     const p = await prepare()
     await p.call('read_source')
     await p.call('stage', { draft: '# Synthetic finding\nSupported evidence.\n' })
-    await p.call('stage', { page: 'overview.md', reviewed: true })
+    await p.call('review', { page: 'overview.md' })
     p.result = await p.call('publish', {
       title: 'Synthetic finding',
       content: 'Supported evidence, line 1.',

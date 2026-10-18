@@ -30,7 +30,7 @@ async function fixture(t) {
       operation: 'stage',
       draft: '# Finding\nEvidence: source line 1.\n$(touch /tmp/must-not-execute)\n',
     })
-    await propose(job, { operation: 'stage', page: 'overview.md', reviewed: true })
+    await propose(job, { operation: 'review', page: 'overview.md' })
     return job
   }
   const publish = (job, request_id = 'req-publish') =>

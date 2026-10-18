@@ -17,6 +17,7 @@ import {
   verifyIngestCommit,
 } from '../config/tools/wiki_ingest_transaction_core.mjs'
 import {
+  finishRun,
   loadRun,
   planNextBatch,
   skipBlockedSource,
@@ -30,6 +31,202 @@ const runFile = promisify(execFile)
 const PAGE = 'sources/webdav/notes.md'
 const SHA = (text) => createHash('sha256').update(text).digest('hex')
 const SOURCE = 'Synthetic selected source.\n'
+
+test('review is separate from stage and needs no edit reference or extra acknowledgement', async (t) => {
+  const { ingestPublication } = await import('../config/tools/wiki_ingest_publication_core.mjs')
+  const f = await fixture(t)
+  const prepared = await ingestPublication({
+    ...f.opts,
+    operation: 'prepare',
+    adapter: 'webdav',
+    sourceKey: 'notes.md',
+    sourceRevision: SHA(SOURCE),
+  })
+  const call = (operation, extra = {}) =>
+    ingestPublication({ ...f.opts, preparationId: prepared.preparation_id, operation, ...extra })
+  await call('read_source')
+  await call('stage', { draft: '# Supported finding\nSource line 1.\n' })
+  const section = await call('inspect', { page: 'overview.md' })
+  // An earlier, corrected edit rejection does not affect the separate review operation.
+  await assert.rejects(
+    call('stage', { page: 'overview.md', reference: 'f'.repeat(64), replacement: 'x' }),
+    (e) => e.ingest.correctable,
+  )
+  await call('stage', {
+    page: 'overview.md',
+    reference: section.reference,
+    replacement: section.text + '\nSupported addition.\n',
+  })
+  await assert.rejects(
+    call('review', { page: 'overview.md', reference: section.reference }),
+    (error) => error.ingest.code === 'invalid_stage' && error.ingest.correctable,
+  )
+  await call('review', { page: 'overview.md' })
+  const result = await call('publish', {
+    title: 'Synthetic finding',
+    content: 'Finding at source line 1.',
+    contradictions: 'None.',
+    extractionLimits: 'Fully read line 1.',
+  })
+  assert.equal(result.status, 'ingested')
+  assert.match(await readFile(path.join(f.wikiRoot, 'overview.md'), 'utf8'), /Supported addition/)
+})
+
+async function failedPrivateDraft(t, { preparation = true } = {}) {
+  const { ingestPublication } = await import('../config/tools/wiki_ingest_publication_core.mjs')
+  const f = await fixture(t)
+  const other = 'Other synthetic source.\n'
+  f.manifest.items.push({
+    ...f.manifest.items[0],
+    source_key: 'other.md',
+    source_path: 'other.md',
+    wiki_path: 'webdav/other.md',
+    source_revision: SHA(other),
+    frontmatter: { source: 'webdav', source_path: 'other.md', source_revision: SHA(other) },
+    claim: { source: 'webdav', source_path: 'other.md' },
+  })
+  await writeFile(path.join(f.sourceRoot, 'webdav', 'manifest.json'), JSON.stringify(f.manifest))
+  await writeFile(path.join(f.sourceRoot, 'webdav', 'other.md'), other)
+  const { run } = await startRun({ root: f.root })
+  const args = { ...f.opts, runId: run.run_id, wikiSourceRoot: path.join(f.wikiRoot, 'sources') }
+  const prepared = preparation
+    ? await ingestPublication({
+        ...args,
+        operation: 'prepare',
+        adapter: 'webdav',
+        sourceKey: 'notes.md',
+        sourceRevision: SHA(SOURCE),
+      })
+    : null
+  const input = { ...args, preparationId: prepared?.preparation_id ?? null }
+  if (preparation)
+    await ingestPublication({ ...input, operation: 'stage', draft: '# Unpublished evidence\n' })
+  await writeRecord({
+    ...args,
+    record: f.record(input, null, {
+      status: 'blocked',
+      blocker: 'Synthetic extraction failure',
+      changed_pages: [],
+    }),
+  })
+  return { ...f, args, input, other, ingestPublication }
+}
+
+for (const preparation of [true, false]) {
+  test(`source failure continues automatically, retaining evidence and report (preparation=${preparation})`, async (t) => {
+    const f = await failedPrivateDraft(t, { preparation })
+    const baseline = await f.git('rev-parse', 'HEAD')
+    let plan = await planNextBatch(f.args)
+    assert.equal(plan.blocked, false)
+    assert.deepEqual(
+      plan.batch.map((entry) => entry.source_key),
+      ['other.md'],
+    )
+    assert.equal(await f.git('rev-parse', 'HEAD'), baseline)
+    assert.equal(await f.git('status', '--porcelain'), '')
+    if (preparation) {
+      const state = await f.ingestPublication({ ...f.input, operation: 'state' })
+      assert.equal(state.phase, 'abandoned')
+      const receipt = JSON.parse(
+        await readFile(path.join(f.root, 'preparations', `${f.input.preparationId}.json`)),
+      )
+      const evidence = path.join(f.root, 'preparations', f.input.preparationId, 'wiki', PAGE)
+      assert.match(await readFile(evidence, 'utf8'), /Unpublished evidence/)
+      assert.equal(receipt.rolled_back, undefined)
+      for (const operation of ['stage', 'review', 'publish', 'resume']) {
+        await assert.rejects(
+          f.ingestPublication({ ...f.input, operation, draft: '# Do not publish' }),
+          /stillgelegt/,
+        )
+      }
+    }
+    // A new revision of the failed identity must not re-enter the same run.
+    f.manifest.items[0].source_revision = SHA('new revision')
+    f.manifest.items[0].frontmatter.source_revision = SHA('new revision')
+    await writeFile(path.join(f.sourceRoot, 'webdav', 'manifest.json'), JSON.stringify(f.manifest))
+    plan = await planNextBatch(f.args)
+    assert.deepEqual(
+      plan.batch.map((entry) => entry.source_key),
+      ['other.md'],
+    )
+    const prepared = await f.ingestPublication({
+      ...f.args,
+      operation: 'prepare',
+      adapter: 'webdav',
+      sourceKey: 'other.md',
+      sourceRevision: SHA(f.other),
+    })
+    const call = (operation, extra = {}) =>
+      f.ingestPublication({
+        ...f.opts,
+        preparationId: prepared.preparation_id,
+        operation,
+        ...extra,
+      })
+    await call('read_source')
+    await call('stage', { draft: '# Other finding\nSource line 1.\n' })
+    await call('review', { page: 'overview.md' })
+    assert.equal(
+      (
+        await call('publish', {
+          title: 'Other finding',
+          content: 'Other finding at line 1.',
+          contradictions: 'None.',
+          extractionLimits: 'Read line 1.',
+        })
+      ).status,
+      'ingested',
+    )
+    const finalPlan = await planNextBatch(f.args)
+    assert.equal(finalPlan.done, true)
+    const finished = await finishRun({ ...f.args, finalStatus: finalPlan.summary })
+    assert.deepEqual(finished.counts, { records: 2, ingested: 1, blocked: 1 })
+    assert.match(await readFile(finished.absolute_path, 'utf8'), /Synthetic extraction failure/)
+    const next = await startRun({ root: f.root })
+    assert.deepEqual(
+      (await planNextBatch({ ...f.args, runId: next.run.run_id })).batch.map(
+        (entry) => entry.source_key,
+      ),
+      ['notes.md'],
+    )
+  })
+}
+
+for (const unsafe of ['foreign', 'head', 'identity', 'run', 'publication', 'global']) {
+  test(`automatic continuation refuses unsafe state: ${unsafe}`, async (t) => {
+    const f = await failedPrivateDraft(t)
+    const receiptPath = path.join(f.root, 'preparations', `${f.input.preparationId}.json`)
+    const receipt = JSON.parse(await readFile(receiptPath))
+    if (unsafe === 'foreign')
+      await writeFile(path.join(f.wikiRoot, 'foreign.md'), 'Preserve foreign work\n')
+    if (unsafe === 'head') await f.git('commit', '--allow-empty', '-qm', 'Foreign commit')
+    if (unsafe === 'identity') receipt.source.source_key = 'foreign.md'
+    if (unsafe === 'run') receipt.publication.run_id = 'run-20000101t000000-abcdef'
+    if (unsafe === 'publication') receipt.publication.phase = 'sealing'
+    if (['identity', 'run', 'publication'].includes(unsafe))
+      await writeFile(receiptPath, JSON.stringify(receipt))
+    if (unsafe === 'global')
+      await writeFile(path.join(f.sourceRoot, 'webdav', 'manifest.json'), '{}')
+    const plan = await planNextBatch(f.args)
+    if (unsafe === 'publication') {
+      assert.equal(plan.batch[0].recovery_only, true)
+      assert.equal(plan.batch[0].preparation_id, f.input.preparationId)
+    } else {
+      assert.equal(plan.blocked, true)
+      assert.deepEqual(plan.batch, [])
+    }
+    assert.equal(
+      JSON.parse(await readFile(receiptPath)).publication.phase,
+      receipt.publication.phase,
+    )
+    assert.deepEqual((await loadRun(f.args)).recovery?.skipped_records ?? [], [])
+    if (unsafe === 'foreign')
+      assert.equal(
+        await readFile(path.join(f.wikiRoot, 'foreign.md'), 'utf8'),
+        'Preserve foreign work\n',
+      )
+  })
+}
 
 test('format-only append is valid and missing versus ambiguous edits are distinguishable', async (t) => {
   const f = await fixture(t)
@@ -182,7 +379,7 @@ test('batch verification accepts a Paperless generation switch before prepare wi
     ingestPublication({ ...f.opts, preparationId: prepared.preparation_id, operation, ...args })
   await call('read_source')
   await call('stage', { draft: `# Synthetic finding\nEvidence at source line 5: ${actualPath}\n` })
-  await call('stage', { page: 'overview.md', reviewed: true })
+  await call('review', { page: 'overview.md' })
   const published = await call('publish', {
     runId: run.run_id,
     title: 'Synthetic finding',
@@ -304,7 +501,7 @@ async function publicationFixture(t) {
     ingestPublication({ ...f.opts, preparationId: prepared.preparation_id, operation, ...args })
   await call('read_source')
   await call('stage', { draft: '# Supported synthesis\nEvidence: source line 1.\n' })
-  await call('stage', { page: 'overview.md', reviewed: true })
+  await call('review', { page: 'overview.md' })
   const publish = () =>
     call('publish', {
       runId: run.run_id,
@@ -533,7 +730,7 @@ test('context targets warn without blocking reads, proposals or publication; com
   const call = (operation, args = {}) =>
     ingestPublication({ ...f.opts, preparationId: prepared.preparation_id, operation, ...args })
   await call('stage', { draft: '# Synthesis\nSource line 1.\n' })
-  await call('stage', { page: 'overview.md', reviewed: true })
+  await call('review', { page: 'overview.md' })
   await assert.rejects(
     call('publish', {
       title: 'Synthesis',
@@ -606,7 +803,7 @@ test('a large multilingual source can exceed the default target and publish with
   await call('stage', {
     draft: '# Synthetic observations\nRepeated multilingual observation; source lines 1–800.\n',
   })
-  await call('stage', { page: 'overview.md', reviewed: true })
+  await call('review', { page: 'overview.md' })
   const result = await call('publish', {
     title: 'Multilingual observations',
     content: 'Repeated observation; source lines 1–800.',
@@ -688,7 +885,7 @@ test('prepare generates mandatory paths and later declaration publishes a new th
   await call('read_source')
   await call('stage', { draft: '# Finding\nSource line 1.\n' })
   await call('stage', { page: 'topics/findings.md', draft: '# Finding\nSource line 1.\n' })
-  await call('stage', { page: 'overview.md', reviewed: true })
+  await call('review', { page: 'overview.md' })
   const result = await call('publish', {
     title: 'Finding',
     content: 'Source line 1 finding.',

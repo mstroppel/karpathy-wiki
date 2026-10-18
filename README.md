@@ -114,9 +114,10 @@ behavior, and validation.
 Drafts use shallow baseline clones. For storage inspection, confirmed cleanup
 and completed-draft retention, see [journal storage](docs/ingest-journal-storage.md).
 Ingestion checks local Git changes before planning and validates source metadata
-and committed contents before recording success. Blocked runs stop on the first
-error and offer confirmed repair or a scoped rollback of the failed source's
-uncommitted drafts before skipping it and continuing with other sources.
+and committed contents before recording success. Source failures normally leave
+their private drafts retained but disabled, record the blocker, and continue with
+other sources without a confirmation prompt. Global metadata conflicts, foreign
+changes and unverifiable publication state still stop for operator maintenance.
 Successful source commits remain intact. See [stabilization acceptance](docs/ingest-stabilization-acceptance.md)
 for the opt-in synthetic real-model/restart test; no production data is mounted.
 

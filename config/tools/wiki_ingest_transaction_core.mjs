@@ -735,10 +735,13 @@ export async function pendingIngestPublications({ root, wikiRoot, runId }) {
   return pending
 }
 
-export async function assertIngestRolledBack(input) {
+export async function assertIngestReleased(input) {
   const opts = options(input)
   const receipt = await loadPreparation(opts)
-  if (receipt.wiki_root !== path.resolve(opts.wikiRoot) || !receipt.rolled_back)
+  if (
+    receipt.wiki_root !== path.resolve(opts.wikiRoot) ||
+    !(receipt.rolled_back || receipt.publication?.phase === 'abandoned')
+  )
     throw new Error('Vorbereitung muss zuerst bestätigt zurückgesetzt werden')
   for (const field of ['adapter', 'source_key', 'source_revision', 'source_path', 'wiki_path']) {
     if (receipt.source[field] !== opts.record[field])

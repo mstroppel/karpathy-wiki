@@ -71,8 +71,8 @@ files, shell commands, caller-selected roots/runs or worker-asserted ownership.
    ```
 
    Operations reuse the [transaction protocol](ingest-reports.md): `read_source`
-   (paginate fully), `inspect`, `stage`, `declare`, `state`. Proposal fields:
-   `operation`, `page`, `draft`, `append`, `reference`, `replacement`, `reviewed`,
+   (paginate fully), `inspect`, `stage`, `review`, `declare`, `state`. Proposal fields:
+   `operation`, `page`, `draft`, `append`, `reference`, `replacement`,
    `offset`, `limit`, `query`, `changed_pages`. Stage the source draft and
    review/update `overview.md`; code alone generates index/log. Staging leaves the
    live wiki untouched. Proposal `prepare`, `publish`, `resume`, `rollback`, ownership
