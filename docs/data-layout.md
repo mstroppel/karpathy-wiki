@@ -22,8 +22,9 @@ ${DATA_ROOT}/
 ├── incoming/
 │   ├── audio/              # Private rclone snapshot of WebDAV recordings
 │   ├── answers/            # Confirmed Q&A drafts, private to OpenCode and answer provider
-│   └── ingest-journal/     # Private wiki ingestion journal: per-source result
-│       └── runs/<run-id>/  #   records, run state, and assembled reports
+│   └── ingest-journal/     # Private wiki ingestion evidence and reports
+│       ├── batches/<id>/  # Default live-edit batch state.json and report.md
+│       └── runs/<run-id>/  # Opt-in trusted-route records and assembled reports
 ├── speech/                 # Speech worker store: recordings, queue, failures,
 │   └── cache/              #   and structured results (unredacted, private)
 ├── models/
@@ -119,7 +120,15 @@ wiki publication.
 
 ## Wiki ingestion journal
 
-Bulk wiki ingestion records its per-source results in
+Default writable batches store `state.json` and `report.md` under
+`incoming/ingest-journal/batches/<batch-id>/`. They contain source identities,
+checkpoint, commit, changed paths, per-source findings and any failure. There
+are no per-page preparations or automatic recovery records in this route;
+failed live edits remain for manual review. The shared lifetime lock is
+`wiki/.git/wiki-ingest-publication.lock`. OpenChamber mounts only `batches` and
+`runs` read-only, never preparations.
+
+The separate opt-in trusted-publisher/manual-reader route records results in
 `incoming/ingest-journal/runs/<run-id>/`: append-only result records, the run
 state with its working-context budget, and the assembled per-source report.
 `incoming/ingest-journal/preparations/<preparation-id>.json` holds private

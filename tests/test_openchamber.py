@@ -36,7 +36,11 @@ class OpenChamberTests(unittest.TestCase):
             chat,
         )
         mounts = re.findall(r"^      - (.*:/.*:[a-z]+)$", chat, re.MULTILINE)
-        self.assertEqual(len(mounts), 3, mounts)
+        self.assertIn(
+            "/incoming/ingest-journal/batches:/knowledge/incoming/ingest-journal/batches:ro",
+            chat,
+        )
+        self.assertEqual(len(mounts), 4, mounts)
         forbidden_paths = (
             "/sources",
             "/incoming/answers",

@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Default writable wiki ingestion now uses an exclusive live-edit worker for up
+  to five sources and one commit per batch. Canonical source metadata, index/log
+  appends and private batch reports are code-owned. Failed edits stay for manual
+  review; private per-page drafts and automatic publication recovery are removed
+  from this default path. Concurrent manual writers and atomic reader visibility
+  are explicitly unsupported. The opt-in trusted reader/publisher route is unchanged.
+
 - Ingest recovery can isolate a failed private draft even when a worker mistypes
   its preparation ID, using a unique persisted run/wiki/source match rather than
   fuzzy ID matching. Original error evidence and all publication safety checks

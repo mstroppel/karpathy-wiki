@@ -286,20 +286,12 @@ class ConfigTests(unittest.TestCase):
         # Bulk runs link the authoritative private file; single-source details
         # and the durable renderer's evidence contract remain unchanged.
         self.assertIn("dauerhaften Berichtspfad", template)
-        self.assertIn("Verlinke den vollständigen privaten Bericht", template)
+        self.assertIn("Verlinke jeden privaten Bericht", template)
         self.assertIn("kurzen Zusammenfassung", template)
-        self.assertIn("[Vollständiger Einlesebericht](<absolute_path>)", orchestrator)
-        self.assertIn("Wurde keine Quelle bearbeitet", orchestrator)
-        self.assertIn("Erfinde keine Details", orchestrator)
-        for field in (
-            "Quelle",
-            "Commit",
-            "Geänderte Seiten",
-            "Inhalt",
-            "Widersprüche/offene Fragen",
-            "Extraktionsgrenzen",
-        ):
-            self.assertIn(f"**{field}:**", skill)
+        self.assertIn("[Vollständiger Einlesebericht](<report_path>)", orchestrator)
+        self.assertIn("Bei null Quellen keine Auswertung erfinden", orchestrator)
+        for field in ("content", "contradictions", "extraction_limits"):
+            self.assertIn(field, skill)
         # The report renderer keeps every detail block; the source path itself
         # is the block heading.
         for field in (
@@ -311,21 +303,15 @@ class ConfigTests(unittest.TestCase):
         ):
             self.assertIn(f"**{field}:**", renderer)
         self.assertIn("record.source_path", renderer)
-        self.assertIn("Mit Git verifizierter", skill)
-        self.assertIn("Wiki-Pfade aus dem tatsächlichen Quellen-Commit", skill)
-        self.assertIn("Kein Commit", skill)
-        self.assertIn("Nicht ermittelt", skill)
-        self.assertIn("nur bei ausdrücklich angeforderter", skill)
-        self.assertIn("normale Sammelaufträge schließen es aus", skill)
-        self.assertIn("include_current: true", skill)
-        self.assertIn("suche den exakten Pfad", skill)
-        self.assertIn("Quellpfad und Quellschlüssel sind nicht", skill)
-        self.assertIn("keine Duplikatseite", skill)
+        self.assertIn("keinen verifizierten Commit", skill)
+        self.assertIn("Nicht ermittelt", renderer)
+        self.assertIn("Aktuelle Quellen werden nicht erneut ausgewertet", orchestrator)
+        self.assertIn("exakten `source_path`", orchestrator)
+        self.assertIn("Keine Duplikatseite", skill)
         # Evidence is durable per source, written only after the verified
         # commit, and unverified results are recorded as blocked.
-        self.assertIn("wiki_ingest_journal", skill)
-        self.assertIn("status: blocked", skill)
-        self.assertIn("Erfolgsdatensatz entsteht erst nach dem Commit", skill)
+        self.assertIn("wiki_ingest_batch", skill)
+        self.assertIn("Erfolgsdatensätze entstehen erst nach", skill)
 
     def test_skills_declare_matching_frontmatter(self):
         skills = ROOT / "config" / "skills"

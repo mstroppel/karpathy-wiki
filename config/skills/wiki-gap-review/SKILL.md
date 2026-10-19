@@ -72,7 +72,7 @@ inhaltliche Änderungen brauchen eine neue Vorschau und Bestätigung.
    für diese Antworten. Bei `invalid`, `conflict` oder `revoked` stoppe und
    nenne den Blocker; noch keinen Import delegieren.
 3. **Konkrete Quelle importieren.** Erst für den passenden `new`-/`outdated`-
-   Eintrag delegiere an `wiki-ingest`. Übergib `source_key`, `source_revision`,
+   Eintrag delegiere an `wiki-ingest-orchestrator`. Übergib `source_key`, `source_revision`,
    `source_path` und den Auftrag: ausschließlich diese Quelle selbst vollständig
    lesen, bestätigte Nutzerangaben mit Herkunft, Unsicherheiten und offenen
    Konflikten in betroffene Seiten, `index.md`, `overview.md` und `log.md`

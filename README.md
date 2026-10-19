@@ -89,37 +89,27 @@ OpenCode to import `/knowledge/sources/webdav`. Generated pages are written to
 
 ## Ingestion reports
 
-`/ingest-new` processes all new and changed sources sequentially, with one
-commit per source, with one fresh worker session per source and a documented
-soft working-context target. Estimated overshoots warn rather than abort; the
-model's actual context limit still applies. Workers propose changes in private drafts; code validates
-and publishes complete transactions, generates index/log entries, and reconciles
-interrupted commit/journal boundaries without duplicate publication.
-Every processed source leaves a durable result record in a private
-journal below `${DATA_ROOT}/incoming/ingest-journal`, and the complete per-source
-report is written there as a file: source path, commit hash, changed wiki
-pages, concrete thematic findings with evidence locations and changes from the
-previous wiki, contradictions or open questions, and justified omissions and
-extraction limits. After ingestion, the main session links the complete private report and
-gives a short summary: overall status, unfinished sources with their blockers,
-record count, run ID, and durable report path, plus a concise overview for every
-processed file: name, one-sentence content, and bullet lists of contradictions/open
-questions and extraction limits. The overview uses bounded reads of effective
-journal records; full details stay in the report and are read only on request. Local link support
-depends on the client; the operator can also open the stated path. Blocked,
-paused, and zero-source runs use the same contract; report-creation failures are
-explicitly flagged separately from ingestion status. See
-[ingestion reports](docs/ingest-reports.md) for the budget model, resume
-behavior, and validation.
-Drafts use shallow baseline clones. For storage inspection, confirmed cleanup
-and completed-draft retention, see [journal storage](docs/ingest-journal-storage.md).
-Ingestion checks local Git changes before planning and validates source metadata
-and committed contents before recording success. Source failures normally leave
-their private drafts retained but disabled, record the blocker, and continue with
-other sources without a confirmation prompt. Global metadata conflicts, foreign
-changes and unverifiable publication state still stop for operator maintenance.
-Successful source commits remain intact. See [stabilization acceptance](docs/ingest-stabilization-acceptance.md)
-for the opt-in synthetic real-model/restart test; no production data is mounted.
+`/ingest-new` processes new and changed sources in small sequential batches:
+one fresh worker, up to five sources and **one Git commit per batch**. The batch
+tool holds an exclusive lifetime lock, starts only from clean Git and records
+the existing HEAD as its checkpoint. Workers read sources with normal file tools
+and edit wiki Markdown directly. The overview is synthesized once per batch;
+code appends index/log entries and stamps source identities without model-copied
+hashes. Source bytes and provider metadata are checked before and after work.
+
+This intentionally simpler default trades per-page isolation and automatic crash
+reconciliation for fewer tool round trips. Readers can see partial work; no other
+human or agent may edit the wiki during ingestion. On failure, edits remain for
+manual review: nothing is automatically reset. Git is the coarse safety net,
+not a proof of semantic correctness or protection from a misbehaving writer.
+
+Private reports under `${DATA_ROOT}/incoming/ingest-journal/batches/<batch-id>`
+include the checkpoint, commit, changed pages and per-source findings, evidence,
+contradictions and extraction limits. Chat links the reports and summarizes the
+result; full details are read only on request. See [ingestion reports](docs/ingest-reports.md)
+for failure handling and the retained safety boundaries. Existing transaction
+cores and [journal maintenance](docs/ingest-journal-storage.md) remain for the
+separate opt-in trusted-publisher/manual-reader route, not the default batches.
 
 Automatic triggering is not enabled yet. See the
 [automatic-ingest runtime gate](docs/auto-ingest-runtime-gate.md) for the
@@ -263,9 +253,11 @@ node --test tests/test_trusted_publisher.mjs
 node --test tests/test_manual_ingest.mjs
 node --test tests/test_trusted_authoring.mjs
 node --test tests/test_journal_storage.mjs
+node --test tests/test_wiki_ingest_batch.mjs
 docker build --target opencode -t kw-opencode:integration -f opencode/Dockerfile .
 docker build --target openchamber -t kw-openchamber:integration -f opencode/Dockerfile .
 sh tests/integration/chat.sh  # authentication, discovery, native SSE and restart persistence
+sh tests/integration/batch-ingest.sh  # synthetic model, exclusive worker, direct read/edit and batch commit
 sh tests/integration/auto-ingest-runtime.sh  # negative writer-gate probe, NOT auto-ingest approval
 sh tests/integration/runtime-write-isolation.sh  # pinned-runtime proof of the reader boundary
 docker build --target publisher -t kw-publisher:integration -f opencode/Dockerfile .

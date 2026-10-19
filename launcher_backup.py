@@ -25,7 +25,12 @@ CONTAINER_LINKS = {
     "opencode/config/AGENTS.md": "/etc/opencode/routing.md",
     **{
         f"opencode/config/plugins/{name}.js": f"/etc/opencode/plugins/{name}.js"
-        for name in ("wiki-ingest-journal", "wiki-ingest-status", "wiki-ingest-transaction")
+        for name in (
+            "wiki-ingest-batch",
+            "wiki-ingest-journal",
+            "wiki-ingest-status",
+            "wiki-ingest-transaction",
+        )
     },
 }
 

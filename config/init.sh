@@ -68,6 +68,7 @@ mkdir -p "$sources/webdav" \
   "$KNOWLEDGE_ROOT/state" \
   "$KNOWLEDGE_ROOT/publisher" \
   "$KNOWLEDGE_ROOT/incoming/ingest-journal/runs" \
+  "$KNOWLEDGE_ROOT/incoming/ingest-journal/batches" \
   "$wiki/assets" \
   "$wiki/sources/webdav" \
   "$wiki/sources/answers" \
@@ -102,6 +103,7 @@ chmod 0700 "$KNOWLEDGE_ROOT/publisher"
 # sources. They are private to OpenCode and its operator, never published.
 chmod 0700 "$KNOWLEDGE_ROOT/incoming/ingest-journal"
 chmod 0700 "$KNOWLEDGE_ROOT/incoming/ingest-journal/runs"
+chmod 0700 "$KNOWLEDGE_ROOT/incoming/ingest-journal/batches"
 
 # Install generated files through a hard link so an existing path, including a
 # concurrently created path, can never be replaced.
@@ -146,7 +148,7 @@ Markdown-Wiki. Neue Quellen liegen ausschließlich unter
 \`/knowledge/incoming/answers\`; nur der lokale Anbieter veröffentlicht sie
 unter \`/knowledge/sources/answers\`.$paperless_summary
 
-Der primäre Agent delegiert ausdrückliche Einleseaufträge an \`wiki-ingest\`,
+Der primäre Agent delegiert ausdrückliche Einleseaufträge an \`wiki-ingest-orchestrator\`,
 Sammelaufträge für alle neuen und geänderten Quellen an
 \`wiki-ingest-orchestrator\`, Prüf- und Wartungsaufträge an \`wiki-lint\`,
 ausdrücklich wissenschaftliche Analysen an \`wiki-analysis\` und das Speichern
