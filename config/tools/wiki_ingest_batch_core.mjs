@@ -18,6 +18,10 @@ const defaults = {
   root: '/knowledge/incoming/ingest-journal',
 }
 
+// Only code-owned reasons may cross the failure-report boundary. Native parser,
+// filesystem, Git and worker errors can contain source-derived text.
+class BatchBlocker extends Error {}
+
 async function git(wikiRoot, args) {
   return (
     await runFile('git', ['--no-replace-objects', '--literal-pathspecs', ...args], {
@@ -37,10 +41,10 @@ async function clean(wikiRoot) {
 async function regularFile(file, root) {
   const resolved = await realpath(file)
   if (!resolved.startsWith(`${await realpath(root)}${path.sep}`))
-    throw new Error('Datei außerhalb der erlaubten Wurzel')
+    throw new BatchBlocker('Datei außerhalb der erlaubten Wurzel')
   const info = await lstat(file)
   if (!info.isFile() || info.nlink !== 1 || resolved !== file)
-    throw new Error('Keine reguläre, unverlinkte Datei')
+    throw new BatchBlocker('Keine reguläre, unverlinkte Datei')
   return readFile(file)
 }
 
@@ -67,33 +71,39 @@ async function sourceBytes(source, { sourceRoot, wikiRoot }) {
     path.join(wikiRoot, 'sources', item.wiki_path) !== source.wiki_path ||
     JSON.stringify(item.frontmatter) !== JSON.stringify(source.frontmatter)
   )
-    throw new Error('Quelle während des Batches geändert; Änderungen manuell prüfen')
+    throw new BatchBlocker('Quelle während des Batches geändert; Änderungen manuell prüfen')
   const bytes = await regularFile(source.source_path, sourceRoot)
   const digest = hash(bytes)
   if (item.source_sha256 && item.source_sha256 !== digest)
-    throw new Error('Quelldatei weicht vom Publisher-Digest ab')
+    throw new BatchBlocker('Quelldatei weicht vom Publisher-Digest ab')
   if (source.adapter === 'paperless') {
-    if (!item.source_sha256) throw new Error('Paperless benötigt source_sha256 vom Publisher')
+    if (!item.source_sha256)
+      throw new BatchBlocker('Paperless benötigt source_sha256 vom Publisher')
     const fields = parseFrontmatterFields(bytes.toString('utf8'))
     if (
       Object.entries({ ...item.frontmatter, ...item.claim }).some(
         ([key, value]) => String(fields[key]) !== String(value),
       )
     )
-      throw new Error('Paperless-Quelle weicht vom Manifest ab')
-  } else if (digest !== source.source_revision) throw new Error('Quellrevision stimmt nicht')
+      throw new BatchBlocker('Paperless-Quelle weicht vom Manifest ab')
+  } else if (digest !== source.source_revision) throw new BatchBlocker('Quellrevision stimmt nicht')
   return bytes
 }
 
 function recordsFrom(text, count) {
-  const records = JSON.parse(text)
+  let records
+  try {
+    records = JSON.parse(text)
+  } catch {
+    throw new BatchBlocker('Worker lieferte kein gültiges JSON')
+  }
   if (!Array.isArray(records) || records.length !== count)
-    throw new Error('Worker muss genau einen Ergebnisdatensatz pro Quelle liefern')
+    throw new BatchBlocker('Worker muss genau einen Ergebnisdatensatz pro Quelle liefern')
   return records.map((record, index) => {
-    if (record.index !== index) throw new Error('Ergebnisreihenfolge stimmt nicht')
+    if (record?.index !== index) throw new BatchBlocker('Ergebnisreihenfolge stimmt nicht')
     for (const field of ['content', 'contradictions', 'extraction_limits']) {
       if (typeof record[field] !== 'string' || !record[field].trim() || record[field].length > 4000)
-        throw new Error(`Ungültiges Ergebnisfeld: ${field}`)
+        throw new BatchBlocker(`Ungültiges Ergebnisfeld: ${field}`)
     }
     return {
       index,
@@ -197,13 +207,13 @@ export async function runIngestBatch(input, worker) {
       )
       signal?.throwIfAborted()
       if ((await git(wikiRoot, ['rev-parse', 'HEAD'])).trim() !== checkpoint)
-        throw new Error('HEAD während des Batches geändert; keine automatische Reparatur')
+        throw new BatchBlocker('HEAD während des Batches geändert; keine automatische Reparatur')
       for (const source of sources) {
         if (hash(await sourceBytes(source, opts)) !== source.source_sha256)
-          throw new Error('Quelle während des Batches geändert; Änderungen manuell prüfen')
+          throw new BatchBlocker('Quelle während des Batches geändert; Änderungen manuell prüfen')
         const page = (await regularFile(source.wiki_path, wikiRoot)).toString('utf8')
         const body = page.startsWith('---\n') ? page.replace(/^---\n[\s\S]*?\n---\n/, '') : page
-        if (!body.trim()) throw new Error('Leere Quellenseite')
+        if (!body.trim()) throw new BatchBlocker('Leere Quellenseite')
         const frontmatter = Object.entries(source.frontmatter)
           .map(([key, value]) => `${key}: ${JSON.stringify(value)}`)
           .join('\n')
@@ -214,7 +224,7 @@ export async function runIngestBatch(input, worker) {
       let index = (await regularFile(indexPath, wikiRoot)).toString('utf8')
       for (const source of sources) {
         const page = path.relative(wikiRoot, source.wiki_path).replace(/\.md$/, '')
-        if (/[[\]|<>\r\n]/.test(page)) throw new Error('Unsicherer Katalogpfad')
+        if (/[[\]|<>\r\n]/.test(page)) throw new BatchBlocker('Unsicherer Katalogpfad')
         if (!index.includes(`[[${page}]]`) && !index.includes(`[[${page}|`))
           index += `\n- [[${page}]]\n`
       }
@@ -235,17 +245,21 @@ export async function runIngestBatch(input, worker) {
             /^(entities|concepts|analyses)\/.+\.md$/.test(page)
           )
         )
-          throw new Error(`Unerlaubter geänderter Wiki-Pfad: ${page}`)
+          throw new BatchBlocker('Unerlaubter geänderter Wiki-Pfad')
         await regularFile(path.join(wikiRoot, page), wikiRoot)
       }
       const checked = await scan()
       if (checked.summary.invalid || checked.summary.conflict)
-        throw new Error('Ungültige Wiki-Metadaten nach Batch')
-      await git(wikiRoot, ['diff', '--check'])
+        throw new BatchBlocker('Ungültige Wiki-Metadaten nach Batch')
       state.changed_pages = changed
       await save()
       signal?.throwIfAborted()
       await git(wikiRoot, ['add', '--', ...changed])
+      try {
+        await git(wikiRoot, ['diff', '--cached', '--check'])
+      } catch {
+        throw new BatchBlocker('Git-Diff-Prüfung fehlgeschlagen; Änderungen manuell prüfen')
+      }
       await git(wikiRoot, [
         'commit',
         '-m',
@@ -268,14 +282,17 @@ export async function runIngestBatch(input, worker) {
       }
     } catch (error) {
       state.status = state.commit ? 'report_failed' : 'blocked'
-      state.blocker = error.message
+      state.blocker =
+        error instanceof BatchBlocker
+          ? error.message
+          : 'Batch fehlgeschlagen; Worker, Validierung oder Berichtsspeicherung manuell prüfen'
       let reportError = null
       try {
         await save()
-      } catch (error) {
+      } catch {
         // Report storage may remain unavailable. Do not lose a verified commit
         // or advertise stale running evidence as the completed report.
-        reportError = error.message
+        reportError = 'Berichtsspeicherung fehlgeschlagen'
       }
       return {
         status: state.status,

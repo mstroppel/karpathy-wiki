@@ -134,7 +134,8 @@ test('worker failure retains live edits, blocks retries and releases lifetime lo
   })
   assert.equal(result.status, 'blocked')
   assert.equal(result.commit, null)
-  assert.match(await readFile(result.report_path, 'utf8'), /Synthetic interrupted worker/)
+  assert.match(result.blocker, /Batch fehlgeschlagen/)
+  assert.doesNotMatch(await readFile(result.report_path, 'utf8'), /Synthetic interrupted worker/)
   assert.equal(await f.git('rev-list', '--count', 'HEAD'), '1')
   await assert.rejects(runIngestBatch(f.opts, f.worker), /nicht sauber/)
   await withIngestLock(
@@ -155,6 +156,55 @@ test('provider revision change during work never commits', async (t) => {
   assert.equal(result.status, 'blocked')
   assert.match(result.blocker, /Quelle während/)
   assert.equal(await f.git('rev-list', '--count', 'HEAD'), '1')
+})
+
+test('malformed JSON and worker exceptions never leak source text through failure evidence', async (t) => {
+  const marker = 'SYNTHETIC_CONFIDENTIAL_FINDING'
+  for (const kind of ['json', 'exception']) {
+    await t.test(kind, async (t) => {
+      const f = await fixture(t)
+      const result = await runIngestBatch(f.opts, async (batch) => {
+        await f.worker(batch)
+        if (kind === 'exception') throw new Error(marker)
+        return `${marker}: invalid JSON`
+      })
+      assert.equal(result.status, 'blocked')
+      assert.doesNotMatch(JSON.stringify(result), new RegExp(marker))
+      for (const file of ['report.md', 'state.json'])
+        assert.doesNotMatch(
+          await readFile(path.join(path.dirname(result.report_path), file), 'utf8'),
+          new RegExp(marker),
+        )
+      assert.equal(await f.git('rev-list', '--count', 'HEAD'), '1')
+    })
+  }
+})
+
+test('complete staged diff rejects conflict markers and whitespace on new and tracked pages', async (t) => {
+  for (const page of ['source', 'thematic', 'tracked']) {
+    for (const defect of ['<<<<<<< HEAD\n=======\n>>>>>>> other\n', 'Synthetic text  \n']) {
+      await t.test(`${page}: ${JSON.stringify(defect)}`, async (t) => {
+        const f = await fixture(t)
+        let target
+        const result = await runIngestBatch(f.opts, async (batch) => {
+          const records = await f.worker(batch)
+          target =
+            page === 'source'
+              ? batch.sources[0].wiki_path
+              : path.join(f.opts.wikiRoot, page === 'tracked' ? 'overview.md' : 'concepts/new.md')
+          await mkdir(path.dirname(target), { recursive: true })
+          await writeFile(target, defect)
+          return records
+        })
+        assert.equal(result.status, 'blocked')
+        assert.match(result.blocker, /Git-Diff-Prüfung fehlgeschlagen/)
+        assert.equal(result.commit, null)
+        assert.equal(await f.git('rev-list', '--count', 'HEAD'), '1')
+        assert.ok((await readFile(target, 'utf8')).includes(defect))
+        assert.notEqual(await f.git('diff', '--cached', '--name-only'), '')
+      })
+    }
+  }
 })
 
 test('Paperless input revisions are distinct from byte digests and require publisher evidence', async (t) => {

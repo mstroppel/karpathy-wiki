@@ -167,6 +167,11 @@
           "effect": "deny"
         },
         {
+          "action": "read",
+          "resource": "/knowledge/incoming/ingest-journal/batches/batch-*/report.md",
+          "effect": "allow"
+        },
+        {
           "action": "wiki_ingest_transaction",
           "resource": "*",
           "effect": "deny"

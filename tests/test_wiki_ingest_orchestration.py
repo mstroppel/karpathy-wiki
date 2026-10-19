@@ -2,6 +2,7 @@
 
 import json
 import unittest
+from fnmatch import fnmatchcase
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -56,6 +57,30 @@ class BatchWorkflowTests(unittest.TestCase):
         self.assertNotIn(
             {"action": "edit", "resource": "/knowledge/sources/**", "effect": "allow"}, rules
         )
+
+    def test_orchestrator_can_read_only_batch_reports_within_the_private_journal(self):
+        rules = self.config["agents"]["wiki-ingest-orchestrator"]["permissions"]
+
+        def effect(action, resource):
+            matches = [
+                rule["effect"]
+                for rule in rules
+                if fnmatchcase(action, rule["action"]) and fnmatchcase(resource, rule["resource"])
+            ]
+            return matches[-1] if matches else None
+
+        root = "/knowledge/incoming/ingest-journal"
+        report = f"{root}/batches/batch-123-abcdef/report.md"
+        self.assertEqual(effect("read", report), "allow")
+        for path in (
+            f"{root}/batches/batch-123-abcdef/state.json",
+            f"{root}/batches/batch-123-abcdef/other.md",
+            f"{root}/preparations/synthetic/report.md",
+            f"{root}/runs/synthetic/report.md",
+        ):
+            self.assertEqual(effect("read", path), "deny")
+        for action in ("edit", "shell", "subagent", "wiki_ingest_journal"):
+            self.assertEqual(effect(action, report), "deny")
 
     def test_worker_keeps_evidence_and_uncertainty_without_transaction_protocol(self):
         for phrase in (

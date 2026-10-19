@@ -41,6 +41,19 @@ class Model(BaseHTTPRequestHandler):
         if not worker and not history:
             name = next(name for name in names if name.endswith("wiki_ingest_batch"))
             call = (name, {})
+        elif not worker and len(history) == 1:
+            # Details must remain readable through the orchestrator's real
+            # permissions, without granting journal mutation or state access.
+            name = next(name for name in names if name == "read")
+            props = tools[name]["parameters"]["properties"]
+            key = next(key for key in ("path", "filePath", "file_path") if key in props)
+            reports = list(Path("/knowledge/incoming/ingest-journal/batches").glob("*/report.md"))
+            assert len(reports) == 1, reports
+            call = (name, {key: str(reports[0])})
+        elif not worker:
+            details = json.dumps(history[-1])
+            assert str(RESULT[0]["contradictions"]) in details, details
+            assert str(RESULT[0]["extraction_limits"]) in details, details
         elif worker and not history:
             # Exercise real worker read permission, not a plugin-owned file read.
             name = next(name for name in names if name == "read")
@@ -203,14 +216,14 @@ def main():
             state = json.loads(reports[0].read_text())
             assert state["status"] == "ingested", state
             assert state["commit"], state
-            assert CALLS == ["wiki_ingest_batch", "read", "write"], CALLS
+            assert CALLS == ["wiki_ingest_batch", "read", "write", "read"], CALLS
             assert revision in WIKI.joinpath("sources/webdav/notes.md").read_text()
             assert SOURCE.joinpath("notes.md").read_text() == text
             count = subprocess.check_output(
                 ["git", "-C", str(WIKI), "rev-list", "--count", "HEAD"], text=True
             )
             assert count.strip() == "2", count
-            print("batch-ingest-runtime: real tool, child permissions, commit and report OK")
+            print("batch-ingest-runtime: permissions, commit and report detail read OK")
         finally:
             backend.terminate()
             backend.wait(timeout=30)
