@@ -10,14 +10,14 @@
   },
   "agents": {
     "wiki-ingest": {
-      "description": "Liest ausdrücklich angeforderte Quellen in das Wiki ein.",
+      "description": "Bearbeitet einen vom Batch-Tool exklusiv gesperrten Einlesebatch direkt im Wiki.",
       "mode": "subagent",
-      "system": "Bearbeite ausschließlich Einleseaufträge für das Wiki. Delegiere nicht erneut. Lade einmal den Skill wiki-ingest, befolge ihn vollständig und führe den Auftrag selbst aus.",
+      "system": "Bearbeite ausschließlich vom wiki_ingest_batch-Tool übergebene Batches. Ohne batch_id nichts ändern; an wiki-ingest-orchestrator verweisen. Lade wiki-ingest einmal. Nutze normale Lese- und Editierwerkzeuge, keine Shell, kein Git und keine Delegation.",
       "permissions": [
         {
-          "action": "wiki_ingest_transaction",
+          "action": "*",
           "resource": "*",
-          "effect": "allow"
+          "effect": "deny"
         },
         {
           "action": "subagent",
@@ -31,17 +31,67 @@
         },
         {
           "action": "edit",
-          "resource": "*",
-          "effect": "deny"
+          "resource": "/knowledge/wiki/**",
+          "effect": "allow"
+        },
+        {
+          "action": "edit",
+          "resource": "sources/*.md",
+          "effect": "allow"
+        },
+        {
+          "action": "edit",
+          "resource": "entities/*.md",
+          "effect": "allow"
+        },
+        {
+          "action": "edit",
+          "resource": "concepts/*.md",
+          "effect": "allow"
+        },
+        {
+          "action": "edit",
+          "resource": "analyses/*.md",
+          "effect": "allow"
+        },
+        {
+          "action": "edit",
+          "resource": "overview.md",
+          "effect": "allow"
         },
         {
           "action": "read",
           "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "edit",
+          "resource": ".git/*",
           "effect": "deny"
         },
         {
-          "action": "read",
+          "action": "edit",
           "resource": "AGENTS.md",
+          "effect": "deny"
+        },
+        {
+          "action": "edit",
+          "resource": "*/AGENTS.md",
+          "effect": "deny"
+        },
+        {
+          "action": "edit",
+          "resource": ".opencode/*",
+          "effect": "deny"
+        },
+        {
+          "action": "read",
+          "resource": "/knowledge/sources/**",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "/knowledge/wiki/**",
           "effect": "allow"
         },
         {
@@ -55,21 +105,61 @@
           "effect": "allow"
         },
         {
-          "action": "grep",
-          "resource": "*",
+          "action": "edit",
+          "resource": "/knowledge/wiki/.git/**",
           "effect": "deny"
         },
         {
-          "action": "glob",
-          "resource": "*",
+          "action": "edit",
+          "resource": "/knowledge/wiki/AGENTS.md",
+          "effect": "deny"
+        },
+        {
+          "action": "skill",
+          "resource": "wiki-ingest",
+          "effect": "allow"
+        },
+        {
+          "action": "external_directory",
+          "resource": "/knowledge/sources/**",
+          "effect": "allow"
+        },
+        {
+          "action": "external_directory",
+          "resource": "/etc/opencode/skills/wiki-ingest/**",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env*",
+          "effect": "deny"
+        },
+        {
+          "action": "read",
+          "resource": "/knowledge/wiki/.git/**",
+          "effect": "deny"
+        },
+        {
+          "action": "read",
+          "resource": ".git/*",
+          "effect": "deny"
+        },
+        {
+          "action": "edit",
+          "resource": "/knowledge/wiki/**/AGENTS.md",
+          "effect": "deny"
+        },
+        {
+          "action": "edit",
+          "resource": "/knowledge/wiki/.opencode/**",
           "effect": "deny"
         }
       ]
     },
     "wiki-ingest-orchestrator": {
-      "description": "Orchestriert die Aufnahme neuer und geänderter Quellen in kontextbegrenzten Batches.",
+      "description": "Startet kleine, exklusive Einlesebatches und verlinkt ihre Berichte.",
       "mode": "all",
-      "system": "Orchestriere Einleseaufträge und ihre bestätigte Bereinigung. Lade wiki-ingest-orchestrator. Delegiere Einlesen an wiki-ingest, lesende Git-Prüfung und bestätigte Wartung an wiki-lint, stets sequenziell. Lies Quellen nicht selbst ein und ändere das Wiki nicht selbst.",
+      "system": "Lade wiki-ingest-orchestrator. Starte wiki_ingest_batch stets sequenziell. Das Tool hält den Lock über Worker und Commit. Keine eigenen Änderungen oder manuelle Worker-Delegation. Bei Blockern stoppen und private Berichte verlinken.",
       "permissions": [
         {
           "action": "read",
@@ -117,14 +207,14 @@
           "effect": "deny"
         },
         {
-          "action": "subagent",
-          "resource": "wiki-ingest",
+          "action": "wiki_ingest_batch",
+          "resource": "*",
           "effect": "allow"
         },
         {
-          "action": "subagent",
-          "resource": "wiki-lint",
-          "effect": "allow"
+          "action": "wiki_ingest_journal",
+          "resource": "*",
+          "effect": "deny"
         }
       ]
     },
@@ -208,15 +298,15 @@
   "commands": {
     "ingest": {
       "description": "Quelle einlesen",
-      "agent": "wiki-ingest",
-      "subagent": true,
-      "template": "Führe diesen Einleseauftrag vollständig aus: $ARGUMENTS"
+      "agent": "wiki-ingest-orchestrator",
+      "subagent": false,
+      "template": "Lade wiki-ingest-orchestrator. Verarbeite nur die ausdrücklich angeforderte neue/geänderte Quelle über wiki_ingest_batch mit source_path aus wiki_ingest_status. Auftrag: $ARGUMENTS"
     },
     "ingest-new": {
       "description": "Alle neuen und geänderten Quellen einlesen",
       "agent": "wiki-ingest-orchestrator",
       "subagent": false,
-      "template": "Lade den Skill wiki-ingest-orchestrator und orchestriere die Aufnahme aller neuen und geänderten Quellen unter /knowledge/sources in geplanten Batches. Bearbeite Quellen ausschließlich über den Subagenten wiki-ingest, streng sequenziell und mit genau einem Commit je Quelle; halte die Ergebnisdatensätze in wiki_ingest_journal fest. Beende den Ingest erst nach einer abschließenden Statusprüfung mit new=0 und outdated=0 oder benenne einen konkreten Blocker und die offenen Quellen. Führe anschließend die Berichtsphase des Skills aus, auch bei blockierten oder pausierten Läufen: Verlinke den vollständigen privaten Bericht und halte diese Hauptsession mit einer kurzen Zusammenfassung kompakt. Nenne Gesamtstatus, offene Quellen mit Blockern, Anzahl der Ergebnisdatensätze, run_id und den dauerhaften Berichtspfad. Ergänze für jede bearbeitete Datei eine kurze Dateiübersicht: Name, Inhalt in einem Satz, Widersprüche/offene Fragen als Bulletpoint-Liste und Extraktionsgrenzen als Bulletpoint-Liste. Lies dafür nur die effektiven Journaldatensätze begrenzt gemäß Berichtsphase; den vollständigen Bericht und weitere Details nur auf ausdrückliche Nachfrage. Kennzeichne eine unvollständige Berichtserstellung oder Dateiübersicht ausdrücklich und erfinde keine Details."
+      "template": "Lade wiki-ingest-orchestrator. Verarbeite alle neuen und geänderten Quellen unter /knowledge/sources über wiki_ingest_batch in sequenziellen kleinen Batches, ein Commit pro Batch. Bei Blockern stoppen, nichts zurücksetzen. Verlinke jeden privaten Bericht mit dem dauerhaften Berichtspfad und schließe mit einer kurzen Zusammenfassung und frischer Statusprüfung ab."
     },
     "lint": {
       "description": "Wiki prüfen",
@@ -369,6 +459,11 @@
       "action": "wiki_ingest_status",
       "resource": "*",
       "effect": "allow"
+    },
+    {
+      "action": "wiki_ingest_batch",
+      "resource": "*",
+      "effect": "deny"
     },
     {
       "action": "wiki_ingest_transaction",

@@ -47,6 +47,11 @@ settings directory, a read-only wiki mount and read-only ingest run records and
 reports. Private transaction drafts remain backend-only. See [chat deployment](chat.md).
 
 OpenCode reads source directories and writes generated Markdown to `wiki/`.
+Default writable ingestion uses one lifetime-locked worker and one Git commit
+per small batch, with direct live Markdown edits and private batch reports.
+Readers may see intermediate edits; other manual/agent writers must stay idle.
+Failures retain work for manual review instead of per-page transaction recovery.
+See [ingestion reports](ingest-reports.md).
 In opt-in reader mode it cannot write protected data. The optional
 [trusted publisher](trusted-publisher.md) is a separate, networkless,
 operator-exec-only writer using the same transaction/journal cores. Its private

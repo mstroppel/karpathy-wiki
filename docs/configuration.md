@@ -115,11 +115,14 @@ and controller, never OpenCode. Trusted analysis saves additionally need
 print-view URLs. Both are empty/default-off. Other reader-mode
 authoring and automatic ingestion remain unsupported.
 
-`/ingest-new` orchestrates bulk wiki ingestion in bounded batches. The batch
-planner sizes each worker session by an estimated token budget, not by a bare
-source count, and stores per-source results in the private journal mounted at
-`/knowledge/incoming/ingest-journal` (see [data layout](data-layout.md)). Tune the
-budget for the configured model:
+Default writable `/ingest-new` uses an exclusive live-edit worker, up to five
+sources, a 128k estimated context target and one commit per batch. Its private
+reports live below `/knowledge/incoming/ingest-journal/batches`. Failures leave
+live edits for manual review; other writers must stay idle. See
+[ingestion reports](ingest-reports.md) for the deliberate tradeoffs.
+
+The following variables configure only the separate transaction planner used by
+the opt-in trusted-publisher route, not the default writable batches:
 
 | Variable | Default | Description |
 | --- | --- | --- |
@@ -127,10 +130,8 @@ budget for the configured model:
 | `WIKI_INGEST_BATCH_MAX_SOURCES` | `1` | Upper cap; one fresh worker/source is always enforced |
 | `WIKI_INGEST_RUN_MAX_BATCHES` | `12` | Batches per run before a clean rollover (`0` = unlimited) |
 
-Token values are documented estimates, not measured model tokens; see
-[ingestion reports](ingest-reports.md) for the budget model, the report
-contract, resume and rollover behavior, and the opt-in real-model acceptance
-run.
+Token values are estimates, not measured model tokens. The trusted route retains
+its per-source transaction and recovery contract; see [manual ingest](manual-ingest.md).
 
 ## Secrets
 
