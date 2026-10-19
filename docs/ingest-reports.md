@@ -120,6 +120,10 @@ other sources. Draft bytes remain as private evidence; no live pages or commits
 are reset. The failed source identity stays excluded for this run, including new
 revisions, and remains blocked in the report. A new run retries pending sources.
 Failures before preparation can also be skipped after checking clean Git.
+If a worker mistypes a preparation ID, recovery uses only a unique persisted
+receipt matching the exact run, wiki and full source identity. It never guesses
+from similar IDs or replaces an existing mismatched receipt. The original error
+record remains unchanged; ambiguous or missing evidence blocks continuation.
 Foreign changes, mismatched receipts, changed HEAD, global `invalid`/`conflict`
 and non-draft publication state still require maintenance or verified resume.
 Every automatic skip appears in planner warnings and the report. Unsafe failures
