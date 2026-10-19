@@ -269,13 +269,21 @@ export async function runIngestBatch(input, worker) {
     } catch (error) {
       state.status = state.commit ? 'report_failed' : 'blocked'
       state.blocker = error.message
-      await save()
+      let reportError = null
+      try {
+        await save()
+      } catch (error) {
+        // Report storage may remain unavailable. Do not lose a verified commit
+        // or advertise stale running evidence as the completed report.
+        reportError = error.message
+      }
       return {
         status: state.status,
         batch_id: batchId,
         commit: state.commit,
         blocker: state.blocker,
-        report_path: report,
+        report_path: reportError ? null : report,
+        report_error: reportError,
         sources: sources.map((source) => ({ source_path: source.source_path })),
       }
     }

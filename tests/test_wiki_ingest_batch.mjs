@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
@@ -218,6 +218,30 @@ test('cancellation retains edits and never creates a commit', async (t) => {
   assert.equal(result.status, 'blocked')
   assert.equal(await f.git('rev-list', '--count', 'HEAD'), '1')
   assert.notEqual(await f.git('status', '--porcelain'), '')
+})
+
+test('persistent report failure after commit still returns verified outcome without stale link', async (t) => {
+  const f = await fixture(t)
+  const hook = path.join(f.opts.wikiRoot, '.git/hooks/post-commit')
+  await writeFile(
+    hook,
+    `#!/usr/bin/env python3
+from pathlib import Path
+for directory in Path('../journal/batches').iterdir():
+    for name in ('state.json', 'report.md'):
+        file = directory / name
+        file.unlink()
+        file.mkdir()
+`,
+  )
+  await chmod(hook, 0o700)
+  const result = await runIngestBatch(f.opts, f.worker)
+  assert.equal(result.status, 'report_failed')
+  assert.equal(result.commit, await f.git('rev-parse', 'HEAD'))
+  assert.equal(result.report_path, null)
+  assert.ok(result.report_error)
+  assert.equal(await f.git('rev-list', '--count', 'HEAD'), '2')
+  assert.equal(await f.git('status', '--porcelain'), '')
 })
 
 test('single-source filter is exact and does not import unrelated sources', async (t) => {
