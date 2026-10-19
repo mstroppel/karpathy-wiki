@@ -8,6 +8,7 @@ import {
   assertIngestReleased,
   confinedIngestPath,
   pendingIngestPublications,
+  resolveBlockedPreparation,
   verifyIngestCommit,
 } from './wiki_ingest_transaction_core.mjs'
 
@@ -835,7 +836,8 @@ export async function skipBlockedSource({
   if (!record) throw new Error('Kein aktueller blockierter Datensatz an record_index')
   await assertCleanIngestWiki(wikiRoot)
   if (record.preparation_id) {
-    await assertIngestReleased({ root, wikiRoot, preparationId: record.preparation_id, record })
+    const preparationId = await resolveBlockedPreparation({ root, wikiRoot, runId, record })
+    await assertIngestReleased({ root, wikiRoot, preparationId, record })
   }
   const skipped = [...new Set([...(run.recovery?.skipped_records ?? []), recordIndex])]
   await writeRunFile(
@@ -933,12 +935,13 @@ export async function planNextBatch({
       if (!wikiSourceRoot) throw new Error('Wiki-Wurzel zur Zustandsprüfung erforderlich')
       const wikiRoot = path.dirname(wikiSourceRoot)
       if (record.preparation_id) {
+        const preparationId = await resolveBlockedPreparation({ root, wikiRoot, runId, record })
         const { abandonFailedDraft } = await import('./wiki_ingest_publication_core.mjs')
         await abandonFailedDraft({
           root,
           wikiRoot,
           runId,
-          preparationId: record.preparation_id,
+          preparationId,
           record,
         })
       }

@@ -72,7 +72,7 @@ test('review is separate from stage and needs no edit reference or extra acknowl
   assert.match(await readFile(path.join(f.wikiRoot, 'overview.md'), 'utf8'), /Supported addition/)
 })
 
-async function failedPrivateDraft(t, { preparation = true } = {}) {
+async function failedPrivateDraft(t, { preparation = true, reportedId } = {}) {
   const { ingestPublication } = await import('../config/tools/wiki_ingest_publication_core.mjs')
   const f = await fixture(t)
   const other = 'Other synthetic source.\n'
@@ -105,11 +105,32 @@ async function failedPrivateDraft(t, { preparation = true } = {}) {
     ...args,
     record: f.record(input, null, {
       status: 'blocked',
+      ...(reportedId === undefined ? {} : { preparation_id: reportedId }),
       blocker: 'Synthetic extraction failure',
       changed_pages: [],
     }),
   })
   return { ...f, args, input, other, ingestPublication }
+}
+
+for (const reportedId of ['prep-' + 'a'.repeat(33), 'prep-' + 'b'.repeat(32)]) {
+  test(`planner recovers a mistyped receipt ID from exact persisted identity: ${reportedId.length}`, async (t) => {
+    const f = await failedPrivateDraft(t, { reportedId })
+    const baseline = await f.git('rev-parse', 'HEAD')
+    const plan = await planNextBatch(f.args)
+    assert.equal(plan.blocked, false)
+    assert.deepEqual(
+      plan.batch.map((entry) => entry.source_key),
+      ['other.md'],
+    )
+    assert.equal((await f.ingestPublication({ ...f.input, operation: 'state' })).phase, 'abandoned')
+    assert.equal(await f.git('rev-parse', 'HEAD'), baseline)
+    assert.equal(await f.git('status', '--porcelain'), '')
+    const run = await loadRun(f.args)
+    assert.equal(run.effective[0].preparation_id, reportedId)
+    assert.deepEqual(run.recovery.skipped_records, [0])
+    assert.equal((await planNextBatch(f.args)).blocked, false)
+  })
 }
 
 for (const preparation of [true, false]) {
@@ -225,6 +246,46 @@ for (const unsafe of ['foreign', 'head', 'identity', 'run', 'publication', 'glob
         await readFile(path.join(f.wikiRoot, 'foreign.md'), 'utf8'),
         'Preserve foreign work\n',
       )
+  })
+}
+
+for (const unsafe of [
+  'identity',
+  'run',
+  'wiki',
+  'ambiguous',
+  'head',
+  'foreign',
+  'existing-other',
+]) {
+  test(`mistyped receipt recovery fails closed: ${unsafe}`, async (t) => {
+    const reportedId = 'prep-' + 'c'.repeat(32)
+    const f = await failedPrivateDraft(t, { reportedId })
+    const receiptPath = path.join(f.root, 'preparations', `${f.input.preparationId}.json`)
+    const receipt = JSON.parse(await readFile(receiptPath))
+    if (unsafe === 'identity') receipt.source.source_revision = 'd'.repeat(64)
+    if (unsafe === 'run') receipt.publication.run_id = 'run-20000101t000000-abcdef'
+    if (unsafe === 'wiki') receipt.wiki_root = path.join(f.wikiRoot, 'elsewhere')
+    if (['identity', 'run', 'wiki'].includes(unsafe))
+      await writeFile(receiptPath, JSON.stringify(receipt))
+    if (unsafe === 'ambiguous' || unsafe === 'existing-other') {
+      const copyId = unsafe === 'existing-other' ? reportedId : 'prep-' + 'e'.repeat(32)
+      const copy = { ...receipt, preparation_id: copyId }
+      if (unsafe === 'existing-other') copy.source = { ...copy.source, source_key: 'other.md' }
+      await writeFile(path.join(f.root, 'preparations', `${copyId}.json`), JSON.stringify(copy))
+    }
+    if (unsafe === 'head') await f.git('commit', '--allow-empty', '-qm', 'Foreign commit')
+    if (unsafe === 'foreign') await writeFile(path.join(f.wikiRoot, 'foreign.md'), 'Keep me')
+    const baseline = await f.git('rev-parse', 'HEAD')
+    const plan = await planNextBatch(f.args)
+    assert.equal(plan.blocked, true)
+    assert.equal(plan.recovery_required, true)
+    assert.deepEqual(plan.batch, [])
+    assert.equal(JSON.parse(await readFile(receiptPath)).publication.phase, 'draft')
+    assert.equal(await f.git('rev-parse', 'HEAD'), baseline)
+    assert.deepEqual((await loadRun(f.args)).recovery?.skipped_records ?? [], [])
+    if (unsafe === 'foreign')
+      assert.equal(await readFile(path.join(f.wikiRoot, 'foreign.md'), 'utf8'), 'Keep me')
   })
 }
 

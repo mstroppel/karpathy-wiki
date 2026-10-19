@@ -37,7 +37,8 @@ erzeugen. Bei Ablehnung stoppe für Wartung; keine Git-Reset-/Clean-Befehle.
    `log.md` automatisch. `changed_pages` ist nur für zusätzliche bekannte
    thematische Seiten nötig und enthält ausschließlich relative Wiki-Pfade,
    niemals den absoluten `wiki_path` aus dem Status. Merke die zurückgegebenen
-   `preparation_id` und `run_id`. Das Tool prüft frischen Status, Quellenbytes,
+   `preparation_id` und `run_id` unverändert aus der Antwort; rekonstruiere IDs
+   niemals aus dem Gedächtnis. Das Tool prüft frischen Status, Quellenbytes,
    `invalid`/`conflict` und sauberes Git und erstellt einen privaten Entwurf.
    Fremde Änderungen sind ein Blocker, kein Staging-/Löschauftrag.
 3. Lies die vollständige Quelle mit `operation: read_source`, `offset`, `limit`;
@@ -91,6 +92,8 @@ erzeugen. Bei Ablehnung stoppe für Wartung; keine Git-Reset-/Clean-Befehle.
 - Alle Aufrufe strikt sequenziell, jeweils Erfolg abwarten. Bei `error` mit
   `correctable: true` und `write_state: unchanged` darfst du die Eingabe einmal
   korrigieren; bei veralteter Referenz vorher denselben Abschnitt erneut lesen.
+  Bei `invalid_preparation` kopiere die ID erneut exakt aus der erfolgreichen
+  `prepare`-Antwort und prüfe, dass sie sich von der abgewiesenen Eingabe unterscheidet.
   Ein weiterer Fehler beendet den Auftrag, auch bei sauberem Git-Status.
 - Bei Transportfehlern ist der Schreibzustand zunächst unbekannt. Prüfe mit
   `operation: state`: `sealing`, `sealed`, `installing` oder `done` erlauben einen
