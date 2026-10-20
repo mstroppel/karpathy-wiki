@@ -23,6 +23,22 @@ def mailboxes(values: list[str]) -> list[str]:
     return [address(mailbox) for _, mailbox in getaddresses(values)]
 
 
+def recipient_mailboxes(values: list[str]) -> set[str]:
+    """Exact To/Cc/Bcc mailboxes; entries that are not exact mailboxes cannot match."""
+    found: set[str] = set()
+    for _, mailbox in getaddresses(values):
+        try:
+            found.add(address(mailbox))
+        except ValueError:
+            continue
+    return found
+
+
+def allowlist_from_env(name: str) -> tuple[str, ...]:
+    """Exact mailboxes from a comma-separated allowlist variable."""
+    return tuple(address(item.strip()) for item in os.getenv(name, "").split(",") if item.strip())
+
+
 def positive(name: str, default: str) -> int:
     value = int(os.getenv(name, default))
     if value <= 0:
@@ -45,7 +61,8 @@ class Settings:
     batch: int = 25
     max_bytes: int = 25 * 1024 * 1024
     timeout: int = 30
-    allowlist: tuple[str, ...] = ()
+    allowlist: tuple[str, ...] = ()  # optional exact From mailboxes
+    recipients: tuple[str, ...] = ()  # optional exact To/Cc/Bcc mailboxes
 
     @classmethod
     def from_env(cls, *, offline: bool = False) -> Settings:
@@ -63,11 +80,8 @@ class Settings:
             batch=positive("EMAIL_BATCH_SIZE", "25"),
             max_bytes=positive("EMAIL_MAX_BYTES", "26214400"),
             timeout=positive("EMAIL_TIMEOUT_SECONDS", "30"),
-            allowlist=tuple(
-                address(item.strip())
-                for item in os.getenv("EMAIL_FROM_ALLOWLIST", "").split(",")
-                if item.strip()
-            ),
+            allowlist=allowlist_from_env("EMAIL_FROM_ALLOWLIST"),
+            recipients=allowlist_from_env("EMAIL_RECIPIENT_ALLOWLIST"),
         )
         if not offline and not result.password:
             raise ValueError("EMAIL_IMAP_PASSWORD is required")

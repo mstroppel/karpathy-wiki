@@ -29,6 +29,8 @@ def mail(
     *,
     delivery=RECIPIENT,
     to="reader@example.com",
+    cc=None,
+    bcc=None,
     sender="sender@example.com",
     body="Secret Person wrote this.",
     html=False,
@@ -38,6 +40,10 @@ def mail(
     message = EmailMessage(policy=policy.SMTP)
     message["From"] = sender
     message["To"] = to
+    if cc is not None:
+        message["Cc"] = cc
+    if bcc is not None:
+        message["Bcc"] = bcc
     message["Subject"] = "Secret Person’s notes"
     message["Message-ID"] = "<example-message@example.com>"
     message["Date"] = "Tue, 13 Oct 2026 12:00:00 +0000"
@@ -123,7 +129,7 @@ class EmailTests(unittest.TestCase):
     def manifest(self):
         return json.loads((self.settings.sanitized / "manifest.json").read_text())
 
-    def test_recipient_headers_do_not_filter_folder_mail(self):
+    def test_delivery_and_recipient_headers_do_not_filter_without_allowlist(self):
         for field in ("To", "Cc", "Bcc"):
             message = parse(mail(delivery=None))
             if field == "To":
@@ -184,6 +190,81 @@ class EmailTests(unittest.TestCase):
             self.assertFalse(authorized(raw, restricted))
         with self.assertRaises(ValueError):
             authorized(mail(sender="not-an-address"), restricted)
+
+    def test_optional_recipient_allowlist_matches_to_cc_and_bcc(self):
+        restricted = replace(self.settings, recipients=("test+email@example.com",))
+        for field in ("to", "cc", "bcc"):
+            with self.subTest(field=field):
+                self.assertTrue(authorized(mail(**{field: "test+email@example.com"}), restricted))
+        self.assertTrue(
+            authorized(mail(to="Other <other@example.com>, test+email@example.com"), restricted)
+        )
+        self.assertTrue(authorized(mail(to="test+email@EXAMPLE.COM"), restricted))
+        self.assertFalse(authorized(mail(), restricted))
+        self.assertFalse(authorized(mail(to="test@example.com"), restricted))
+        self.assertFalse(authorized(mail(to="test+other@example.com"), restricted))
+        self.assertFalse(authorized(mail(to="TEST+email@example.com"), restricted))
+        self.assertFalse(authorized(mail(to="undisclosed-recipients:;"), restricted))
+        self.assertFalse(
+            authorized(
+                b"From: sender@example.com\r\nX-Original-To: test+email@example.com\r\n\r\nbody",
+                restricted,
+            )
+        )
+        # Entries that are not exact mailboxes cannot match and never veto a
+        # matching recipient.
+        self.assertFalse(authorized(mail(to="not-an-address"), restricted))
+        self.assertTrue(
+            authorized(mail(to="test+email@example.com", cc="not-an-address"), restricted)
+        )
+        self.assertTrue(
+            authorized(
+                mail(to="test+email@example.com", bcc="undisclosed-recipients:;"), restricted
+            )
+        )
+
+    def test_sender_and_recipient_allowlists_must_both_match(self):
+        restricted = replace(
+            self.settings,
+            allowlist=("sender@example.com",),
+            recipients=("test+email@example.com",),
+        )
+        self.assertTrue(authorized(mail(to="test+email@example.com"), restricted))
+        self.assertFalse(authorized(mail(to="reader@example.com"), restricted))
+        self.assertFalse(
+            authorized(mail(to="test+email@example.com", sender="other@example.com"), restricted)
+        )
+        self.assertFalse(
+            authorized(mail(to="reader@example.com", sender="other@example.com"), restricted)
+        )
+
+    def test_nonmatching_recipients_are_not_archived_or_deleted(self):
+        messages = {
+            "1": mail(to="test+email@example.com"),
+            "2": mail(cc="test+email@example.com"),
+            "3": mail(to="reader@example.com"),
+            "4": mail(bcc="test+email@example.com"),
+        }
+        settings = replace(self.settings, recipients=("test+email@example.com",))
+        client = FakeIMAP(messages)
+        self.assertEqual(receive(client, settings, self.store), (3, 0))
+        self.assertEqual(set(client.messages), {"3"})
+        self.assertEqual(len(list(self.settings.archive.glob("*.eml"))), 3)
+
+    def test_pending_delete_rechecks_current_recipient_allowlist(self):
+        client = FakeIMAP({"1": mail()})
+        client.fail_delete = True
+        receive(client, self.settings, self.store)
+        client.fail_delete = False
+        self.store.close()
+        self.store = Store(self.settings.archive)
+        client.commands.clear()
+        settings = replace(self.settings, recipients=("other@example.com",))
+        self.assertEqual(receive(client, settings, self.store), (0, 0))
+        self.assertFalse(any(command[0] == "STORE" for command in client.commands))
+        self.assertIn("1", client.messages)
+        self.assertEqual(receive(client, self.settings, self.store), (0, 0))
+        self.assertFalse(client.messages)
 
     def test_plain_preferred_and_attachments_and_embedded_mail_not_extracted(self):
         message = parse(mail(attachment=True))
@@ -705,6 +786,19 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(settings.password, " password with spaces ")
         self.assertEqual(settings.interval, 60)
         self.assertEqual(settings.allowlist, ())
+        self.assertEqual(settings.recipients, ())
+
+    def test_optional_recipient_allowlist_keeps_plus_tags_and_lowercases_domains(self):
+        with patch.dict(
+            os.environ,
+            {
+                **self.env(),
+                "EMAIL_RECIPIENT_ALLOWLIST": " Test+Email@EXAMPLE.com, other@example.com ",
+            },
+            clear=True,
+        ):
+            settings = Settings.from_env()
+        self.assertEqual(settings.recipients, ("Test+Email@example.com", "other@example.com"))
 
     def test_unsafe_env_rejected(self):
         for key, value in [
@@ -713,6 +807,7 @@ class SettingsTests(unittest.TestCase):
             ("EMAIL_IMAP_PASSWORD", ""),
             ("EMAIL_BATCH_SIZE", "0"),
             ("EMAIL_FROM_ALLOWLIST", "invalid"),
+            ("EMAIL_RECIPIENT_ALLOWLIST", "invalid"),
         ]:
             with (
                 self.subTest(key=key),
