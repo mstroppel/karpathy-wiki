@@ -2,7 +2,7 @@
 
 The optional `email` profile receives **one IMAP account and folder for this
 installation**. It considers all existing messages, read and unread. It publishes
-only body text and decoded message headers; no attachment extraction, speech,
+only body text and selected decoded message headers; no attachment extraction, speech,
 OAuth, SMTP receiver, or automatic wiki commits are included.
 
 **The configured account/folder is the trust boundary. There is no recipient
@@ -105,7 +105,10 @@ after a cycle; cycles never overlap. Tests never contact a live mailbox.
 ## Durability and recovery
 
 `${DATA_ROOT}/incoming/email` is private (`0700`). Immutable `.eml` files (`0600`)
-have opaque names. Originals are verified after writing; the file **and parent
+use `YYYY/MM/DD/HH-MM-SS_<id>.eml`, based on the provider's first receipt time
+in UTC, never the sender's Date header. The path is stored once and survives
+retries, restarts and replay. Names contain no subjects or addresses. Originals
+are verified after writing; the file **and parent
 directory** are fsynced, then a provider-local SQLite EXTRA-synchronous ledger
 commit records the delivery **before** deletion. Disk/state/integrity failures
 never permit deletion. A crash before the ledger commit can leave an orphan
@@ -133,12 +136,23 @@ exact-original-byte deduplication.
 Failed replay retains the last successful projection, subject to the current
 privacy gate, and reports the failure without discarding safe published text.
 
+Docker logs record each accepted receipt/archive (original ID and relative path)
+and each successful targeted server deletion (original ID), including resumed
+deletes. Failures name the operation and exception type only. Logs never include
+subjects, addresses, bodies, raw headers or server responses. A successful delete
+line is emitted only after the server command and ledger update succeed. These
+operational logs are not a replacement for the durable ledger.
+
 Body extraction prefers `text/plain`, otherwise converts HTML locally to text,
 preserves signatures/quotes, ignores attachments/embedded messages and loads no
-external resources. All decoded headers, including BCC and delivery provenance,
-are visible **after redaction**. The complete document crosses the privacy gate;
+external resources. Markdown uses the decoded Subject as its title (or
+`(No subject)`), then From, To, Cc when present, Date including its timezone,
+and the body. Bcc, transport/authentication/spam/MIME and provider headers are
+omitted. Message-ID and thread references remain available in the private
+original, not the Markdown. Attachments stay in the original only; there are no
+public attachment links. The complete document crosses the privacy gate;
 public IDs/claims are opaque and the whole manifest gets a residual-match check.
-Raw addresses, filenames, Message-IDs and original paths are never public IDs.
+Raw addresses, subjects and Message-IDs are never public IDs.
 
 Coherent generations publish through an atomic manifest at
 `${DATA_ROOT}/sources/email/manifest.json`, owning wiki subtree `email`. Previous
@@ -146,6 +160,20 @@ projections are removed after publication; originals are never pruned. Stricter
 redactions recheck/re-redact stored projections on the next cycle; restoring
 previously removed values requires replay. Revocations do not erase already
 committed wiki knowledge; request cleanup explicitly in the normal wiki workflow.
+
+The canonical original and its redacted Markdown share a date-based directory
+and basename; only the extension differs. Publication retains the immutable
+generation wrapper, for example:
+
+```text
+incoming/email/2026/10/20/18-24-17_<id>.eml
+sources/email/generations/<generation>/2026/10/20/18-24-17_<id>.md
+```
+
+The first original's opaque ID is also the source ID. Transit-only duplicates
+retain their own private originals/paths but share that first source and its
+canonical Markdown path. Exact-byte duplicates reuse the archived original.
+Raw `.eml` files are never copied into `sources`.
 
 ## Explicit offline replay
 

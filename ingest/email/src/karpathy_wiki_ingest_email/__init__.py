@@ -56,6 +56,7 @@ def publish(store: Store, root: Path, anonymizer: TargetedAnonymizer) -> int:
     generations only after the atomic manifest switch, as other providers do.
     """
     documents: dict[str, str] = {}
+    paths: dict[str, Path] = {}
     revoked = []
     errors = []
     for source in store.sources():
@@ -65,7 +66,9 @@ def publish(store: Store, root: Path, anonymizer: TargetedAnonymizer) -> int:
             revoked.append({"source_key": source["id"], "claim": {"email_id": source["id"]}})
             continue
         try:
+            relative = store.relative_path(source["original"]).with_suffix(".md")
             documents[source["id"]] = anonymizer.anonymize(source["output"])[0]
+            paths[source["id"]] = relative
         except ValueError:
             revoked.append({"source_key": source["id"], "claim": {"email_id": source["id"]}})
             errors.append({"source_key": source["id"], "error": "PrivacyValidationError"})
@@ -81,7 +84,7 @@ def publish(store: Store, root: Path, anonymizer: TargetedAnonymizer) -> int:
         items.append(
             ManifestItem(
                 source_key=source_id,
-                source_path=f"generations/{fingerprint}/{source_id}.md",
+                source_path=f"generations/{fingerprint}/{paths[source_id].as_posix()}",
                 wiki_path=f"email/{source_id}/index.md",
                 source_revision=revision,
                 source_sha256=revision,
@@ -100,12 +103,14 @@ def publish(store: Store, root: Path, anonymizer: TargetedAnonymizer) -> int:
         staging = root / f".staging-{uuid.uuid4().hex}"
         staging.mkdir()
         for source_id, text in documents.items():
-            atomic_write(staging / f"{source_id}.md", text)
+            destination = staging / paths[source_id]
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            atomic_write(destination, text)
         generation.parent.mkdir(exist_ok=True)
         staging.rename(generation)
     else:
         for source_id, text in documents.items():
-            if (generation / f"{source_id}.md").read_text(encoding="utf-8") != text:
+            if (generation / paths[source_id]).read_text(encoding="utf-8") != text:
                 raise ValueError("published generation integrity failure")
     path = root / "manifest.json"
     unchanged = False

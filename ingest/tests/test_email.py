@@ -8,6 +8,7 @@ import stat
 import tempfile
 import unittest
 from dataclasses import replace
+from datetime import UTC, datetime
 from email import policy
 from email.message import EmailMessage
 from pathlib import Path
@@ -159,7 +160,7 @@ class EmailTests(unittest.TestCase):
         self.assertEqual(receive(client, self.settings, self.store), (5, 0))
         self.assertFalse(client.messages)
         self.assertEqual(
-            {path.read_bytes() for path in self.settings.archive.glob("*.eml")}, set(originals)
+            {path.read_bytes() for path in self.settings.archive.rglob("*.eml")}, set(originals)
         )
 
     def test_empty_allowlist_does_not_parse_headers_before_archiving(self):
@@ -169,7 +170,7 @@ class EmailTests(unittest.TestCase):
             side_effect=AssertionError("no header filter configured"),
         ):
             self.assertEqual(receive(FakeIMAP({"1": raw}), self.settings, self.store), (1, 0))
-        self.assertEqual(next(self.settings.archive.glob("*.eml")).read_bytes(), raw)
+        self.assertEqual(next(self.settings.archive.rglob("*.eml")).read_bytes(), raw)
 
     def test_optional_sender_allowlist_requires_single_exact_from(self):
         restricted = replace(self.settings, allowlist=("sender@example.com",))
@@ -249,7 +250,7 @@ class EmailTests(unittest.TestCase):
         client = FakeIMAP(messages)
         self.assertEqual(receive(client, settings, self.store), (3, 0))
         self.assertEqual(set(client.messages), {"3"})
-        self.assertEqual(len(list(self.settings.archive.glob("*.eml"))), 3)
+        self.assertEqual(len(list(self.settings.archive.rglob("*.eml"))), 3)
 
     def test_pending_delete_rechecks_current_recipient_allowlist(self):
         client = FakeIMAP({"1": mail()})
@@ -292,14 +293,96 @@ class EmailTests(unittest.TestCase):
         self.assertNotIn("tracker", text)
         self.assertNotIn("<p>", text)
 
-    def test_all_decoded_metadata_including_bcc_is_redacted(self):
+    def test_only_reader_headers_are_rendered_and_redacted(self):
         message = parse(mail())
+        message["Cc"] = "Secret Person <copy@example.com>"
         message["Bcc"] = "Secret Person <hidden@example.com>"
         message["X-Private-Note"] = "Secret Person"
+        message["Received"] = "private relay"
+        message["DKIM-Signature"] = "private signature"
+        message["References"] = "<private-thread@example.com>"
         text = render(message.as_bytes(), "opaque", self.anonymizer)
-        self.assertIn("Bcc: [PERSON] <hidden@example.com>", text)
-        self.assertIn("X-Private-Note: [PERSON]", text)
+        self.assertTrue(text.startswith("# [PERSON]’s notes\n"))
+        self.assertIn("- **From:** sender@example.com", text)
+        self.assertIn("- **To:** reader@example.com", text)
+        self.assertIn("- **Cc:** [PERSON] <copy@example.com>", text)
+        self.assertIn("- **Date:** Tue, 13 Oct 2026 12:00:00 +0000", text)
+        self.assertIn("## Message\n\n[PERSON] wrote this.", text)
+        for omitted in (
+            "Bcc",
+            "hidden@example.com",
+            "X-Private-Note",
+            "Received",
+            "DKIM",
+            "References",
+            "Message-ID",
+            "MIME-Version",
+            "Content-Type",
+            "X-Original-To",
+            "opaque",
+        ):
+            self.assertNotIn(omitted, text)
         self.assertNotIn("Secret Person", text)
+
+    def test_missing_headers_and_folded_subject(self):
+        raw = b"Subject: Folded\r\n subject\r\nContent-Type: text/plain\r\n\r\nbody"
+        self.assertTrue(render(raw, "opaque", self.anonymizer).startswith("# Folded subject\n"))
+        text = render(b"Content-Type: text/plain\r\n\r\nbody", "opaque", self.anonymizer)
+        self.assertTrue(text.startswith("# (No subject)\n"))
+        self.assertNotIn("**Cc:**", text)
+
+    def test_archive_and_projection_share_receipt_path_across_restart_and_replay(self):
+        raw = mail()
+        with patch("karpathy_wiki_ingest_email.store.datetime") as clock:
+            clock.now.return_value = datetime(2026, 10, 20, 18, 24, 17, tzinfo=UTC)
+            original = self.seed(raw)
+            clock.now.assert_called_once_with(UTC)
+        relative = self.store.relative_path(original)
+        self.assertEqual(relative.as_posix(), f"2026/10/20/18-24-17_{original}.eml")
+        self.assertEqual(self.store.sources()[0]["id"], original)
+        for directory in (self.settings.archive / relative).parents:
+            if directory == self.settings.archive:
+                break
+            self.assertEqual(stat.S_IMODE(directory.stat().st_mode), 0o700)
+        self.store.close()
+        self.store = Store(self.settings.archive)
+        self.assertEqual(self.seed(raw, uid="2"), original)
+        extract(self.store, self.anonymizer, 25)
+        publish(self.store, self.settings.sanitized, self.anonymizer)
+        first = self.manifest()["items"][0]
+        self.assertEqual(Path(*Path(first["source_path"]).parts[2:]), relative.with_suffix(".md"))
+        self.store.rearm(None)
+        extract(self.store, self.anonymizer, 25)
+        publish(self.store, self.settings.sanitized, self.anonymizer)
+        self.assertEqual(self.manifest()["items"][0], first)
+        self.assertEqual(self.store.read(original), raw)
+        self.assertFalse(list(self.settings.sanitized.rglob("*.eml")))
+
+    def test_receipt_and_successful_deletion_logs_are_content_free(self):
+        client = FakeIMAP()
+        client.fail_delete = True
+        with self.assertLogs("karpathy-wiki-email", level="INFO") as captured:
+            self.assertEqual(receive(client, self.settings, self.store), (1, 1))
+        logs = "\n".join(captured.output)
+        self.assertIn("Email received and archived original_id=", logs)
+        self.assertIn("Email delete failed original_id=", logs)
+        self.assertNotIn("Email deleted from mailbox", logs)
+        original = self.store.sources()[0]["original"]
+        self.assertIn(self.store.relative_path(original).as_posix(), logs)
+        for secret in (
+            "Secret Person",
+            "example.com",
+            "secret server response",
+            "private-password",
+        ):
+            self.assertNotIn(secret, logs)
+        self.store.close()
+        self.store = Store(self.settings.archive)
+        client.fail_delete = False
+        with self.assertLogs("karpathy-wiki-email", level="INFO") as captured:
+            self.assertEqual(receive(client, self.settings, self.store), (0, 0))
+        self.assertEqual(len(captured.output), 1)
+        self.assertIn(f"Email deleted from mailbox original_id={original}", captured.output[0])
 
     def test_empty_malformed_and_bad_charset_fail_locally(self):
         cases = [
@@ -329,7 +412,7 @@ class EmailTests(unittest.TestCase):
             self.assertEqual(receive(client, self.settings, self.store), (1, 0))
             self.assertGreaterEqual(sync.call_count, 2)
         self.assertEqual(stat.S_IMODE(self.settings.archive.stat().st_mode), 0o700)
-        original = next(self.settings.archive.glob("*.eml"))
+        original = next(self.settings.archive.rglob("*.eml"))
         self.assertEqual(stat.S_IMODE(original.stat().st_mode), 0o600)
         self.assertEqual(original.read_bytes(), raw)
         self.assertTrue(
@@ -360,7 +443,7 @@ class EmailTests(unittest.TestCase):
         client = FakeIMAP(messages)
         self.assertEqual(receive(client, settings, self.store), (2, 1))
         self.assertEqual(set(client.messages), {"2", "3"})
-        self.assertEqual(len(list(self.settings.archive.glob("*.eml"))), 2)
+        self.assertEqual(len(list(self.settings.archive.rglob("*.eml"))), 2)
 
     def test_cursor_rotation_prevents_poison_and_nonmatching_starvation(self):
         client = FakeIMAP(
@@ -463,7 +546,7 @@ class EmailTests(unittest.TestCase):
         client = FakeIMAP()
         client.fail_delete = True
         receive(client, self.settings, self.store)
-        next(self.settings.archive.glob("*.eml")).write_bytes(b"corrupt")
+        next(self.settings.archive.rglob("*.eml")).write_bytes(b"corrupt")
         client.commands.clear()
         self.assertEqual(receive(client, self.settings, self.store), (0, 1))
         self.assertFalse(any(command[0] == "STORE" for command in client.commands))
@@ -478,7 +561,7 @@ class EmailTests(unittest.TestCase):
         client.fail_delete = False
         self.assertEqual(receive(client, self.settings, self.store), (1, 0))
         self.assertEqual(len(self.store.sources()), 2)
-        self.assertIn(new, [path.read_bytes() for path in self.settings.archive.glob("*.eml")])
+        self.assertIn(new, [path.read_bytes() for path in self.settings.archive.rglob("*.eml")])
 
     def test_pending_delete_rechecks_current_allowlist_without_delivery_header(self):
         client = FakeIMAP({"1": mail(delivery=None)})
@@ -511,7 +594,7 @@ class EmailTests(unittest.TestCase):
                 client.messages = {"1": raw}
                 self.assertEqual(receive(client, settings, self.store), (1, 0))
                 self.assertIn(
-                    raw, [path.read_bytes() for path in self.settings.archive.glob("*.eml")]
+                    raw, [path.read_bytes() for path in self.settings.archive.rglob("*.eml")]
                 )
 
     def test_pathological_mime_cannot_block_archive_or_delete(self):
@@ -529,7 +612,7 @@ class EmailTests(unittest.TestCase):
         client = FakeIMAP({"1": raw})
         self.assertEqual(receive(client, self.settings, self.store), (1, 0))
         self.assertFalse(client.messages)
-        self.assertEqual(next(self.settings.archive.glob("*.eml")).read_bytes(), raw)
+        self.assertEqual(next(self.settings.archive.rglob("*.eml")).read_bytes(), raw)
         self.assertEqual(extract(self.store, self.anonymizer, 25), 1)
 
     def test_identity_exception_follows_durable_archive_with_extra_ledger(self):
@@ -537,7 +620,7 @@ class EmailTests(unittest.TestCase):
         raw = mail()
 
         def failing_identity(message):
-            self.assertEqual(next(self.settings.archive.glob("*.eml")).read_bytes(), raw)
+            self.assertEqual(next(self.settings.archive.rglob("*.eml")).read_bytes(), raw)
             raise RecursionError
 
         with patch("karpathy_wiki_ingest_email.store.message_identity", new=failing_identity):
@@ -550,7 +633,7 @@ class EmailTests(unittest.TestCase):
         self.assertEqual(identity(parse(first)), identity(parse(second)))
         receive(FakeIMAP({"1": first, "2": second}), self.settings, self.store)
         self.assertEqual(len(self.store.sources()), 1)
-        self.assertEqual(len(list(self.settings.archive.glob("*.eml"))), 2)
+        self.assertEqual(len(list(self.settings.archive.rglob("*.eml"))), 2)
         self.assertEqual(extract(self.store, self.anonymizer, 25), 0)
         publish(self.store, self.settings.sanitized, self.anonymizer)
         self.assertEqual(len(self.manifest()["items"]), 1)
@@ -560,7 +643,7 @@ class EmailTests(unittest.TestCase):
         first = self.seed()
         second = self.seed(uid="2")
         self.assertEqual(first, second)
-        self.assertEqual(len(list(self.settings.archive.glob("*.eml"))), 1)
+        self.assertEqual(len(list(self.settings.archive.rglob("*.eml"))), 1)
         self.assertEqual(len(self.store.sources()), 1)
 
     def test_local_failure_stays_replayable_after_server_deletion(self):
@@ -588,7 +671,7 @@ class EmailTests(unittest.TestCase):
         self.assertEqual(receive(client, self.settings, self.store), (1, 0))
         self.assertFalse(client.messages)
         self.assertEqual(extract(self.store, self.anonymizer, 25), 1)
-        self.assertEqual(next(self.settings.archive.glob("*.eml")).read_bytes(), raw)
+        self.assertEqual(next(self.settings.archive.rglob("*.eml")).read_bytes(), raw)
 
     def test_manifest_opaque_identifiers_and_publication_idempotency(self):
         self.seed()
@@ -693,11 +776,37 @@ class EmailTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.store.read("../bad")
         original = self.seed()
-        path = self.settings.archive / f"{original}.eml"
+        path = self.settings.archive / self.store.relative_path(original)
         path.unlink()
         path.symlink_to(self.redactions)
         with self.assertRaises(OSError):
             self.store.read(original)
+
+    def test_nested_archive_symlinks_and_unsafe_ledger_paths_fail_closed(self):
+        original = self.seed()
+        relative = self.store.relative_path(original)
+        directory = (self.settings.archive / relative).parent
+        moved = directory.with_name("moved")
+        directory.rename(moved)
+        directory.symlink_to(moved, target_is_directory=True)
+        with self.assertRaises(OSError):
+            self.store.read(original)
+        with self.assertRaises(ValueError):
+            self.seed(mail(body="different message"))
+        with self.store.db:
+            self.store.db.execute("UPDATE originals SET path='../escape.eml'")
+        with self.assertRaises(ValueError):
+            self.store.read(original)
+
+    def test_invalid_archive_path_revokes_projection_without_partial_publication(self):
+        self.seed()
+        extract(self.store, self.anonymizer, 25)
+        publish(self.store, self.settings.sanitized, self.anonymizer)
+        with self.store.db:
+            self.store.db.execute("UPDATE originals SET path='../escape.eml'")
+        self.assertEqual(publish(self.store, self.settings.sanitized, self.anonymizer), 1)
+        self.assertEqual(self.manifest()["items"], [])
+        self.assertEqual(len(self.manifest()["revoked"]), 1)
 
     def test_pending_extraction_limit_and_published_integrity(self):
         self.seed(uid="1")

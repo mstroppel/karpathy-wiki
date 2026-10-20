@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import imaplib
 import json
+import logging
 import re
 import ssl
 from contextlib import contextmanager
@@ -14,6 +15,8 @@ from typing import Any
 
 from .settings import Settings, mailboxes, recipient_mailboxes
 from .store import Store
+
+LOG = logging.getLogger("karpathy-wiki-email")
 
 
 def checked(result: tuple[Any, Any]) -> Any:
@@ -84,6 +87,7 @@ def delete(client: Any, store: Store, scope: str, epoch: str, uid: str, original
     checked(client.uid("STORE", uid, "+FLAGS.SILENT", r"(\Deleted)"))
     checked(client.uid("EXPUNGE", uid))
     store.deleted(scope, epoch, uid)
+    LOG.info("Email deleted from mailbox original_id=%s", original)
 
 
 def receive(client: Any, settings: Settings, store: Store) -> tuple[int, int]:
@@ -128,12 +132,16 @@ def receive(client: Any, settings: Settings, store: Store) -> tuple[int, int]:
     backlog_set = set(backlog)
     archived = failed = 0
     for uid in backlog + newest:
+        operation = "receive"
+        original = None
         try:
             previous = store.delivery(scope, epoch, uid)
             if previous is not None:
                 if not previous["deleted"] and authorized(
                     store.read(previous["original"]), settings
                 ):
+                    operation = "delete"
+                    original = previous["original"]
                     delete(client, store, scope, epoch, uid, previous["original"])
                 continue
             data = checked(client.uid("FETCH", uid, "(UID RFC822.SIZE)"))
@@ -157,8 +165,20 @@ def receive(client: Any, settings: Settings, store: Store) -> tuple[int, int]:
                 continue
             original = store.archive(raw, None, scope, epoch, uid)
             archived += 1
+            LOG.info(
+                "Email received and archived original_id=%s path=%s",
+                original,
+                store.relative_path(original).as_posix(),
+            )
+            operation = "delete"
             delete(client, store, scope, epoch, uid, original)
-        except (OSError, ValueError, RecursionError, imaplib.IMAP4.error):
+        except (OSError, ValueError, RecursionError, imaplib.IMAP4.error) as error:
+            LOG.error(
+                "Email %s failed original_id=%s (%s)",
+                operation,
+                original or "unassigned",
+                type(error).__name__,
+            )
             failed += 1
         finally:
             # Only backlog work advances the cursor; newest-first processing
