@@ -616,7 +616,7 @@ class CycleHarness(unittest.TestCase):
         )
 
     def page(self) -> str:
-        sources = sorted((self.active() / "recordings").glob("*.md"))
+        sources = sorted((self.active() / "recordings").rglob("*.md"))
         self.assertTrue(sources, "no published recording")
         return sources[-1].read_text(encoding="utf-8")
 
@@ -706,6 +706,56 @@ class DaemonSchedulingTests(CycleHarness):
 
 
 class PublicationTests(CycleHarness):
+    def test_transcript_mirrors_nested_recording_path_and_replays(self):
+        relative = "shared/42 Gespräche/2026-01-15 Beratung.mp3"
+        write_recording(self.incoming, relative)
+        self.assertEqual(self.cycle(), (1, 0, False))
+        item = self.manifest()["items"][0]
+        expected = f"recordings/{relative}.md"
+        self.assertEqual(item["source_path"], f"generations/{self.active().name}/{expected}")
+        self.assertEqual((self.active() / expected).read_text(), self.page())
+        generation = self.active()
+        self.assertEqual(self.cycle(), (0, 0, False))
+        self.assertEqual(self.active(), generation)
+
+    def test_same_stem_in_different_formats_or_folders_stays_distinct(self):
+        for relative in ("one/meeting.mp3", "one/meeting.wav", "two/meeting.mp3"):
+            write_recording(self.incoming, relative)
+        self.assertEqual(self.cycle(), (3, 0, False))
+        items = self.manifest()["items"]
+        self.assertEqual(len({item["source_path"] for item in items}), 3)
+        for item in items:
+            self.assertTrue((self.sanitized / item["source_path"]).is_file())
+
+    def test_redacted_path_collision_keeps_previous_generation(self):
+        write_recording(self.incoming, "meeting.mp3")
+        self.cycle()
+        generation = self.active()
+        manifest = self.manifest()
+        write_recording(self.incoming, "Max Mustermann.mp3")
+        write_recording(self.incoming, "[ICH].mp3")
+        self.assertEqual(self.cycle()[1], 1)
+        self.assertEqual(self.active(), generation)
+        self.assertEqual(self.manifest(), manifest)
+
+    def test_unsafe_redacted_origin_is_quarantined_before_writing(self):
+        write_recording(self.incoming, "previous.mp3")
+        self.cycle()
+        generation = self.active()
+        write_recording(self.incoming, "meeting.mp3")
+        for unsafe in ("../escape.mp3", "/escape.mp3", "a/../escape.mp3", "a\\escape.mp3"):
+            with self.subTest(origin=unsafe):
+                redactor = anonymizer()
+                original = redactor.anonymize
+
+                def redact(text, unsafe=unsafe, original=original):
+                    return (unsafe, {}) if text == "meeting.mp3" else original(text)
+
+                with mock.patch.object(redactor, "anonymize", side_effect=redact):
+                    self.assertEqual(self.cycle(redactor, store=None)[1], 1)
+                self.assertEqual(self.active(), generation)
+        self.assertFalse(list(self.sanitized.rglob("escape.mp3.md")))
+
     def test_renderer_change_republishes_frontmatter_without_retranscription(self):
         from karpathy_wiki_ingest_audio import publisher
 
@@ -784,6 +834,7 @@ class PublicationTests(CycleHarness):
         self.assertNotIn("Max Mustermann", manifest)
         self.assertIn("[ICH]", manifest)
         for path in self.sanitized.rglob("*"):
+            self.assertNotIn("Max Mustermann", str(path))
             if path.is_file():
                 self.assertNotIn("Max Mustermann", path.read_text(), str(path))
         generation = self.active()

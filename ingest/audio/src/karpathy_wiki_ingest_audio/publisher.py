@@ -45,6 +45,7 @@ from karpathy_wiki_ingest.manifest import (
     MANIFEST_FILENAME,
     ManifestItem,
     build_manifest,
+    check_relative_path,
     write_manifest,
 )
 from karpathy_wiki_ingest.shared import (
@@ -92,7 +93,7 @@ GENERATION_METADATA_FILENAME = ".generation.json"
 STAGING_PREFIX = ".staging-"
 TRANSCRIPT_DIRECTORY = "recordings"
 
-RENDERER_VERSION = 2
+RENDERER_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -146,8 +147,14 @@ def wiki_path_of(source_id: str) -> str:
     return posixpath.join(WIKI_ROOT, f"recording-{source_id}", "index.md")
 
 
-def source_path_of(generation: str, source_id: str) -> str:
-    name = posixpath.join(TRANSCRIPT_DIRECTORY, f"{source_id}.md")
+def transcript_path_of(safe_origin: str) -> str:
+    """Mirror the redacted origin, retaining the audio extension to avoid aliases."""
+    check_relative_path(safe_origin)
+    return posixpath.join(TRANSCRIPT_DIRECTORY, f"{safe_origin}.md")
+
+
+def source_path_of(generation: str, safe_origin: str) -> str:
+    name = transcript_path_of(safe_origin)
     return posixpath.join(GENERATIONS_DIRECTORY, generation, name)
 
 
@@ -291,7 +298,6 @@ def sanitize_into_generation(
     for work in build_sources(mapping, inventory, source_ids):
         if status is not None:
             status.enter("source", phase_timeout)
-        target = staging / TRANSCRIPT_DIRECTORY / f"{work.source_id}.md"
         stage = "metadata_redaction"
         try:
             # Public metadata (origin path, page title) is redacted before
@@ -299,6 +305,11 @@ def sanitize_into_generation(
             # wiki page all carry the sanitized value.
             safe_title, _ = anonymizer.anonymize(title_of(work.relative))
             safe_origin, _ = anonymizer.anonymize(work.relative)
+            target = staging / transcript_path_of(safe_origin)
+            # Redaction can collapse distinct names. Never overwrite another
+            # recording or publish a generation with ambiguous source paths.
+            if target.exists():
+                raise ValueError("redacted transcript path collision")
             stage = "speech"
             if status is not None:
                 status.enter("speech_wait", speech_timeout)
@@ -329,7 +340,7 @@ def sanitize_into_generation(
             items.append(
                 ManifestItem(
                     source_key=work.source_id,
-                    source_path=source_path_of(generation_name, work.source_id),
+                    source_path=source_path_of(generation_name, safe_origin),
                     wiki_path=wiki_path_of(work.source_id),
                     source_revision=revision,
                     frontmatter={
@@ -662,10 +673,17 @@ def published_matches(
         source_key = item.get("source_key")
         if not isinstance(source_key, str) or not source_key or source_key in parsed:
             return False
-        relative = posixpath.join(TRANSCRIPT_DIRECTORY, f"{source_key}.md")
+        frontmatter = item.get("frontmatter")
+        if not isinstance(frontmatter, dict):
+            return False
+        try:
+            origin = check_relative_path(frontmatter.get("source_path"))
+            relative = transcript_path_of(origin)
+        except ValueError:
+            return False
         if relative not in files:
             return False
-        if item.get("source_path") != source_path_of(generation.name, source_key):
+        if item.get("source_path") != source_path_of(generation.name, origin):
             return False
         if item.get("source_revision") != files[relative]:
             return False
