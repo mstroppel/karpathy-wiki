@@ -84,13 +84,13 @@ class Handler(socketserver.StreamRequestHandler):
                     uid = args[1]
                     ledger = sqlite3.connect(ROOT / "incoming/email/mail.sqlite3")
                     delivery = ledger.execute(
-                        "SELECT original FROM deliveries WHERE uid=?", (uid,)
+                        "SELECT originals.path FROM deliveries JOIN originals "
+                        "ON deliveries.original=originals.id WHERE uid=?",
+                        (uid,),
                     ).fetchone()
                     ledger.close()
                     assert delivery is not None, "server delete preceded durable ledger"
-                    assert (ROOT / f"incoming/email/{delivery[0]}.eml").read_bytes() == MESSAGES[
-                        uid
-                    ]
+                    assert (ROOT / "incoming/email" / delivery[0]).read_bytes() == MESSAGES[uid]
                 elif operation == "EXPUNGE":
                     uid = args[1]
                     if FIRST_DELETE:
@@ -154,13 +154,18 @@ def run():
             assert len(first["items"]) == 4
             assert cycle(settings) == 0  # persisted pending delete resumes
         assert set(MESSAGES) == {"5"}, "non-allowlisted message was deleted"
-        assert len(list(settings.archive.glob("*.eml"))) == 4
+        assert len(list(settings.archive.rglob("*.eml"))) == 4
         assert all(command.split()[1] not in {"CLOSE", "EXPUNGE"} for command in COMMANDS)
         assert client_context.check_hostname
         for item in first["items"]:
             text = (settings.sanitized / item["source_path"]).read_text()
             assert "Secret Person" not in text
             assert "PRIVATE ATTACHMENT" not in text
+            assert "MIME-Version" not in text
+            assert "Content-Type" not in text
+            relative = Path(*Path(item["source_path"]).parts[2:]).with_suffix(".eml")
+            assert (settings.archive / relative).is_file(), "archive/projection paths differ"
+            assert item["source_key"] in relative.stem
         # Explicit offline replay needs no network and preserves revisions/IDs.
         with patch("karpathy_wiki_ingest_email.connection", side_effect=AssertionError("network")):
             assert cycle(replace(settings, host="", username="", password=""), replay=True) == 0
@@ -195,7 +200,7 @@ def run():
         # 3 and 4 were already consumed by the sender-filter run; 5 fails the
         # sender filter, and 6/8 have no matching To/Cc/Bcc mailbox.
         assert set(MESSAGES) == {"5", "6", "8"}, f"unexpected server state: {sorted(MESSAGES)}"
-        assert len(list(settings.archive.glob("*.eml"))) == 5
+        assert len(list(settings.archive.rglob("*.eml"))) == 5
         filtered = json.loads((settings.sanitized / "manifest.json").read_text())
         assert len(filtered["items"]) == 5
         (ROOT / "wiki/sources").mkdir(parents=True)

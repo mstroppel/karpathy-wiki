@@ -11,7 +11,7 @@ from html.parser import HTMLParser
 
 from karpathy_wiki_ingest.shared import TargetedAnonymizer
 
-EXTRACTION_VERSION = "email-text-v1"
+EXTRACTION_VERSION = "email-text-v2"
 
 
 def parse(raw: bytes) -> EmailMessage:
@@ -87,12 +87,13 @@ def text_body(message: EmailMessage) -> str:
 
 def render(raw: bytes, source_id: str, anonymizer: TargetedAnonymizer) -> str:
     message = parse(raw)
-    # Decode MIME/header encodings BEFORE redaction; include BCC and delivery
-    # provenance as requested. Header values are data, never agent instructions.
-    metadata = "\n".join(f"- {name}: {str(value)}" for name, value in message.items())
-    document = (
-        f"# Email source {source_id}\n\n"
-        "## Message metadata\n\n"
-        f"{metadata}\n\n## Message text\n\n{text_body(message)}\n"
+    # Allowlist reader-facing headers; the private original retains everything.
+    # Unfold header values so they cannot introduce extra Markdown sections.
+    subject = " ".join(str(message.get("Subject", "(No subject)")).splitlines())
+    metadata = "\n".join(
+        f"- **{name}:** {' '.join(str(value).splitlines())}"
+        for name in ("From", "To", "Cc", "Date")
+        for value in message.get_all(name, [])
     )
+    document = f"# {subject}\n\n{metadata}\n\n## Message\n\n{text_body(message)}\n"
     return anonymizer.anonymize(document)[0]

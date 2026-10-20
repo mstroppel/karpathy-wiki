@@ -9,10 +9,12 @@ from __future__ import annotations
 import fcntl
 import hashlib
 import os
+import re
 import sqlite3
 import stat
 import time
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 from .extract import identity as message_identity
@@ -65,7 +67,7 @@ class Store:
                     next_attempt INTEGER NOT NULL DEFAULT 0, error TEXT
                 );
                 CREATE TABLE IF NOT EXISTS originals (
-                    id TEXT PRIMARY KEY, sha256 TEXT UNIQUE NOT NULL,
+                    id TEXT PRIMARY KEY, sha256 TEXT UNIQUE NOT NULL, path TEXT NOT NULL,
                     source_id TEXT NOT NULL REFERENCES sources(id)
                 );
                 CREATE TABLE IF NOT EXISTS deliveries (
@@ -90,11 +92,30 @@ class Store:
         self.db.close()
         self.lock.close()
 
-    def read(self, original: str) -> bytes:
+    def relative_path(self, original: str) -> Path:
         if len(original) != 32 or any(c not in "0123456789abcdef" for c in original):
             raise ValueError("invalid original ID")
-        path = self.root / f"{original}.eml"
-        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        row = self.db.execute("SELECT path FROM originals WHERE id=?", (original,)).fetchone()
+        if row is None or not re.fullmatch(
+            rf"[0-9]{{4}}/[0-9]{{2}}/[0-9]{{2}}/[0-9]{{2}}-[0-9]{{2}}-[0-9]{{2}}_{original}\.eml",
+            row["path"],
+        ):
+            raise ValueError("invalid original path")
+        return Path(row["path"])
+
+    def read(self, original: str) -> bytes:
+        relative = self.relative_path(original)
+        directory = os.open(self.root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            for component in relative.parts[:-1]:
+                child = os.open(
+                    component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory
+                )
+                os.close(directory)
+                directory = child
+            descriptor = os.open(relative.name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory)
+        finally:
+            os.close(directory)
         with os.fdopen(descriptor, "rb") as handle:
             if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
                 raise ValueError("original is not a regular file")
@@ -113,8 +134,21 @@ class Store:
             self.read(original)
         else:
             original = uuid.uuid4().hex
-            temporary = self.root / f".{original}.tmp"
-            path = self.root / f"{original}.eml"
+            relative = Path(datetime.now(UTC).strftime("%Y/%m/%d/%H-%M-%S_") + original + ".eml")
+            path = self.root / relative
+            directory = self.root
+            for component in relative.parts[:-1]:
+                parent = directory
+                directory = parent / component
+                directory.mkdir(mode=0o700, exist_ok=True)
+                if directory.is_symlink() or not directory.is_dir():
+                    raise ValueError("invalid archive directory")
+                directory.chmod(0o700)
+                # Sync even existing directories: a previous interrupted write
+                # may have left an uncommitted directory entry behind.
+                fsync_directory(directory)
+                fsync_directory(parent)
+            temporary = path.with_name(f".{original}.tmp")
             try:
                 descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
                 with os.fdopen(descriptor, "wb") as handle:
@@ -124,7 +158,7 @@ class Store:
                 if temporary.read_bytes() != raw:
                     raise OSError("archive verification failed")
                 os.link(temporary, path)  # never overwrite an original
-                fsync_directory(self.root)
+                fsync_directory(path.parent)
             finally:
                 temporary.unlink(missing_ok=True)
             # MIME parsing/serialization cannot prevent durable raw retention.
@@ -138,7 +172,7 @@ class Store:
             source = self.db.execute(
                 "SELECT id FROM sources WHERE identity=?", (identity,)
             ).fetchone()
-            source_id = source["id"] if source else uuid.uuid4().hex
+            source_id = source["id"] if source else original
             with self.db:
                 if not source:
                     self.db.execute(
@@ -146,7 +180,8 @@ class Store:
                         (source_id, identity, original),
                     )
                 self.db.execute(
-                    "INSERT INTO originals VALUES(?,?,?)", (original, digest(raw), source_id)
+                    "INSERT INTO originals VALUES(?,?,?,?)",
+                    (original, digest(raw), relative.as_posix(), source_id),
                 )
         # A crash before this commit leaves an orphan .eml, but no deletion.
         with self.db:

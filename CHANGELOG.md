@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Email Markdown now includes only Subject, From, To, optional Cc, Date and body;
+  technical headers and Bcc remain private in the original. Originals use UTC
+  receipt paths `YYYY/MM/DD/HH-MM-SS_<id>.eml`; published Markdown mirrors that
+  directory/basename inside its generation. Content-free Docker logs record
+  accepted receipts, archive paths, successful mailbox deletes and failures.
+  The private email ledger layout changes; no automatic conversion or legacy
+  fallback is provided. Back up the original archive and ledger together before
+  upgrading; existing email archives require manual reorganization for this
+  pre-1.0 layout. Never delete retained originals or reset pending-deletion state.
 - Published images now target AMD64 only; ARM64 hosts are no longer supported.
   CI caches BuildKit layers per image, runs six integration suites in parallel,
   and promotes the successful main CI run's image digests to pre-release tags
