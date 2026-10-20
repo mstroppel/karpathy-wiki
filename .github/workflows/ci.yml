@@ -161,12 +161,34 @@ jobs:
           load: false
           push: ${{ (github.event_name == 'push' || github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'workflow_dispatch' && inputs.pull_request_number != '') }}
       - name: Save immutable image digests for release promotion
-        if: github.event_name == 'push'
+        if: fromJSON(steps.build.outputs.metadata)['opencode-release'] != null
+        # Export only the eight digests, not provenance or other unbounded data.
+        # Run on PRs too so the release artifact path is covered before merging.
         env:
-          METADATA: ${{ steps.build.outputs.metadata }}
-        run: printf '%s\n' "$METADATA" > image-metadata.json
+          DIGEST_opencode: ${{ fromJSON(steps.build.outputs.metadata)['opencode-release']['containerimage.digest'] }}
+          DIGEST_openchamber: ${{ fromJSON(steps.build.outputs.metadata)['openchamber-release']['containerimage.digest'] }}
+          DIGEST_ingest: ${{ fromJSON(steps.build.outputs.metadata)['ingest-release']['containerimage.digest'] }}
+          DIGEST_ingest_webdav: ${{ fromJSON(steps.build.outputs.metadata)['ingest-webdav-release']['containerimage.digest'] }}
+          DIGEST_ingest_audio: ${{ fromJSON(steps.build.outputs.metadata)['ingest-audio-release']['containerimage.digest'] }}
+          DIGEST_ingest_speech: ${{ fromJSON(steps.build.outputs.metadata)['ingest-speech-release']['containerimage.digest'] }}
+          DIGEST_ingest_paperless: ${{ fromJSON(steps.build.outputs.metadata)['ingest-paperless-release']['containerimage.digest'] }}
+          DIGEST_ingest_email: ${{ fromJSON(steps.build.outputs.metadata)['ingest-email-release']['containerimage.digest'] }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          metadata = {
+              name.removeprefix("DIGEST_").replace("_", "-") + "-release": {
+                  "containerimage.digest": value
+              }
+              for name, value in os.environ.items() if name.startswith("DIGEST_")
+          }
+          Path("image-metadata.json").write_text(json.dumps(metadata) + "\n")
+          PY
       - uses: actions/upload-artifact@v7
-        if: github.event_name == 'push'
+        if: fromJSON(steps.build.outputs.metadata)['opencode-release'] != null
         with:
           name: release-image-metadata
           path: image-metadata.json
