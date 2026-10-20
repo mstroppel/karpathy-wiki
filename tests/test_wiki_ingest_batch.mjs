@@ -177,6 +177,48 @@ test('target collisions with conflicted identities never dispatch a worker or st
   assert.equal(await f.git('rev-list', '--count', 'HEAD'), '3')
 })
 
+test('root-conflicted manifests still reserve targets before dispatch', async (t) => {
+  const f = await fixture(t, 2)
+  const [colliding, independent] = f.manifest.items
+  colliding.wiki_path = 'shared/collision.md'
+  await f.publish()
+  for (const name of ['alpha', 'beta']) {
+    await mkdir(path.join(f.opts.sourceRoot, name))
+    await writeFile(
+      path.join(f.opts.sourceRoot, name, 'manifest.json'),
+      JSON.stringify({
+        ...f.manifest,
+        source: name,
+        wiki_root: 'shared',
+        items: [
+          { ...colliding, wiki_path: name === 'alpha' ? colliding.wiki_path : 'shared/other.md' },
+        ],
+      }),
+    )
+  }
+  await mkdir(path.join(f.opts.wikiRoot, 'sources/shared'))
+  const page = path.join(f.opts.wikiRoot, 'sources', colliding.wiki_path)
+  const original = `---\nsource: webdav\nsource_path: ${colliding.source_path}\nsource_revision: ${colliding.source_revision}\n---\n# Previous\n`
+  await writeFile(page, original)
+  await f.git('add', '.')
+  await f.git('commit', '-qm', 'target of root-conflicted provider')
+  const calls = []
+  const result = await runIngestBatch(f.opts, async (batch) => {
+    calls.push(batch.sources[0].source_key)
+    return f.worker(batch)
+  })
+  assert.deepEqual(calls, [independent.source_key])
+  assert.equal(result.status, 'partial')
+  assert.equal(result.ingested, 1)
+  assert.equal(result.summary.conflict, 1)
+  assert.equal(result.summary.invalid, 2)
+  assert.equal(result.remaining, 0)
+  assert.equal(result.blocker, null)
+  assert.equal(await readFile(page, 'utf8'), original)
+  assert.equal(await f.git('status', '--porcelain'), '')
+  assert.equal(await f.git('rev-list', '--count', 'HEAD'), '3')
+})
+
 test('invalid source metadata is skipped without poisoning independent publication', async (t) => {
   const f = await fixture(t)
   const page = path.join(f.opts.wikiRoot, 'sources/webdav/note-1.md')

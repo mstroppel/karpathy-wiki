@@ -363,6 +363,15 @@ export async function scanIngestStatus({ sourceRoot, wikiSourceRoot, includeCurr
   }
 
   const owned = Object.entries(adapters).filter(([, adapter]) => adapter.manifest)
+  // Reserve every parsed manifest target before root/identity classification.
+  // Invalid roots and conflicted identities must not expose targets to workers.
+  const targetCounts = new Map()
+  for (const [, adapter] of owned) {
+    for (const item of adapter.manifest.items) {
+      const target = path.join(wikiSourceRoot, item.wiki_path)
+      targetCounts.set(target, (targetCounts.get(target) ?? 0) + 1)
+    }
+  }
   // The contract requires wiki_roots to be unique across sources; duplicate
   // roots would make page attribution depend on directory iteration order, so
   // colliding manifests are reported invalid.
@@ -463,9 +472,6 @@ export async function scanIngestStatus({ sourceRoot, wikiSourceRoot, includeCurr
   }
 
   const results = {}
-  // Count every manifest owner, even identities already classified as conflict
-  // or invalid. Otherwise another source can overwrite their canonical target.
-  const targetCounts = new Map()
   for (const [sourceName, adapter] of Object.entries(adapters)) {
     const result = emptyResult()
     if (adapter.failure) {
@@ -477,7 +483,6 @@ export async function scanIngestStatus({ sourceRoot, wikiSourceRoot, includeCurr
     for (const item of adapter.manifest.items) {
       const source_path = path.join(adapter.sourceRoot, item.source_path)
       const wiki_path = path.join(wikiSourceRoot, item.wiki_path)
-      targetCounts.set(wiki_path, (targetCounts.get(wiki_path) ?? 0) + 1)
       const base = {
         source_key: item.source_key,
         source_path,
