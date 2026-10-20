@@ -695,6 +695,46 @@ test('reports wiki path collisions across sources', async () => {
   }
 })
 
+test('target ownership includes new, current, outdated, invalid and conflicted identities', async (t) => {
+  for (const state of ['new', 'current', 'outdated', 'invalid', 'conflict']) {
+    await t.test(state, async () => {
+      const { root, sourceRoot, wikiSourceRoot } = await fixture()
+      try {
+        await writeManifest(sourceRoot, 'custom', {
+          wiki_root: 'custom',
+          items: [
+            item('owner', 'owner.txt', 'custom/shared.md'),
+            item('other', 'other.txt', 'custom/shared.md'),
+            item('independent', 'independent.txt', 'custom/independent.md'),
+          ],
+        })
+        const fields = [
+          'source_path: owner.txt',
+          `source_revision: ${state === 'outdated' ? OTHER_REVISION : state === 'invalid' ? 'invalid' : REVISION}`,
+        ]
+        if (state !== 'new') await writePage(wikiSourceRoot, 'custom/shared.md', fields)
+        if (state === 'conflict') await writePage(wikiSourceRoot, 'custom/duplicate.md', fields)
+        const status = await scanIngestStatus({ sourceRoot, wikiSourceRoot, includeCurrent: true })
+        const result = status.adapters.custom
+        assert.deepEqual(
+          result.new.map((entry) => entry.source_key),
+          ['independent'],
+        )
+        assert.deepEqual(result.conflict.map((entry) => entry.source_key).sort(), [
+          'other',
+          'owner',
+        ])
+        assert.equal(result.current.length, 0)
+        assert.equal(result.outdated.length, 0)
+        assert.equal(status.summary.conflict, 2)
+        if (state === 'invalid' || state === 'conflict') assert.ok(result.invalid.length)
+      } finally {
+        await rm(root, { recursive: true, force: true })
+      }
+    })
+  }
+})
+
 test('rejects duplicate wiki_root values across sources', async () => {
   const { root, sourceRoot, wikiSourceRoot } = await fixture()
   try {

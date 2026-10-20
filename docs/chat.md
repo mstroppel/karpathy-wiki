@@ -100,19 +100,19 @@ model/provider budget. Do not use private sources for these checks.
 - [ ] Select the wiki project and model. Confirm all four wiki commands and
   wiki agents/skills are visible; switch agents and verify the next turn uses
   the selected agent.
-- [ ] Run `/ingest-new` on a synthetic published source: verify streamed output,
-  a wiki commit, and the page in SilverBullet. Click the final report link and
+- [ ] In writable mode, run `/ingest-new` on a synthetic published source: verify
+  streamed output, a wiki commit, and the page in SilverBullet. Click the final report link and
   verify the viewer shows that run's report, not a previously opened wiki page;
   repeat with a second run. Run `/analysis`, then
   `/analysis-save` in the same conversation: verify the saved page and HTML view.
-- [ ] With the manual ingest route in reader mode: prepare an analysis save and
-  admit it with `/analysis-save`; verify page, print view, index/log entries and
-  exactly one focused commit, and that command arguments are refused.
-- [ ] With `answers` enabled, run `/gap-review`: answer and defer questions
-  across turns. No answer source may be published before explicit confirmation;
-  after confirmation verify local redaction and normal ingest. In reader mode
-  admit the confirmed save with `/answer-save` and verify only the inbox draft
-  appears, unpublished.
+- [ ] In reader mode, attempt `/ingest-new`, `/analysis-save` and a confirmed
+  `/answer-save`: verify refusal and no wiki, source, journal or answer-inbox
+  mutations, including no new commit, page, print view or index/log entry.
+- [ ] In writable mode with `answers` enabled, run `/gap-review`: answer and defer
+  questions across turns. No answer source may be published before explicit confirmation;
+  after confirmation verify local redaction and normal ingest. With `answers`
+  disabled, verify a confirmed `/answer-save` creates only the local inbox draft,
+  unpublished.
 - [ ] Trigger a harmless permission request with a disposable test agent:
   deny it and verify no operation occurs; approve another and verify it runs
   once. Trigger a native question and verify the response resumes the same turn.

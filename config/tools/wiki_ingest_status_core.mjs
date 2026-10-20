@@ -306,7 +306,7 @@ function emptyResult() {
   }
 }
 
-function finishAdapters(adapters, includeCurrent) {
+function finishAdapters(adapters, includeCurrent, targetCounts) {
   const targets = new Map()
   for (const [sourceName, result] of Object.entries(adapters)) {
     for (const status of ['new', 'outdated', 'current']) {
@@ -318,7 +318,7 @@ function finishAdapters(adapters, includeCurrent) {
     }
   }
   for (const [wikiPath, entries] of targets) {
-    if (entries.length < 2) continue
+    if (targetCounts.get(wikiPath) < 2) continue
     for (const { sourceName, status, item } of entries) {
       const result = adapters[sourceName]
       result[status] = result[status].filter((candidate) => candidate !== item)
@@ -463,6 +463,9 @@ export async function scanIngestStatus({ sourceRoot, wikiSourceRoot, includeCurr
   }
 
   const results = {}
+  // Count every manifest owner, even identities already classified as conflict
+  // or invalid. Otherwise another source can overwrite their canonical target.
+  const targetCounts = new Map()
   for (const [sourceName, adapter] of Object.entries(adapters)) {
     const result = emptyResult()
     if (adapter.failure) {
@@ -474,6 +477,7 @@ export async function scanIngestStatus({ sourceRoot, wikiSourceRoot, includeCurr
     for (const item of adapter.manifest.items) {
       const source_path = path.join(adapter.sourceRoot, item.source_path)
       const wiki_path = path.join(wikiSourceRoot, item.wiki_path)
+      targetCounts.set(wiki_path, (targetCounts.get(wiki_path) ?? 0) + 1)
       const base = {
         source_key: item.source_key,
         source_path,
@@ -521,7 +525,7 @@ export async function scanIngestStatus({ sourceRoot, wikiSourceRoot, includeCurr
     results[sourceName] = result
   }
 
-  finishAdapters(results, includeCurrent)
+  finishAdapters(results, includeCurrent, targetCounts)
   const summary = Object.fromEntries(
     RESULT_NAMES.map((name) => [
       name,

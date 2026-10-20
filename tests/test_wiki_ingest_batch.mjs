@@ -148,6 +148,35 @@ test('broken provider and conflicting source do not stop independent sources', a
   assert.match(await readFile(result.report_path, 'utf8'), /broken/)
 })
 
+test('target collisions with conflicted identities never dispatch a worker or stop independent sources', async (t) => {
+  const f = await fixture(t)
+  const [first, second, independent] = f.manifest.items
+  second.wiki_path = first.wiki_path
+  await f.publish()
+  const page = path.join(f.opts.wikiRoot, 'sources', first.wiki_path)
+  const duplicate = path.join(f.opts.wikiRoot, 'sources/webdav/duplicate.md')
+  const original = `---\nsource: webdav\nsource_path: ${first.source_path}\nsource_revision: ${first.source_revision}\n---\n# Previous\n`
+  await writeFile(page, original)
+  await writeFile(duplicate, original)
+  await f.git('add', '.')
+  await f.git('commit', '-qm', 'conflicting target owner')
+  const calls = []
+  const result = await runIngestBatch(f.opts, async (batch) => {
+    calls.push(batch.sources[0].source_key)
+    return f.worker(batch)
+  })
+  assert.deepEqual(calls, [independent.source_key])
+  assert.equal(result.status, 'partial')
+  assert.equal(result.ingested, 1)
+  assert.equal(result.summary.conflict, 2)
+  assert.equal(result.remaining, 0)
+  assert.equal(result.blocker, null)
+  assert.equal(await readFile(page, 'utf8'), original)
+  assert.equal(await readFile(duplicate, 'utf8'), original)
+  assert.equal(await f.git('status', '--porcelain'), '')
+  assert.equal(await f.git('rev-list', '--count', 'HEAD'), '3')
+})
+
 test('invalid source metadata is skipped without poisoning independent publication', async (t) => {
   const f = await fixture(t)
   const page = path.join(f.opts.wikiRoot, 'sources/webdav/note-1.md')
