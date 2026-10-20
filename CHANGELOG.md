@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Audio transcripts now mirror the redacted recording folders and full filename
+  under `sources/audio/current/recordings`, appending `.md` (for example,
+  `Meetings/Call.mp3.md`) instead of using opaque filenames. Source IDs and wiki
+  targets remain stable. The next successful cycle republishes from the speech
+  cache without re-transcription; no raw audio is exposed or moved.
 - Email Markdown now includes only Subject, From, To, optional Cc, Date and body;
   technical headers and Bcc remain private in the original. Originals use UTC
   receipt paths `YYYY/MM/DD/HH-MM-SS_<id>.eml`; published Markdown mirrors that

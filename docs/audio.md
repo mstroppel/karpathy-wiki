@@ -309,6 +309,17 @@ are added to these service logs.
 
 Sanitized Markdown only, below `sources/audio` with `wiki_root: audio`:
 
+Transcripts mirror the recording's relative folders and full filename below
+`sources/audio/current/recordings`, with `.md` appended. For example,
+`incoming/audio/shared/Meetings/2026-01-15 Call.mp3` corresponds to
+`sources/audio/current/recordings/shared/Meetings/2026-01-15 Call.mp3.md`.
+Folder and file names undergo the same configured redaction as origin metadata;
+they are not raw-audio links, and OpenCode still cannot access the private audio.
+Keeping the audio extension distinguishes recordings such as `Call.mp3` and
+`Call.wav`. Invalid redacted paths or colliding redacted names fail the cycle
+without overwriting transcripts; the previous generation stays active.
+Opaque source IDs and wiki page paths remain unchanged.
+
 - a redacted recording title (derived from the file name) and the sanitized
   relative WebDAV origin,
 - the source audio SHA-256, language, backend/model versions and options,
