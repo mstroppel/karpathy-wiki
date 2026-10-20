@@ -106,14 +106,16 @@ EOF
 docker network create "$network_name" >/dev/null || fail "cannot create test network"
 
 # ------------------------------------------------------------------ build
-docker build -q --target opencode -t kw-opencode:integration -f opencode/Dockerfile . \
-  || fail "cannot build the opencode image"
-docker build -q -t kw-ingest-webdav:integration --target webdav ingest/ \
-  || fail "cannot build the webdav ingest image"
-docker build -q -t kw-ingest:integration --target core ingest/ \
-  || fail "cannot build the core ingest image"
-docker build -q -t kw-ingest-paperless:integration --target paperless ingest/ \
-  || fail "cannot build the paperless ingest image"
+if [ "${SKIP_IMAGE_BUILD:-0}" != 1 ]; then
+  docker build -q --target opencode -t kw-opencode:integration -f opencode/Dockerfile . \
+    || fail "cannot build the opencode image"
+  docker build -q -t kw-ingest-webdav:integration --target webdav ingest/ \
+    || fail "cannot build the webdav ingest image"
+  docker build -q -t kw-ingest:integration --target core ingest/ \
+    || fail "cannot build the core ingest image"
+  docker build -q -t kw-ingest-paperless:integration --target paperless ingest/ \
+    || fail "cannot build the paperless ingest image"
+fi
 obscured_password=$(docker run --rm --entrypoint rclone kw-ingest-webdav:integration obscure integration-only) \
   || fail "cannot obscure the WebDAV test password"
 printf 'WEBDAV_PASSWORD_OBSCURED=%s\n' "$obscured_password" >>"$env_file"

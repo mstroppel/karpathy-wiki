@@ -1,12 +1,11 @@
 FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587 AS opencode
 
 # The OpenCode CLI is downloaded from the npm registry and verified against
-# these pinned sha512 digests (hex, one per supported target architecture).
-# Digests must be updated together with OPENCODE_VERSION; the scheduled
-# OpenCode update workflow opens a pull request that bumps all three.
+# the pinned sha512 digest (hex) for the supported amd64 architecture.
+# Update the digest together with OPENCODE_VERSION; the scheduled
+# OpenCode update workflow opens a pull request that bumps both.
 ARG OPENCODE_VERSION=2.0.32
 ARG OPENCODE_SHA512_LINUX_X64=439d287c143781dc230fa65086b551f1f5659bc0f6c4f32c872e1dca763a97a6fea8b74a801489f56a68683cab417d585a67f6b3b20de116d79a85d77498ad0c
-ARG OPENCODE_SHA512_LINUX_ARM64=611e4ed378abbe6a2dfc6d1ff16e3d7a1be19f9baa085377bdff494ec0a1bdfe3b5ba95d8ca08dbec6824974b648fdba74f394310067ed6a9b2a7c87ceb351e7
 ARG TARGETARCH
 ARG APP_UID=1000
 ARG APP_GID=100
@@ -18,7 +17,6 @@ RUN apt-get update \
 RUN arch="${TARGETARCH:-$(dpkg --print-architecture)}" \
     && case "${arch}" in \
         amd64) target=linux-x64; digest="${OPENCODE_SHA512_LINUX_X64}" ;; \
-        arm64) target=linux-arm64; digest="${OPENCODE_SHA512_LINUX_ARM64}" ;; \
         *) printf 'unsupported architecture: %s\n' "${arch}" >&2; exit 1 ;; \
     esac \
     && curl --fail --location --retry 3 \
@@ -61,7 +59,7 @@ RUN apt-get update \
 WORKDIR /opt/chat
 COPY openchamber/package.json openchamber/package-lock.json ./
 # Integrity-locked dependencies only; lifecycle scripts may fetch unverified
-# binaries. node-pty ships its Linux x64/arm64 prebuilds in the locked tarball.
+# binaries. node-pty ships its Linux x64 prebuild in the locked tarball.
 RUN npm ci --omit=dev --ignore-scripts \
     && node -e "require('node-pty')" \
     && npm cache clean --force

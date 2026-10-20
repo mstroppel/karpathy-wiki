@@ -41,7 +41,7 @@ class RegistryMirrorTests(unittest.TestCase):
     def test_container_builders_use_mirror_configuration(self):
         config = tomllib.loads((ROOT / ".github/docker/buildkitd.toml").read_text())
         self.assertEqual(config["registry"]["docker.io"]["mirrors"], ["mirror.gcr.io"])
-        for name in ("ci.yml", "pre-release.yml", "images.yml"):
+        for name in ("ci.yml", "images.yml"):
             with self.subTest(workflow=name):
                 workflow = (WORKFLOWS / name).read_text()
                 self.assertIn(

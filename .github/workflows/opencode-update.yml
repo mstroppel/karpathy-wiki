@@ -177,13 +177,10 @@ jobs:
               --output "$2"
           }
           download linux-x64 /tmp/opencode-x64.tgz
-          download linux-arm64 /tmp/opencode-arm64.tgz
           x64_digest=$(sha512sum /tmp/opencode-x64.tgz | cut -d' ' -f1)
-          arm64_digest=$(sha512sum /tmp/opencode-arm64.tgz | cut -d' ' -f1)
           sed -i \
             -e "s/^ARG OPENCODE_VERSION=.*/ARG OPENCODE_VERSION=${latest}/" \
             -e "s/^ARG OPENCODE_SHA512_LINUX_X64=.*/ARG OPENCODE_SHA512_LINUX_X64=${x64_digest}/" \
-            -e "s/^ARG OPENCODE_SHA512_LINUX_ARM64=.*/ARG OPENCODE_SHA512_LINUX_ARM64=${arm64_digest}/" \
             opencode/Dockerfile
           if ! grep -q "^ARG OPENCODE_VERSION=${latest}\$" opencode/Dockerfile; then
             printf 'failed to update OPENCODE_VERSION in opencode/Dockerfile\n' >&2
