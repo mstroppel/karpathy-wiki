@@ -10,9 +10,9 @@
   },
   "agents": {
     "wiki-ingest": {
-      "description": "Bearbeitet einen vom Batch-Tool exklusiv gesperrten Einlesebatch direkt im Wiki.",
+      "description": "Liest eine vom Ingest-Tool gesperrte Quelle direkt ins Wiki ein.",
       "mode": "subagent",
-      "system": "Bearbeite ausschließlich vom wiki_ingest_batch-Tool übergebene Batches. Ohne batch_id nichts ändern; an wiki-ingest-orchestrator verweisen. Lade wiki-ingest einmal. Nutze normale Lese- und Editierwerkzeuge, keine Shell, kein Git und keine Delegation.",
+      "system": "Bearbeite ausschließlich die vom wiki_ingest_batch-Tool übergebene Quelle. Ohne batch_id nichts ändern; an wiki-ingest-orchestrator verweisen. Lade wiki-ingest einmal. Nutze normale Lese- und Editierwerkzeuge, keine Shell, kein Git und keine Delegation.",
       "permissions": [
         {
           "action": "*",
@@ -157,9 +157,9 @@
       ]
     },
     "wiki-ingest-orchestrator": {
-      "description": "Startet kleine, exklusive Einlesebatches und verlinkt ihre Berichte.",
+      "description": "Startet den sequenziellen Ingest und verlinkt seinen Bericht.",
       "mode": "all",
-      "system": "Lade wiki-ingest-orchestrator. Starte wiki_ingest_batch stets sequenziell. Das Tool hält den Lock über Worker und Commit. Keine eigenen Änderungen oder manuelle Worker-Delegation. Bei Blockern stoppen und private Berichte verlinken.",
+      "system": "Lade wiki-ingest-orchestrator. Rufe wiki_ingest_batch einmal auf; das Tool arbeitet die ausgewählten Quellen selbst ab. Keine eigenen Änderungen oder Worker-Delegation. Übersprungene Quellen und private Berichte nennen.",
       "permissions": [
         {
           "action": "read",
@@ -170,11 +170,6 @@
           "action": "read",
           "resource": "/knowledge/incoming/ingest-journal/batches/batch-*/report.md",
           "effect": "allow"
-        },
-        {
-          "action": "wiki_ingest_transaction",
-          "resource": "*",
-          "effect": "deny"
         },
         {
           "action": "grep",
@@ -215,11 +210,6 @@
           "action": "wiki_ingest_batch",
           "resource": "*",
           "effect": "allow"
-        },
-        {
-          "action": "wiki_ingest_journal",
-          "resource": "*",
-          "effect": "deny"
         }
       ]
     },
@@ -246,11 +236,6 @@
       "system": "Bearbeite ausschließlich ausdrücklich angeforderte wissenschaftliche Analysen. Delegiere nicht erneut. Lade einmal den Skill wiki-analysis, befolge ihn vollständig und führe den Auftrag selbst aus.",
       "permissions": [
         {
-          "action": "wiki_ingest_transaction",
-          "resource": "*",
-          "effect": "deny"
-        },
-        {
           "action": "edit",
           "resource": "*",
           "effect": "deny"
@@ -264,11 +249,6 @@
           "action": "subagent",
           "resource": "*",
           "effect": "deny"
-        },
-        {
-          "action": "wiki_ingest_journal",
-          "resource": "*",
-          "effect": "deny"
         }
       ]
     },
@@ -278,11 +258,6 @@
       "system": "Bearbeite ausschließlich Aufträge, eine fertige Analyse als Wiki-Seite zu speichern. Delegiere nicht erneut. Lade einmal den Skill wiki-analysis-save, befolge ihn vollständig und führe den Auftrag selbst aus.",
       "permissions": [
         {
-          "action": "wiki_ingest_transaction",
-          "resource": "*",
-          "effect": "deny"
-        },
-        {
           "action": "subagent",
           "resource": "*",
           "effect": "deny"
@@ -291,11 +266,6 @@
           "action": "shell",
           "resource": "*",
           "effect": "allow"
-        },
-        {
-          "action": "wiki_ingest_journal",
-          "resource": "*",
-          "effect": "deny"
         }
       ]
     }
@@ -311,7 +281,7 @@
       "description": "Alle neuen und geänderten Quellen einlesen",
       "agent": "wiki-ingest-orchestrator",
       "subagent": false,
-      "template": "Lade wiki-ingest-orchestrator. Verarbeite alle neuen und geänderten Quellen unter /knowledge/sources über wiki_ingest_batch in sequenziellen kleinen Batches, ein Commit pro Batch. Bei Blockern stoppen, nichts zurücksetzen. Verlinke jeden privaten Bericht mit dem dauerhaften Berichtspfad und schließe mit einer kurzen Zusammenfassung und frischer Statusprüfung ab."
+      "template": "Lade wiki-ingest-orchestrator. Verarbeite alle neuen und geänderten Quellen unter /knowledge/sources mit einem Aufruf von wiki_ingest_batch. Das Tool arbeitet alle Quellen sequenziell ab und überspringt isolierte Quellenfehler. Nichts zurücksetzen. Verlinke den privaten Bericht mit dem dauerhaften Berichtspfad und schließe mit einer kurzen Zusammenfassung ab."
     },
     "lint": {
       "description": "Wiki prüfen",
@@ -469,16 +439,6 @@
       "action": "wiki_ingest_batch",
       "resource": "*",
       "effect": "deny"
-    },
-    {
-      "action": "wiki_ingest_transaction",
-      "resource": "*",
-      "effect": "deny"
-    },
-    {
-      "action": "wiki_ingest_journal",
-      "resource": "*",
-      "effect": "allow"
     },
     {
       "action": "external_directory",

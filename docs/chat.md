@@ -50,15 +50,10 @@ concurrent writer sessions: this stack does not add writer serialization.
 
 The optional [reader-only backend mode](runtime-write-isolation.md) additionally
 prevents all backend wiki, source, journal and answer-inbox writes at the kernel
-boundary. With the separate [trusted manual ingest route](manual-ingest.md)
-enabled, immediate browser `/ingest-new`, `/analysis-save` and `/answer-save`
-commands are admitted through the trusted channel and written by it; the runtime
-only prepares content. `/lint` maintenance, repair/rollback and other authoring
-remain unsupported; this is not automatic ingestion
-or a general API sandbox.
+boundary. No authoring is supported in that mode; it is not a general API sandbox.
 
 The UI wiki mount is read-only. Ingest run records and reports are also mounted
-read-only at `/knowledge/incoming/ingest-journal/runs`, using the same absolute
+read-only at `/knowledge/incoming/ingest-journal/batches`, using the same absolute
 paths as OpenCode. Local report links open through OpenChamber's authenticated
 file viewer; they are outside the wiki workspace and use outside-workspace reads.
 Private transaction preparations and answer/audio inboxes are not mounted.

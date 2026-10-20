@@ -48,11 +48,11 @@ docker run --rm --network none --user 0:0 --entrypoint /bin/sh \
 docker run --rm --network none --user 1000:1000 --entrypoint /bin/sh \
   --mount "type=volume,src=$data,dst=/knowledge" \
   "$OPENCODE_SMOKE_IMAGE" -c '
-    mkdir -p /knowledge/incoming/ingest-journal/runs/run-smoke-a /knowledge/incoming/ingest-journal/runs/run-smoke-b
-    printf "# Synthetic report A\n" > /knowledge/incoming/ingest-journal/runs/run-smoke-a/report.md
-    printf "# Synthetic report B\n" > /knowledge/incoming/ingest-journal/runs/run-smoke-b/report.md
+    mkdir -p /knowledge/incoming/ingest-journal/batches/run-smoke-a /knowledge/incoming/ingest-journal/batches/run-smoke-b
+    printf "# Synthetic report A\n" > /knowledge/incoming/ingest-journal/batches/run-smoke-a/report.md
+    printf "# Synthetic report B\n" > /knowledge/incoming/ingest-journal/batches/run-smoke-b/report.md
     printf "# Unrelated wiki page\n" > /knowledge/wiki/unrelated.md
-    chmod 0600 /knowledge/incoming/ingest-journal/runs/run-smoke-*/report.md
+    chmod 0600 /knowledge/incoming/ingest-journal/batches/run-smoke-*/report.md
   '
 
 docker run -d --name "$backend" --network "$network" --network-alias opencode \
@@ -76,7 +76,7 @@ docker run -d --name "$frontend" --network "$network" \
   -e OPENCHAMBER_OPENCODE_CWD=/knowledge/wiki \
   -e OPENCODE_PASSWORD -e OPENCHAMBER_UI_PASSWORD \
   --mount "type=volume,src=$data,dst=/knowledge/wiki,volume-subpath=wiki,readonly" \
-  --mount "type=volume,src=$data,dst=/knowledge/incoming/ingest-journal/runs,volume-subpath=incoming/ingest-journal/runs,readonly" \
+  --mount "type=volume,src=$data,dst=/knowledge/incoming/ingest-journal/batches,volume-subpath=incoming/ingest-journal/batches,readonly" \
   --mount "type=volume,src=$home,dst=/home/openchamber/.config/openchamber" \
   -w /knowledge/wiki "$OPENCHAMBER_SMOKE_IMAGE" >/dev/null
 
@@ -98,7 +98,7 @@ if docker exec "$frontend" sh -c 'touch /knowledge/wiki/.smoke-write' >/dev/null
   printf 'openchamber-smoke: frontend can write the wiki\n' >&2
   exit 1
 fi
-if docker exec "$frontend" sh -c 'echo overwrite > /knowledge/incoming/ingest-journal/runs/run-smoke-a/report.md' >/dev/null 2>&1; then
+if docker exec "$frontend" sh -c 'echo overwrite > /knowledge/incoming/ingest-journal/batches/run-smoke-a/report.md' >/dev/null 2>&1; then
   printf 'openchamber-smoke: frontend can write reports\n' >&2
   exit 1
 fi

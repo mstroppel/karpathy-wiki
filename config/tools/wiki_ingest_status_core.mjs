@@ -439,7 +439,11 @@ export async function scanIngestStatus({ sourceRoot, wikiSourceRoot, includeCurr
     // outdated). A page that drops another declared field, or changed its
     // value, is invalid instead of current.
     if (typeof fields.source_revision !== 'string' || !REVISION_RE.test(fields.source_revision)) {
-      owner.state.invalid.push({ path: pagePath, error: 'source_revision ist ungültig' })
+      owner.state.invalid.push({
+        source_key: item.source_key,
+        path: pagePath,
+        error: 'source_revision ist ungültig',
+      })
       continue
     }
     const mismatch = Object.entries(item.frontmatter).find(
@@ -447,6 +451,7 @@ export async function scanIngestStatus({ sourceRoot, wikiSourceRoot, includeCurr
     )
     if (mismatch) {
       owner.state.invalid.push({
+        source_key: item.source_key,
         path: pagePath,
         error: `Frontmatter-Feld ${mismatch[0]} weicht ab`,
       })
@@ -479,7 +484,11 @@ export async function scanIngestStatus({ sourceRoot, wikiSourceRoot, includeCurr
       const pages = adapter.state.pending.get(item.source_key) ?? []
       for (const page of pages) {
         if (page.pagePath !== wiki_path)
-          result.invalid.push({ path: page.pagePath, error: `erwarteter Pfad: ${wiki_path}` })
+          result.invalid.push({
+            source_key: item.source_key,
+            path: page.pagePath,
+            error: `erwarteter Pfad: ${wiki_path}`,
+          })
       }
       if (pages.length > 1) {
         result.conflict.push({

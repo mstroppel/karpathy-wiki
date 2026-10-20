@@ -67,9 +67,6 @@ RUN npm ci --omit=dev --ignore-scripts \
     && npm cache clean --force
 COPY --from=opencode /usr/local/bin/opencode /usr/local/bin/opencode
 COPY openchamber/bootstrap.mjs openchamber/healthcheck.mjs /etc/openchamber/
-COPY openchamber/manual-ingest.mjs /etc/openchamber/
-COPY openchamber/patch-manual-ingest.mjs /etc/openchamber/
-RUN node /etc/openchamber/patch-manual-ingest.mjs /opt/chat/node_modules/@openchamber/web/server/index.js
 COPY openchamber/entrypoint.sh /usr/local/bin/karpathy-wiki-chat
 RUN chmod 0755 /usr/local/bin/karpathy-wiki-chat \
     && install -d -o 1000 -g 1000 /home/openchamber/.config/openchamber /knowledge/wiki
@@ -77,20 +74,3 @@ ENV HOME=/home/openchamber NODE_ENV=production OPENCHAMBER_DATA_DIR=/home/opench
 USER 1000:1000
 WORKDIR /knowledge/wiki
 ENTRYPOINT ["karpathy-wiki-chat"]
-
-# Trusted writer only: no OpenCode, chat, npm packages, model credentials or API.
-# The deterministic analysis renderer ships here so the trusted channel derives
-# print views itself instead of trusting runtime-produced artifacts.
-FROM node:26-bookworm-slim@sha256:86f07bc9c5dce4578cf37e5a418b7bfc7f817cda25cde66e2b66e95ed86c4567 AS publisher
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends git python3 python3-markdown python3-bleach \
-    && rm -rf /var/lib/apt/lists/*
-COPY config/tools /opt/karpathy-wiki/config/tools
-COPY publisher /opt/karpathy-wiki/publisher
-COPY opencode/render_analysis.py /usr/local/bin/render-analysis
-COPY config/skills/wiki-analysis-save/print-template.html /opt/karpathy-wiki/print-template.html
-ENV KARPATHY_WIKI_PRINT_TEMPLATE=/opt/karpathy-wiki/print-template.html
-RUN chmod 0755 /opt/karpathy-wiki/publisher/entrypoint.sh /usr/local/bin/render-analysis
-USER 1000:1000
-WORKDIR /knowledge/wiki
-ENTRYPOINT ["/opt/karpathy-wiki/publisher/entrypoint.sh"]

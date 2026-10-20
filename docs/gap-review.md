@@ -19,12 +19,8 @@ After explicit confirmation, the primary agent immediately saves the Markdown Q&
 its finding, affected pages, evidence, and attribution to the user. Unanswered
 questions and unresolved conflicts remain marked as open. Follow-up requests such
 as “ingest the answers” continue this workflow in the primary agent, rather than
-dispatching a context-free ingest request. With the opt-in
-[manual ingest route](manual-ingest.md) (reader mode) the runtime cannot write
-the inbox: after the same explicit confirmation the agent prepares the complete
-file as a `karpathy-authoring` block and the user sends `/answer-save`, which
-writes exactly that file through the trusted channel. `/answer-save resume`
-explicitly verifies an interrupted save and never repeats one. The provider reads
+dispatching a context-free ingest request. Reader mode cannot save the inbox.
+The provider reads
 this inbox read-only, applies the configured local redaction rules, and writes
 complete source revisions plus a versioned manifest under
 `${DATA_ROOT}/sources/answers`. The source tree is read-only to OpenCode;

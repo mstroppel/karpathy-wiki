@@ -23,8 +23,7 @@ ${DATA_ROOT}/
 │   ├── audio/              # Private rclone snapshot of WebDAV recordings
 │   ├── answers/            # Confirmed Q&A drafts, private to OpenCode and answer provider
 │   └── ingest-journal/     # Private wiki ingestion evidence and reports
-│       ├── batches/<id>/  # Default live-edit batch state.json and report.md
-│       └── runs/<run-id>/  # Opt-in trusted-route records and assembled reports
+│       └── batches/<id>/   # Sequential ingest state.json and report.md
 ├── speech/                 # Speech worker store: recordings, queue, failures,
 │   └── cache/              #   and structured results (unredacted, private)
 ├── models/
@@ -37,7 +36,6 @@ ${DATA_ROOT}/
 │   ├── audio/              # Content-free audio error reports
 │   └── paperless/          # Content-free Paperless error reports
 ├── openchamber/             # Private chat UI settings (not backend sessions)
-├── publisher/               # Trusted queue/ownership/intents; controller boot fence, manual and authoring state
 └── opencode/
     ├── config/             # OpenCode configuration and generated policy
     ├── data/               # Credentials, sessions, messages, and logs
@@ -113,61 +111,22 @@ last recorded source generation, and the last completed wiki publication (if
 any). A publication is counted as completed only when its Git commit is
 recorded. Publisher jobs have a database-enforced exclusive lease: two
 distinct publish jobs cannot hold live leases simultaneously, and an expired
-holder cannot renew or complete its job. The serialized publisher that will
-consume these leases is still planned; the operator-only trusted publisher uses
-separate non-expiring admission state. These metrics do not imply automatic
-wiki publication.
+holder cannot renew or complete its job. These source-provider bookkeeping
+facilities do not imply automatic wiki publication.
 
 ## Wiki ingestion journal
 
-Default writable batches store `state.json` and `report.md` under
-`incoming/ingest-journal/batches/<batch-id>/`. They contain source identities,
-checkpoint, commit, changed paths, per-source findings and any failure. There
-are no per-page preparations or automatic recovery records in this route;
-failed live edits remain for manual review. The shared lifetime lock is
-`wiki/.git/wiki-ingest-publication.lock`. OpenChamber mounts only `batches` and
-`runs` read-only, never preparations.
+Each explicit ingest request stores `state.json` and `report.md` under
+`incoming/ingest-journal/batches/<id>/`: source identities, checkpoint, per-source
+commits, changed paths, findings and failures. Records are private (`0700`
+directories, `0600` files), never published into the wiki. Only `batches` is
+mounted into OpenChamber, read-only. Include the entire journal and wiki `.git`
+in backups, including retained evidence from older releases.
 
-The separate opt-in trusted-publisher/manual-reader route records results in
-`incoming/ingest-journal/runs/<run-id>/`: append-only result records, the run
-state with its working-context budget, and the assembled per-source report.
-`incoming/ingest-journal/preparations/<preparation-id>.json` holds private
-transaction receipts (`0600`): selected source identity, a separate source-byte
-SHA-256, baseline commit and file hashes, and the exact validated changed-page hashes. Include these receipts
-in journal backups so pending commits remain verifiable.
-Receipts also track transaction-owned page hashes, retained-backup hashes, pending
-publication intent and resumable rollback progress (`rollback_started`,
-`rollback_pending`, `rolled_back`). Run metadata records confirmed skipped failure
-indices; the original blocked result records remain in the journal and report.
-Each preparation now also owns `preparations/<preparation-id>/wiki/`, an isolated
-Git clone containing the baseline snapshot and proposed changes, and `/journal/`, its
-draft transaction evidence. Receipts retain section references, reading/proposal
-budgets, publication phase, intended commit/report payload and owned index-lock
-identity. Include the entire retained preparation directory in private backups;
-new clones omit older history and never share mutable files. They are not served.
-The model-facing publisher uses a stable `wiki/.git/wiki-ingest-publication.lock`
-inode with a kernel lock released on process exit, rather than stale-file removal.
-Run audit writes similarly use `runs/<run-id>/records.lock`; complete audit,
-run and report files replace private files atomically. An unverifiable
-`wiki/.git/index.lock` requires confirmed maintenance; only a proven owned lock
-can be completed during resume. Operator-confirmed
-[journal compaction](ingest-journal-storage.md) removes only verified completed
-drafts and preserves compact transaction proof. Live backups are not cleaned up.
-Wiki pages displaced during publication or confirmed rollback retain their original inode at
-`wiki/.git/ingest-backup-<random-id>/page`, inside an exclusive `0700` directory.
-These private recovery files are outside Git's content tree and public wiki pages;
-include `.git` in wiki backups. They are never automatically removed, since an
-external writer may still hold a descriptor to the displaced inode. Inspect and
-clean them only during explicitly confirmed maintenance with writers stopped.
-These records hold source-derived summaries of processed sources, so they live
-in the private `incoming/` area alongside the answer drafts instead of the
-content-free state store. The directory is private to OpenCode and its operator
-(`0700`), only `incoming/ingest-journal` is mounted into the OpenCode container
-(`/knowledge/incoming/ingest-journal`), and nothing from it is published to the
-wiki, to source directories, or into fixtures and diagnostics. Include it in
-backups of `DATA_ROOT` to keep completed reports. See
-[ingestion reports](ingest-reports.md) for the record schema, resume behavior,
-and the report contract.
+There are no new transaction preparations, private clones or automatic recovery
+records. Uncertain live edits remain for manual review. The lifetime lock is
+`wiki/.git/wiki-ingest-publication.lock`; it releases on process exit, not by
+deleting a stale file. See [ingestion reports](ingest-reports.md).
 
 ## Removed data directories
 
