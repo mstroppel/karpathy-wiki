@@ -2,10 +2,12 @@
 
 import json
 import os
+import re
 import runpy
 import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -15,6 +17,54 @@ PROMOTE = runpy.run_path(str(ROOT / "scripts/promote-images.py"))
 
 
 class PipelineTests(unittest.TestCase):
+    def test_metadata_export_passes_only_digests_even_with_large_provenance(self):
+        ci = (ROOT / ".github/workflows/ci.yml").read_text()
+        export = ci.split("      - name: Save immutable image digests for release promotion\n", 1)[
+            1
+        ].split("      - uses: actions/upload-artifact", 1)[0]
+        # Exercise release builds on PRs too, but skip default-target fork builds.
+        self.assertIn(
+            "if: fromJSON(steps.build.outputs.metadata)['opencode-release'] != null", export
+        )
+        metadata = {
+            f"{image}-release": {
+                "containerimage.digest": "sha256:" + f"{index:064x}",
+                "buildx.build.provenance": "x" * 200_000,
+            }
+            for index, image in enumerate(PROMOTE["IMAGES"])
+        }
+        # Model the workflow's fromJSON selections before the shell is launched.
+        env = {}
+        for line in export.split("        env:\n", 1)[1].split("        run:", 1)[0].splitlines():
+            match = re.fullmatch(
+                r"          (DIGEST_\w+): \$\{\{ fromJSON\(steps.build.outputs.metadata\)"
+                r"\['([^']+)'\]\['containerimage.digest'\] \}\}",
+                line,
+            )
+            self.assertIsNotNone(match, line)
+            assert match is not None
+            env[match[1]] = metadata[match[2]]["containerimage.digest"]
+        self.assertEqual(len(env), len(PROMOTE["IMAGES"]))
+        script = textwrap.dedent(export.split("        run: |\n", 1)[1])
+        with tempfile.TemporaryDirectory() as directory:
+            result = subprocess.run(
+                ["sh", "-eu"],
+                input=script,
+                env={**os.environ, **env},
+                cwd=directory,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                json.loads((Path(directory) / "image-metadata.json").read_text()),
+                {
+                    target: {"containerimage.digest": values["containerimage.digest"]}
+                    for target, values in metadata.items()
+                },
+            )
+
     def test_only_amd64_is_built_and_each_image_has_its_own_opt_in_cache(self):
         bake = (ROOT / "docker-bake.hcl").read_text()
         self.assertIn('platforms = ["linux/amd64"]', bake)
