@@ -1,7 +1,7 @@
-// Model-free publisher/journal core probe, installed only in a disposable container.
+// Model-free ingest/storage probe, installed only in a disposable container.
 import { open, writeFile } from 'node:fs/promises'
-import { startRun } from '/etc/opencode/tools/wiki_ingest_journal_core.mjs'
-import { ingestPublication } from '/etc/opencode/tools/wiki_ingest_publication_core.mjs'
+import { writeIngestFile } from '/etc/opencode/tools/wiki_ingest_storage.mjs'
+import { runIngestBatch } from '/etc/opencode/tools/wiki_ingest_batch_core.mjs'
 
 async function denied(action) {
   try {
@@ -24,7 +24,7 @@ export default {
         async execute() {
           const results = {
             journal_core: await denied(() =>
-              startRun({ root: '/knowledge/incoming/ingest-journal', resume: false }),
+              writeIngestFile('/knowledge/incoming/ingest-journal/probe.json', '{}'),
             ),
             publication_lock: await denied(async () => {
               const handle = await open('/knowledge/wiki/.git/wiki-ingest-publication.lock', 'a+')
@@ -34,11 +34,13 @@ export default {
           // The current core deliberately maps failed lock acquisition to a
           // generic lock error. Verify its refusal separately from the syscall.
           try {
-            await ingestPublication({ operation: 'prepare' })
-            throw new Error('publisher unexpectedly admitted publication')
+            await runIngestBatch({}, () => {
+              throw new Error('worker must not start')
+            })
+            throw new Error('ingest unexpectedly admitted publication')
           } catch (error) {
-            if (error.message !== 'Ein anderer Schreiber hält den Ingest-Lock') throw error
-            results.publisher_core = 'rejected_before_publication'
+            if (!error.message.startsWith('Ingest-Lock nicht verfügbar')) throw error
+            results.ingest_core = 'rejected_before_publication'
           }
           await writeFile('/tmp/core-probe-result.json', JSON.stringify(results))
         },

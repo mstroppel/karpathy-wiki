@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
 import { lstat, mkdir, readFile, realpath, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { promisify } from 'node:util'
+import { isDeepStrictEqual, promisify } from 'node:util'
 import {
   parseFrontmatterFields,
   parseManifest,
@@ -67,11 +67,12 @@ async function sourceBytes(source, { sourceRoot, wikiRoot }) {
   if (
     !item ||
     item.source_revision !== source.source_revision ||
-    path.join(sourceRoot, source.adapter, item.source_path) !== source.source_path ||
     path.join(wikiRoot, 'sources', item.wiki_path) !== source.wiki_path ||
-    JSON.stringify(item.frontmatter) !== JSON.stringify(source.frontmatter)
+    !isDeepStrictEqual(item.frontmatter, source.frontmatter)
   )
     throw new BatchBlocker('Quelle während des Batches geändert; Änderungen manuell prüfen')
+  // A provider may relocate an unchanged revision to a new generation. Verify
+  // the exact bytes given to the worker, not equality of generation paths.
   const bytes = await regularFile(source.source_path, sourceRoot)
   const digest = hash(bytes)
   if (item.source_sha256 && item.source_sha256 !== digest)
@@ -90,30 +91,6 @@ async function sourceBytes(source, { sourceRoot, wikiRoot }) {
   return bytes
 }
 
-function recordsFrom(text, count) {
-  let records
-  try {
-    records = JSON.parse(text)
-  } catch {
-    throw new BatchBlocker('Worker lieferte kein gültiges JSON')
-  }
-  if (!Array.isArray(records) || records.length !== count)
-    throw new BatchBlocker('Worker muss genau einen Ergebnisdatensatz pro Quelle liefern')
-  return records.map((record, index) => {
-    if (record?.index !== index) throw new BatchBlocker('Ergebnisreihenfolge stimmt nicht')
-    for (const field of ['content', 'contradictions', 'extraction_limits']) {
-      if (typeof record[field] !== 'string' || !record[field].trim() || record[field].length > 4000)
-        throw new BatchBlocker(`Ungültiges Ergebnisfeld: ${field}`)
-    }
-    return {
-      index,
-      content: record.content,
-      contradictions: record.contradictions,
-      extraction_limits: record.extraction_limits,
-    }
-  })
-}
-
 async function changedPaths(wikiRoot) {
   const tracked = await git(wikiRoot, ['diff', 'HEAD', '--name-only', '-z'])
   const untracked = await git(wikiRoot, ['ls-files', '--others', '--exclude-standard', '-z'])
@@ -121,188 +98,213 @@ async function changedPaths(wikiRoot) {
 }
 
 function reportText(state) {
-  const lines = [
+  return [
     '# Einlesebericht',
-    '',
-    `Batch: ${state.batch_id}`,
+    `Lauf: ${state.batch_id}`,
     `Status: ${state.status}`,
     `Checkpoint: ${state.checkpoint}`,
-    `Commit: ${state.commit ?? 'Kein Commit verifiziert'}`,
-    `Blocker: ${state.blocker ?? 'Keiner'}`,
+    ...state.sources.map((source) =>
+      [
+        `\n## ${source.source_path}`,
+        `Revision: ${source.source_revision}`,
+        `Wiki: ${source.wiki_path}`,
+        `Status: ${source.status}`,
+        `Commit: ${source.commit ?? 'Kein Commit verifiziert'}`,
+        `Geänderte Seiten: ${(source.changed_pages ?? []).join(', ')}`,
+        source.blocker ?? '',
+        source.content ?? 'Nicht ermittelt',
+      ].join('\n\n'),
+    ),
+    '\n## Quellenstatus',
+    JSON.stringify(state.summary),
+    JSON.stringify(state.diagnostics),
+    state.blocker ?? '',
     '',
-    'Geänderte Seiten:',
-    ...(state.changed_pages ?? []).map((page) => `- ${page}`),
-  ]
-  for (const [index, source] of state.sources.entries()) {
-    const record = state.records?.[index]
-    lines.push(
-      '',
-      `## ${source.source_path}`,
-      '',
-      `Revision: ${source.source_revision}`,
-      `Wiki: ${source.wiki_path}`,
-      `**Inhalt:** ${record?.content ?? 'Nicht ermittelt'}`,
-      `**Widersprüche/offene Fragen:** ${record?.contradictions ?? 'Nicht ermittelt'}`,
-      `**Extraktionsgrenzen:** ${record?.extraction_limits ?? 'Nicht ermittelt'}`,
-    )
-  }
-  return lines.join('\n') + '\n'
+  ].join('\n\n')
 }
 
-// One callback, one lifetime lock, one live worktree, one commit. There are no
-// per-page receipts, private clones, rollback operations or automatic recovery.
+// One explicit request, one lock, sequential sources. No scheduler, receipts,
+// private clones, rollback or model-driven continuation protocol.
 export async function runIngestBatch(input, worker) {
   const opts = { ...defaults, ...input }
   const { wikiRoot, sourceRoot, root, signal } = opts
-  const size = opts.maxSources ?? 5
-  const budget = opts.budgetTokens ?? 128000
-  if (!Number.isInteger(size) || size < 1 || size > 5) throw new Error('Batchgröße muss 1–5 sein')
-  if (!Number.isInteger(budget) || budget < 16000 || budget > 1000000)
-    throw new Error('Kontextziel muss 16000–1000000 sein')
   const gitRoot = path.join(wikiRoot, '.git')
   if ((await realpath(gitRoot)) !== gitRoot) throw new Error('Unsicheres Git-Verzeichnis')
   return withIngestLock(path.join(gitRoot, 'wiki-ingest-publication.lock'), async () => {
     signal?.throwIfAborted()
     await clean(wikiRoot)
     const scan = () =>
-      scanIngestStatus({ sourceRoot, wikiSourceRoot: path.join(wikiRoot, 'sources') })
+      scanIngestStatus({
+        sourceRoot,
+        wikiSourceRoot: path.join(wikiRoot, 'sources'),
+        includeCurrent: true,
+      })
     const status = await scan()
-    if (status.summary.invalid || status.summary.conflict)
-      throw new Error('Quellenstatus enthält invalid/conflict; manuelle Prüfung erforderlich')
     const candidates = pending(status).filter(
       (source) => !opts.sourcePath || source.source_path === opts.sourcePath,
     )
     if (opts.sourcePath && !candidates.length)
       throw new Error('Angeforderte Quelle ist nicht new/outdated; keine Neuauswertung')
-    const sources = []
-    let estimated = 12000
-    for (const source of candidates.slice(0, size)) {
-      const bytes = await sourceBytes(source, opts)
-      const tokens = Math.ceil(bytes.length / 3) + 4000
-      if (sources.length && estimated + tokens > budget) break
-      estimated += tokens
-      sources.push({ ...source, source_sha256: hash(bytes) })
-    }
-    if (!sources.length) return { status: 'done', remaining: 0, summary: status.summary }
+    if (!candidates.length && !status.summary.invalid && !status.summary.conflict)
+      return { status: 'done', remaining: 0, summary: status.summary }
     const batchId = `batch-${Date.now()}-${randomBytes(6).toString('hex')}`
     const directory = path.join(root, 'batches', batchId)
-    await mkdir(directory, { recursive: true, mode: 0o700 })
     const checkpoint = (await git(wikiRoot, ['rev-parse', 'HEAD'])).trim()
-    const state = { batch_id: batchId, status: 'running', checkpoint, sources, commit: null }
+    const state = {
+      batch_id: batchId,
+      status: 'running',
+      checkpoint,
+      sources: [],
+      summary: status.summary,
+      diagnostics: Object.fromEntries(
+        Object.entries(status.adapters).map(([adapter, result]) => [
+          adapter,
+          { invalid: result.invalid, conflict: result.conflict },
+        ]),
+      ),
+    }
     const report = path.join(directory, 'report.md')
+    let reportError = null
     const save = async () => {
-      await writeIngestFile(path.join(directory, 'state.json'), JSON.stringify(state, null, 2))
-      await writeIngestFile(report, reportText(state))
+      try {
+        await mkdir(directory, { recursive: true, mode: 0o700 })
+        await writeIngestFile(path.join(directory, 'state.json'), JSON.stringify(state, null, 2))
+        await writeIngestFile(report, reportText(state))
+        reportError = null
+      } catch {
+        reportError = 'Berichtsspeicherung fehlgeschlagen'
+      }
     }
     await save()
-    try {
-      state.records = recordsFrom(
-        await worker({
-          batch_id: batchId,
-          sources,
-          budget_tokens: budget,
-          estimated_tokens: estimated,
-        }),
-        sources.length,
-      )
-      signal?.throwIfAborted()
-      if ((await git(wikiRoot, ['rev-parse', 'HEAD'])).trim() !== checkpoint)
-        throw new BatchBlocker('HEAD während des Batches geändert; keine automatische Reparatur')
-      for (const source of sources) {
-        if (hash(await sourceBytes(source, opts)) !== source.source_sha256)
-          throw new BatchBlocker('Quelle während des Batches geändert; Änderungen manuell prüfen')
-        const page = (await regularFile(source.wiki_path, wikiRoot)).toString('utf8')
-        const body = page.startsWith('---\n') ? page.replace(/^---\n[\s\S]*?\n---\n/, '') : page
+    for (const candidate of candidates) {
+      const source = { ...candidate, status: 'running', commit: null }
+      state.sources.push(source)
+      const head = (await git(wikiRoot, ['rev-parse', 'HEAD'])).trim()
+      try {
+        signal?.throwIfAborted()
+        await clean(wikiRoot)
+        const adapter = status.adapters[source.adapter]
+        if (
+          adapter.invalid.some(
+            (item) => item.path === source.wiki_path || item.source_key === source.source_key,
+          )
+        )
+          throw new BatchBlocker('Ungültige Quellenseite; übersprungen')
+        const digest = hash(await sourceBytes(source, opts))
+        source.content = await worker({ batch_id: batchId, sources: [candidate] })
+        signal?.throwIfAborted()
+        if (typeof source.content === 'string' && source.content.trimStart().startsWith('SKIP:'))
+          throw new BatchBlocker('Quelle nicht auswertbar; siehe Extraktionsgrenzen im Bericht')
+        if ((await git(wikiRoot, ['rev-parse', 'HEAD'])).trim() !== head)
+          throw new BatchBlocker(
+            'HEAD während des Einlesens geändert; manuelle Prüfung erforderlich',
+          )
+        if (hash(await sourceBytes(source, opts)) !== digest)
+          throw new BatchBlocker(
+            'Quelle während des Einlesens geändert; manuelle Prüfung erforderlich',
+          )
+        const sourcePage = (await regularFile(source.wiki_path, wikiRoot)).toString('utf8')
+        const body = sourcePage.startsWith('---\n')
+          ? sourcePage.replace(/^---\n[\s\S]*?\n---\n/, '')
+          : sourcePage
         if (!body.trim()) throw new BatchBlocker('Leere Quellenseite')
         const frontmatter = Object.entries(source.frontmatter)
           .map(([key, value]) => `${key}: ${JSON.stringify(value)}`)
           .join('\n')
         await writeFile(source.wiki_path, `---\n${frontmatter}\n---\n${body}`)
-      }
-      // index/log are cheap deterministic batch appends, not model round trips.
-      const indexPath = path.join(wikiRoot, 'index.md')
-      let index = (await regularFile(indexPath, wikiRoot)).toString('utf8')
-      for (const source of sources) {
+        // Index/log and source identities belong to code, not the worker.
+        const indexPath = path.join(wikiRoot, 'index.md')
+        let index = (await regularFile(indexPath, wikiRoot)).toString('utf8')
         const page = path.relative(wikiRoot, source.wiki_path).replace(/\.md$/, '')
         if (/[[\]|<>\r\n]/.test(page)) throw new BatchBlocker('Unsicherer Katalogpfad')
         if (!index.includes(`[[${page}]]`) && !index.includes(`[[${page}|`))
           index += `\n- [[${page}]]\n`
-      }
-      await writeFile(indexPath, index)
-      const logPath = path.join(wikiRoot, 'log.md')
-      const log = (await regularFile(logPath, wikiRoot)).toString('utf8')
-      await writeFile(logPath, log + `\n- Ingest ${batchId}: ${sources.length} Quellen.\n`)
-      await regularFile(path.join(wikiRoot, 'overview.md'), wikiRoot)
-      const changed = await changedPaths(wikiRoot)
-      const selectedPages = new Set(
-        sources.map((source) => path.relative(wikiRoot, source.wiki_path)),
-      )
-      for (const page of changed) {
+        await writeFile(indexPath, index)
+        const logPath = path.join(wikiRoot, 'log.md')
+        const log = (await regularFile(logPath, wikiRoot)).toString('utf8')
+        await writeFile(logPath, log + `\n- Ingest ${batchId}: [[${page}]].\n`)
+        await regularFile(path.join(wikiRoot, 'overview.md'), wikiRoot)
+        const changed = await changedPaths(wikiRoot)
+        for (const page of changed) {
+          if (
+            !(
+              page === path.relative(wikiRoot, source.wiki_path) ||
+              /^(index|overview|log)\.md$/.test(page) ||
+              /^(entities|concepts|analyses)\/.+\.md$/.test(page)
+            )
+          )
+            throw new BatchBlocker('Unerlaubter geänderter Wiki-Pfad')
+          await regularFile(path.join(wikiRoot, page), wikiRoot)
+        }
+        const checked = await scan()
         if (
-          !(
-            selectedPages.has(page) ||
-            /^(index|overview|log)\.md$/.test(page) ||
-            /^(entities|concepts|analyses)\/.+\.md$/.test(page)
+          !checked.adapters[source.adapter]?.current.some(
+            (item) =>
+              item.source_key === source.source_key &&
+              item.source_revision === source.source_revision,
           )
         )
-          throw new BatchBlocker('Unerlaubter geänderter Wiki-Pfad')
-        await regularFile(path.join(wikiRoot, page), wikiRoot)
+          throw new BatchBlocker('Quellenübernahme nicht verifiziert')
+        source.changed_pages = changed
+        signal?.throwIfAborted()
+        await git(wikiRoot, ['add', '--', ...changed])
+        try {
+          // Formatting (including Markdown hard breaks) is not an ingest failure.
+          await git(wikiRoot, [
+            '-c',
+            'core.whitespace=-trailing-space,-space-before-tab',
+            'diff',
+            '--cached',
+            '--check',
+          ])
+        } catch {
+          throw new BatchBlocker(
+            'Git-Konfliktmarker oder ungültiger Diff; manuelle Prüfung erforderlich',
+          )
+        }
+        await git(wikiRoot, ['commit', '-m', `feat(wiki): ingest source (${batchId})`])
+        source.commit = (await git(wikiRoot, ['rev-parse', 'HEAD'])).trim()
+        source.status = 'ingested'
+      } catch (error) {
+        source.blocker =
+          error instanceof BatchBlocker
+            ? error.message
+            : 'Quelle konnte nicht verarbeitet werden; Quelle und Worker prüfen'
+        // An isolated failure before writing is not a reason to abandon the run.
+        // Unknown live edits/commits cannot safely be attributed or discarded.
+        source.status = 'skipped'
+        try {
+          await clean(wikiRoot)
+          if ((await git(wikiRoot, ['rev-parse', 'HEAD'])).trim() !== head)
+            throw new Error('HEAD changed', { cause: error })
+        } catch {
+          source.status = 'blocked'
+          state.blocker =
+            'Ungeklärte Wiki-Änderungen; manuelle Prüfung erforderlich, nichts zurückgesetzt'
+        }
       }
-      const checked = await scan()
-      if (checked.summary.invalid || checked.summary.conflict)
-        throw new BatchBlocker('Ungültige Wiki-Metadaten nach Batch')
-      state.changed_pages = changed
       await save()
-      signal?.throwIfAborted()
-      await git(wikiRoot, ['add', '--', ...changed])
-      try {
-        await git(wikiRoot, ['diff', '--cached', '--check'])
-      } catch {
-        throw new BatchBlocker('Git-Diff-Prüfung fehlgeschlagen; Änderungen manuell prüfen')
-      }
-      await git(wikiRoot, [
-        'commit',
-        '-m',
-        `feat(wiki): ingest ${sources.length} sources (${batchId})`,
-      ])
-      state.commit = (await git(wikiRoot, ['rev-parse', 'HEAD'])).trim()
-      state.status = 'ingested'
-      await save()
-      return {
-        status: state.status,
-        batch_id: batchId,
-        commit: state.commit,
-        changed_pages: changed,
-        report_path: report,
-        remaining: checked.summary.new + checked.summary.outdated,
-        sources: sources.map((source, i) => ({
-          source_path: source.source_path,
-          content: state.records[i].content.slice(0, 200),
-        })),
-      }
-    } catch (error) {
-      state.status = state.commit ? 'report_failed' : 'blocked'
-      state.blocker =
-        error instanceof BatchBlocker
-          ? error.message
-          : 'Batch fehlgeschlagen; Worker, Validierung oder Berichtsspeicherung manuell prüfen'
-      let reportError = null
-      try {
-        await save()
-      } catch {
-        // Report storage may remain unavailable. Do not lose a verified commit
-        // or advertise stale running evidence as the completed report.
-        reportError = 'Berichtsspeicherung fehlgeschlagen'
-      }
-      return {
-        status: state.status,
-        batch_id: batchId,
-        commit: state.commit,
-        blocker: state.blocker,
-        report_path: reportError ? null : report,
-        report_error: reportError,
-        sources: sources.map((source) => ({ source_path: source.source_path })),
-      }
+      if (state.blocker || signal?.aborted) break
+    }
+    state.summary = (await scan()).summary
+    const remaining = state.summary.new + state.summary.outdated
+    if (signal?.aborted) state.blocker ??= 'Einleselauf unterbrochen'
+    const incomplete = opts.sourcePath
+      ? state.sources.some((source) => source.status !== 'ingested')
+      : remaining || state.summary.invalid || state.summary.conflict
+    state.status = state.blocker ? 'blocked' : incomplete ? 'partial' : 'done'
+    await save()
+    return {
+      status: state.status,
+      batch_id: batchId,
+      commit: state.sources.findLast((source) => source.commit)?.commit ?? null,
+      ingested: state.sources.filter((source) => source.status === 'ingested').length,
+      skipped: state.sources.filter((source) => source.status === 'skipped').length,
+      blocker: state.blocker ?? null,
+      report_path: reportError ? null : report,
+      report_error: reportError,
+      remaining,
+      summary: state.summary,
     }
   })
 }

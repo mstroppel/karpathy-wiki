@@ -1,8 +1,8 @@
 # Runtime write isolation
 
 `WIKI_RUNTIME_READ_ONLY=true` opts into a **reader-only OpenCode runtime**.
-It is a kernel-enforced boundary for [automatic-ingest work (#157)](https://github.com/mstroppel/karpathy-wiki/issues/157),
-not writer serialization, a publisher or a completed auto-ingest feature.
+It is an independent kernel-enforced read-only mode, not writer serialization
+or automatic ingestion.
 
 ## Enable
 
@@ -39,13 +39,9 @@ Compose mounts. This changes no stored data layout and performs no migration.
 
 In reader mode, model questions, file reads and private session state remain
 available. Direct `/ingest-new`, `/analysis-save`, journal/report writes and
-saving confirmed `/gap-review` answers are denied to the runtime: with the
-[manual-ingest profile](manual-ingest.md) those writes are admitted through the
-UI-authenticated trusted channel instead (`/ingest-new`, `/analysis-save`,
-`/answer-save`). Without that profile they cannot work at all. Do not enable
-automated ingest here yet. The existing publisher core reports a generic lock
-failure when its kernel lock write is denied; that is not evidence of another
-active writer.
+saving confirmed `/gap-review` answers are denied. There is no alternate
+publication channel. The ingest lock is unavailable on read-only storage;
+that does not imply another active writer.
 
 Authenticated API/configuration access is **not** sandboxed in general. Runtime
 secrets and sessions remain within the backend's existing authority. The guarantee
@@ -55,7 +51,7 @@ against kernel/container-runtime exploits or an administrator who changes the
 deployment, grants a remote writer credential, exposes a privileged socket or
 pre-seeds writable hardlink aliases outside the protected trees. Keep host data
 roots disjoint and do not expose Docker/host-writer authority to OpenCode.
-Initialization, source providers and the optional publisher are separate trusted
+Initialization and source providers are separate trusted
 writers outside this runtime boundary; do not mistake reader mode for their
 coordination or for immutable source publication over time.
 
@@ -69,13 +65,13 @@ sh tests/integration/runtime-write-isolation.sh
 The runner uses disposable named volumes, no host data, no exposed ports, no
 external network and no model calls. It checks both rendered Compose modes,
 confirms a direct API write succeeds in manual mode, and then runs the isolated
-mode with the same stock OpenCode 2.0.25 API. It verifies:
+mode with the pinned OpenCode API. It verifies:
 
 - Direct writes from wiki and unrelated locations cannot overwrite/create files.
 - Actual location/session shells and a PTY execute overwrite/create/unlink/rename,
   chmod, mkdir and symlink attempts: the kernel returns `EROFS`.
 - Symlink and `/proc/self/root` paths, hardlink escape and remount cannot bypass it.
-- The actual journal core cannot start a run; publication's lock syscall returns
+- The actual report writer cannot write; the ingest lock syscall returns
   `EROFS` and its core refuses admission. A synthetic custom command invokes these
   cores without asking a model; this is not model-facing tool-dispatch validation.
 - Runtime/configuration writes outside the protected trees remain possible but
@@ -84,8 +80,5 @@ mode with the same stock OpenCode 2.0.25 API. It verifies:
 - The same checks pass after restart, and startup rejects a writable backing
   alias or a read-only flag paired with writable mounts.
 
-CI runs this positive boundary proof. The earlier negative probe in #188 concerns
-the manual writable topology; its plugin-only guard limitation is not fixed
-upstream. Passing this reader-boundary test does **not** prove publisher admission,
-writer handover, idempotent dispatch, boot activation, quota handling or ingestion
-semantics. Those remain gates for the full controller.
+CI runs this positive boundary proof. It does not make writable mode safe for
+concurrent writers or implement the deferred automatic-ingest feature (#157).

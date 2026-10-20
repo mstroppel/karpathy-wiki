@@ -43,25 +43,18 @@ See [email ingestion](email.md) for trust, deletion and retention boundaries.
 
 OpenChamber exposes the private OpenCode backend's sessions and wiki commands;
 sessions are not exported to SilverBullet. The frontend has a separate private
-settings directory, a read-only wiki mount and read-only ingest run records and
-reports. Private transaction drafts remain backend-only. See [chat deployment](chat.md).
+settings directory, a read-only wiki mount and read-only ingest reports.
+See [chat deployment](chat.md).
 
 OpenCode reads source directories and writes generated Markdown to `wiki/`.
-Default writable ingestion uses one lifetime-locked worker and one Git commit
-per small batch, with direct live Markdown edits and private batch reports.
+Writable ingestion uses one lifetime lock over the selected backlog, sequential
+fresh workers, one Git commit per source and a private report.
 Readers may see intermediate edits; other manual/agent writers must stay idle.
 Failures retain work for manual review instead of per-page transaction recovery.
 See [ingestion reports](ingest-reports.md).
-In opt-in reader mode it cannot write protected data. The optional
-[trusted publisher](trusted-publisher.md) is a separate, networkless,
-operator-exec-only writer using the same transaction/journal cores. Its private
-queue/ownership is not mounted into OpenCode. The alternative
-[manual-ingest controller](manual-ingest.md) adds a UI-authenticated internal
-listener and outbound runtime access, while retaining the isolated write authority
-and lifetime lock. Its token is shared only with the UI; worker JSON is fetched
-outbound through tool-free generation, never admitted through a worker endpoint.
-Automatic routing and other reader-mode authoring remain pending.
-This boundary is distinct from source-provider SQLite leases.
+In opt-in reader mode it cannot write protected data. There is no alternate
+publisher/controller route. Automatic wiki ingestion is deferred until after 1.0.
+Source-provider acquisition and its SQLite leases remain independent.
 SilverBullet serves the wiki space from a read-only mount. Services do not publish host ports; the
 reverse proxy reaches them through `WEBPROXY_NETWORK` using these aliases:
 
@@ -76,13 +69,11 @@ provides unique aliases on the shared proxy network, allowing multiple
 installations to run independently with different environment files and data
 roots. Only trusted proxy infrastructure should join `WEBPROXY_NETWORK`.
 
-Ingest work is coordinated by a durable, content-free SQLite state store
-below `${DATA_ROOT}/state` (`state.py` in the ingest core): ingest jobs with
-state transitions, attempts, and leases, the immutable source generations,
-and wiki publications. WebDAV and Paperless both record accepted cycles and
-published source generations. Git remains the human-readable audit history, but no
-longer carries job state or concurrency control; a restart neither loses
-accepted ingest work nor executes an accepted publication twice. The
+Source acquisition is coordinated by a durable, content-free SQLite state store
+below `${DATA_ROOT}/state` (`state.py` in the ingest core): jobs, attempts, leases
+and immutable source generations. WebDAV and Paperless record accepted cycles
+and published source generations. Wiki authoring instead uses the explicit
+ingest request, lifetime lock and Git commits described above. The
 experimental analysis UI is not part of this stack. It can be added later
 without changing the source and wiki contracts. Saved analyses and their
 printable HTML views live inside the wiki space (see
