@@ -82,7 +82,10 @@ class OpenChamberTests(unittest.TestCase):
             self.assertIn("openchamber", block)
         self.assertIn("directory: /openchamber", (ROOT / ".github/dependabot.yml").read_text())
         prerelease = (ROOT / ".github/workflows/pre-release.yml").read_text()
-        self.assertIn("needs: [tests, lint, chat-integration]", prerelease)
+        self.assertIn("workflow_call:", prerelease)
+        ci = (ROOT / ".github/workflows/ci.yml").read_text()
+        self.assertIn("needs: [tests, lint, integration-gate, images]", ci)
+        self.assertIn("script: tests/integration/chat.sh", ci)
         publication = (ROOT / ".github/workflows/images.yml").read_text()
         self.assertLess(
             publication.index("sh tests/integration/chat.sh"),

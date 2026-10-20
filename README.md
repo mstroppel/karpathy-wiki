@@ -12,6 +12,7 @@ own configuration, sources, wiki history, credentials, and sessions.
 Requirements:
 
 - Docker Engine with Docker Compose v2
+- An AMD64/x86-64 host (published images do not support ARM64)
 - Python 3.11+ (launcher), GNU tar (safe updates and rollback)
 - A reverse proxy attached to a Docker network
 - An account with an [OpenCode-supported model provider](https://opencode.ai/docs/providers/)
@@ -213,6 +214,19 @@ Milestones define release commitments, priority labels define execution order,
 and `roadmap:post-1.0` identifies the uncommitted post-1.0 backlog.
 
 ## Development
+
+CI builds AMD64 images with per-image GitHub Actions BuildKit caches. Six
+integration suites run in isolated parallel jobs; the `Compose integration`
+check aggregates their results for branch protection. Unit tests, lint and image
+builds run alongside them. On `main`, only after all gates pass, the reusable
+pre-release workflow promotes that run's image digests to release tags without
+repeating tests or builds. PR preview images retain their `pr-<number>` tags.
+The pre-release workflow is called by CI, not dispatched separately.
+
+Local Bake builds do not need Actions credentials. To load images before running
+individual integration suites, use e.g.
+`sh scripts/build-integration-images.sh opencode openchamber`; the Compose/email
+runners accept `SKIP_IMAGE_BUILD=1` when their required images are already loaded.
 
 Run the same checks CI runs:
 

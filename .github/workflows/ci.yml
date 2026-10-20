@@ -16,6 +16,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.event.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   tests:
     name: Tests
@@ -60,32 +64,66 @@ jobs:
         run: scripts/lint.sh
 
   integration:
-    name: Compose integration
+    name: Integration (${{ matrix.suite }})
     runs-on: ubuntu-latest
-    needs: [tests, lint]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: compose
+            images: opencode ingest ingest-webdav ingest-paperless
+            script: tests/integration/run.sh
+          - suite: email
+            images: ingest-email
+            script: tests/integration/email.sh
+          - suite: launcher-backup
+            images: ''
+            script: tests/integration/launcher-backup.sh
+          - suite: chat
+            images: opencode openchamber
+            script: tests/integration/chat.sh
+          - suite: batch-ingest
+            images: opencode
+            script: tests/integration/batch-ingest.sh
+          - suite: runtime-write-isolation
+            images: opencode
+            script: tests/integration/runtime-write-isolation.sh
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
-      - name: Configure Docker Hub mirror for daemon builds
-        # Configure the daemon too: Compose pulls and docker build do not use
-        # the container BuildKit configuration in the images job.
+      - name: Configure Docker Hub mirror for daemon and builder
         run: sh scripts/setup-ci-docker.sh
-      - name: Run disposable Compose stack test
-        run: tests/integration/run.sh
-      - name: Verify synthetic TLS email reception, restart and offline replay
-        run: sh tests/integration/email.sh
-      - name: Verify safe launcher update and delayed full rollback
-        run: sh tests/integration/launcher-backup.sh
-      - name: Run primary chat integration
+      - uses: docker/setup-buildx-action@v4
+        with:
+          buildkitd-config: .github/docker/buildkitd.toml
+      - uses: crazy-max/ghaction-github-runtime@v4
+      - name: Load cached integration images
+        if: matrix.images != ''
+        env:
+          BUILD_CACHE: gha
+          IMAGES: ${{ matrix.images }}
         run: |
-          docker build --target openchamber -t kw-openchamber:integration -f opencode/Dockerfile .
-          sh tests/integration/chat.sh
-      - name: Prove default batch ingest with a synthetic tool-calling model
-        run: sh tests/integration/batch-ingest.sh
-      - name: Prove kernel-enforced runtime write isolation
-        run: sh tests/integration/runtime-write-isolation.sh
+          # Intentional splitting of the fixed, repository-owned image list.
+          # shellcheck disable=SC2086
+          sh scripts/build-integration-images.sh $IMAGES
+      - name: Run isolated integration suite
+        env:
+          SKIP_IMAGE_BUILD: '1'
+          SCRIPT: ${{ matrix.script }}
+        run: sh "$SCRIPT"
+
+  integration-gate:
+    # Keep the existing branch-protection check name while expanding the matrix.
+    name: Compose integration
+    runs-on: ubuntu-latest
+    needs: [integration]
+    if: always()
+    steps:
+      - env:
+          RESULT: ${{ needs.integration.result }}
+        run: test "$RESULT" = success
 
   images:
     name: Images
@@ -102,6 +140,7 @@ jobs:
           buildkitd-config: .github/docker/buildkitd.toml
       - name: Log in to GHCR
         if: >-
+          (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
           (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
           (github.event_name == 'workflow_dispatch' && inputs.pull_request_number != '')
         uses: docker/login-action@v4
@@ -110,12 +149,34 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build images
+        id: build
         uses: docker/bake-action@v7
         env:
-          IMAGE_VERSION: pr-${{ github.event.number || inputs.pull_request_number }}
+          BUILD_CACHE: gha
+          IMAGE_VERSION: ${{ github.event_name == 'push' && format('sha-{0}', github.sha) || format('pr-{0}', github.event.number || inputs.pull_request_number) }}
         with:
           source: .
           files: docker-bake.hcl
-          targets: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'workflow_dispatch' && inputs.pull_request_number != '') && 'release' || 'default' }}
+          targets: ${{ (github.event_name == 'push' || github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'workflow_dispatch' && inputs.pull_request_number != '') && 'release' || 'default' }}
           load: false
-          push: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'workflow_dispatch' && inputs.pull_request_number != '') }}
+          push: ${{ (github.event_name == 'push' || github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'workflow_dispatch' && inputs.pull_request_number != '') }}
+      - name: Save immutable image digests for release promotion
+        if: github.event_name == 'push'
+        env:
+          METADATA: ${{ steps.build.outputs.metadata }}
+        run: printf '%s\n' "$METADATA" > image-metadata.json
+      - uses: actions/upload-artifact@v7
+        if: github.event_name == 'push'
+        with:
+          name: release-image-metadata
+          path: image-metadata.json
+          if-no-files-found: error
+
+  pre-release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [tests, lint, integration-gate, images]
+    permissions:
+      contents: write
+      packages: write
+      actions: read
+    uses: ./.github/workflows/pre-release.yml

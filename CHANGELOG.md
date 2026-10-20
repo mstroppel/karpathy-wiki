@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Published images now target AMD64 only; ARM64 hosts are no longer supported.
+  CI caches BuildKit layers per image, runs six integration suites in parallel,
+  and promotes the successful main CI run's image digests to pre-release tags
+  without repeating tests or image builds. No data-layout changes.
 - Ingest now drains the selected backlog in one tool call, with a fresh worker
   and commit per source. Isolated source failures are skipped; Markdown hard
   breaks, whitespace and report-storage failures no longer stop independent
