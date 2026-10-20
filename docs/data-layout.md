@@ -7,6 +7,10 @@ retains attachments indefinitely, and must be backed up with its ledger.
 Redacted text generations and the provider manifest live separately in
 `${DATA_ROOT}/sources/email`; the owned wiki subtree is `wiki/sources/email`.
 Server deletion follows durable original archival, not a wiki commit.
+Originals use `YYYY/MM/DD/HH-MM-SS_<id>.eml` (UTC first receipt). Their redacted
+Markdown counterparts use the same relative directory/basename with `.md`
+inside the immutable `sources/email/generations/<generation>/` wrapper.
+Transit-only duplicates keep separate private originals and one canonical source.
 
 All persistent data lives below `DATA_ROOT`. The installation directory only
 contains the launcher, `.env`, optional secrets, and local Compose adoptions.
