@@ -47,22 +47,12 @@ find . \
 done
 
 # Shipped JavaScript and the full Compose configuration.
-node --check config/plugins/wiki-ingest-journal.js
 node --check config/plugins/wiki-ingest-status.js
-node --check config/plugins/wiki-ingest-transaction.js
 node --check config/plugins/wiki-ingest-batch.js
 node --check config/tools/wiki_ingest_batch_core.mjs
 node --check config/tools/wiki_ingest_batch_worker.mjs
-node --check config/tools/wiki_ingest_journal_core.mjs
 node --check config/tools/wiki_ingest_status_core.mjs
-node --check config/tools/wiki_ingest_transaction_core.mjs
-node --check config/tools/wiki_ingest_publication_core.mjs
 node --check config/tools/wiki_ingest_storage.mjs
-node --check config/tools/wiki_ingest_errors.mjs
-node --check publisher/control.mjs
-node --check publisher/cli.mjs
-node --check publisher/journal_storage.mjs
-node --check publisher/journal_maintenance.mjs
 docker compose --env-file .env.example config --quiet
 
 printf 'lint: OK\n'

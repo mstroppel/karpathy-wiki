@@ -18,7 +18,7 @@ when reproducible upgrades are required.
 | `STACK_ID` | Unique DNS alias prefix on the proxy network |
 | `WIKI_NAME` | Human-readable title written during first initialization |
 | `WIKI_PUBLIC_URL` | Browser-visible SilverBullet base URL |
-| `OPENCHAMBER_PUBLIC_URL` | Browser-visible chat URL; exact Origin for optional trusted manual ingest |
+| `OPENCHAMBER_PUBLIC_URL` | Browser-visible chat URL |
 | `OPENCHAMBER_UI_PASSWORD` | Separate strong password for browser sign-in |
 | `OPENCODE_PASSWORD` | Stable OpenCode v2 server password shared with internal API clients |
 | `DATA_ROOT` | Persistent instance directory; absolute paths are recommended |
@@ -104,34 +104,12 @@ parsing. If no record is listed, narrow the query to one adapter.
 `WIKI_RUNTIME_READ_ONLY` defaults to `false` (manual authoring). Set it to `true`
 for the [kernel-enforced reader topology](runtime-write-isolation.md); this
 disables all wiki/journal/answer writes and is not an auto-ingest switch.
-Recreate OpenCode to apply mount changes. The optional
-[trusted publisher](trusted-publisher.md) provides an operator-only writer;
-the alternative [manual-ingest profile](manual-ingest.md) routes immediate browser
-`/ingest-new`, `/analysis-save` and `/answer-save` through separate
-UI-authenticated admission. Configure its
-`WIKI_INGEST_CONTROL_URL` and separate `WIKI_INGEST_CONTROL_TOKEN` only in the UI
-and controller, never OpenCode. Trusted analysis saves additionally need
-`WIKI_PUBLIC_URL` in the controller environment to derive the public page and
-print-view URLs. Both are empty/default-off. Other reader-mode
-authoring and automatic ingestion remain unsupported.
+Recreate OpenCode to apply mount changes. Reader mode has no alternate writer.
 
-Default writable `/ingest-new` uses an exclusive live-edit worker, up to five
-sources, a 128k estimated context target and one commit per batch. Its private
-reports live below `/knowledge/incoming/ingest-journal/batches`. Failures leave
-live edits for manual review; other writers must stay idle. See
-[ingestion reports](ingest-reports.md) for the deliberate tradeoffs.
-
-The following variables configure only the separate transaction planner used by
-the opt-in trusted-publisher route, not the default writable batches:
-
-| Variable | Default | Description |
-| --- | --- | --- |
-| `WIKI_INGEST_BATCH_BUDGET_TOKENS` | `32000` | Estimated working context per worker session |
-| `WIKI_INGEST_BATCH_MAX_SOURCES` | `1` | Upper cap; one fresh worker/source is always enforced |
-| `WIKI_INGEST_RUN_MAX_BATCHES` | `12` | Batches per run before a clean rollover (`0` = unlimited) |
-
-Token values are estimates, not measured model tokens. The trusted route retains
-its per-source transaction and recovery contract; see [manual ingest](manual-ingest.md).
+Writable `/ingest-new` processes the selected backlog sequentially in one tool
+call, with a fresh worker and commit per source. Isolated source failures are
+skipped, not retried; only uncertain shared changes stop the run. No batch-budget
+or rollover configuration is needed. See [ingestion reports](ingest-reports.md).
 
 ## Secrets
 

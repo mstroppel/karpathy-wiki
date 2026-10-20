@@ -252,9 +252,7 @@ updating container images alone cannot fix the host's backup helper.
    ```
 
    Keep the archive outside `DATA_ROOT`. Do not back up just `wiki/*.md` or
-    omit `state/ingest.sqlite3`. Include the entire private ingest-journal and
-    `publisher/` queue, ownership and replay evidence; do not reset ownership
-    bookkeeping to unblock a restored publisher.
+    omit `state/ingest.sqlite3`. Include the entire private ingest-journal.
 
 3. Separately save the installation's `.env`, `karpathy-wiki.sh`, any
    `compose.override.yaml`, and every secret file referenced by `.env`
@@ -288,11 +286,8 @@ git -C /path/to/restored/data/wiki fsck --full
 
 Check the restored `index.md` and a representative committed source page in
 SilverBullet, verify the Git history, and confirm OpenCode can read the wiki.
-After [journal compaction](ingest-journal-storage.md), retain the complete journal
-and wiki `.git` in backups: compact parent receipts contain the nested transaction
-proof; removed draft clones need not be reconstructed. Never omit unresolved
-drafts or live publication backups. Run journal maintenance without `--confirm`
-on the restored idle stack to verify completed publication/report evidence.
+Retain the complete private journal and wiki `.git` in backups, including any
+older recovery evidence. Inspect unresolved live edits before resuming ingestion.
 Then stop the test stack and remove only its own resources. A missing or corrupt
 SQLite state file should be investigated before re-enabling providers: deleting
 it resets ingest bookkeeping and may cause upstream sources to be reprocessed.

@@ -89,42 +89,21 @@ OpenCode to import `/knowledge/sources/webdav`. Generated pages are written to
 
 ## Ingestion reports
 
-`/ingest-new` processes new and changed sources in small sequential batches:
-one fresh worker, up to five sources and **one Git commit per batch**. The batch
-tool holds an exclusive lifetime lock, starts only from clean Git and records
-the existing HEAD as its checkpoint. Workers read sources with normal file tools
-and edit wiki Markdown directly. The overview is synthesized once per batch;
-code appends index/log entries and stamps source identities without model-copied
-hashes. Source bytes and provider metadata are checked before and after work.
+`/ingest-new` makes one tool call that processes all selected new/changed sources
+sequentially: one fresh worker and Git commit per source. Unusable sources are
+reported and skipped; formatting and report-storage problems do not stop the run.
+Sources and provenance are verified before publication. No scheduler, second
+publisher or transaction protocol is involved; automatic ingestion is post-1.0 (#157).
 
-This intentionally simpler default trades per-page isolation and automatic crash
-reconciliation for fewer tool round trips. Readers can see partial work; no other
-human or agent may edit the wiki during ingestion. On failure, edits remain for
-manual review: nothing is automatically reset. Git is the coarse safety net,
-not a proof of semantic correctness or protection from a misbehaving writer.
+Private reports under `${DATA_ROOT}/incoming/ingest-journal/batches/<id>` contain
+commits, changed pages, findings, contradictions and extraction limits. Chat links
+the report and summarizes remaining work. See [ingestion reports](docs/ingest-reports.md).
 
-Private reports under `${DATA_ROOT}/incoming/ingest-journal/batches/<batch-id>`
-include the checkpoint, commit, changed pages and per-source findings, evidence,
-contradictions and extraction limits. Chat links the reports and summarizes the
-result; full details are read only on request. See [ingestion reports](docs/ingest-reports.md)
-for failure handling and the retained safety boundaries. Existing transaction
-cores and [journal maintenance](docs/ingest-journal-storage.md) remain for the
-separate opt-in trusted-publisher/manual-reader route, not the default batches.
-
-Automatic triggering is not enabled yet. See the
-[automatic-ingest runtime gate](docs/auto-ingest-runtime-gate.md) for the
-model-free negative probe and the known blocker to plugin-only writer coordination.
-
-An optional [kernel-enforced reader mode](docs/runtime-write-isolation.md) prevents
-OpenCode from changing wiki, sources, ingest-journal and answer-inbox data even
-through direct backend APIs. An opt-in
-[trusted publisher](docs/trusted-publisher.md) provides an operator-only
-publication/coordination foundation. An alternative opt-in
-[trusted manual ingest route](docs/manual-ingest.md) connects immediate browser
-`/ingest-new`, `/analysis-save` and `/answer-save` requests to isolated workers,
-trusted writes and verified publication in reader mode. Other reader-mode chat
-authoring and automatic ingest remain unimplemented.
-Writable manual operation remains the default.
+Readers can see intermediate edits. Other writers must stay idle during ingest.
+Uncertain live changes stop for manual inspection; nothing is automatically reset.
+The optional [reader mode](docs/runtime-write-isolation.md) disables **all** runtime
+authoring, including ingest and analysis/answer saves. Writable manual operation
+remains the default.
 
 ## Analyses
 
@@ -132,18 +111,15 @@ Scientific analyses (`/analysis`) can be saved from the same conversation with
 `/analysis-save` (no arguments required): the analysis is added to the wiki index
 and log as a linked page at `WIKI_PUBLIC_URL/analyses/<slug>`
 and a print-optimized HTML view at `WIKI_PUBLIC_URL/.fs/assets/analyses/<slug>.html`,
-from which the browser's print dialog produces a shareable PDF. In the opt-in
-reader-mode [manual ingest route](docs/manual-ingest.md) the save is prepared in
-the chat and admitted by sending `/analysis-save`, which the trusted channel
-writes and commits. See [analysis export](docs/analysis-export.md).
+from which the browser's print dialog produces a shareable PDF.
+See [analysis export](docs/analysis-export.md).
 
 ## Interactive gap review
 
 Run `/gap-review` in OpenCode to review unsupported claims, contradictions,
 missing information, and stale syntheses. Answer or defer its numbered
 questions across turns. Only after you confirm the proposed answers does
-OpenCode save a Markdown Q&A draft to the local answer inbox (`/answer-save`
-admits that save through the trusted channel in reader mode); that local save
+OpenCode save a Markdown Q&A draft to the local answer inbox; that local save
 works without the `answers` profile. Enable the profile for publication: the
 provider locally redacts and publishes the draft as a tracked source, which
 the normal wiki ingest flow uses to update the wiki. See
@@ -247,22 +223,12 @@ npm ci
 scripts/install-shellcheck.sh  # add ~/.local/bin to PATH if needed; Linux x86_64
 scripts/lint.sh
 scripts/test-python.sh
-node --test tests/test_wiki_ingest_status.mjs tests/test_contract_fixtures.mjs tests/test_wiki_ingest_journal.mjs tests/test_ingest_context_budget.mjs tests/test_wiki_ingest_transaction.mjs tests/test_answer_intake.mjs
-node --test tests/test_chat_bootstrap.mjs
-node --test tests/test_trusted_publisher.mjs
-node --test tests/test_manual_ingest.mjs
-node --test tests/test_trusted_authoring.mjs
-node --test tests/test_journal_storage.mjs
-node --test tests/test_wiki_ingest_batch.mjs
+npm test
 docker build --target opencode -t kw-opencode:integration -f opencode/Dockerfile .
 docker build --target openchamber -t kw-openchamber:integration -f opencode/Dockerfile .
 sh tests/integration/chat.sh  # authentication, discovery, native SSE and restart persistence
-sh tests/integration/batch-ingest.sh  # synthetic model, exclusive worker, direct read/edit and batch commit
-sh tests/integration/auto-ingest-runtime.sh  # negative writer-gate probe, NOT auto-ingest approval
+sh tests/integration/batch-ingest.sh  # synthetic model, sequential sources, skips, commits and report
 sh tests/integration/runtime-write-isolation.sh  # pinned-runtime proof of the reader boundary
-docker build --target publisher -t kw-publisher:integration -f opencode/Dockerfile .
-sh tests/integration/trusted-publisher.sh  # isolated writer, crash recovery and reader boundary
-sh tests/integration/manual-ingest.sh  # UI-only admission, synthetic worker proposals and trusted authoring saves
 tests/integration/run.sh  # requires Docker; disposable Compose stack test
 sh tests/integration/email.sh  # synthetic TLS IMAP, archive-before-delete, restart, replay
 sh tests/integration/launcher-backup.sh  # real Compose update snapshots and delayed rollback
@@ -273,8 +239,8 @@ project with a disposable WebDAV upstream. It verifies redaction, manifest
 publication, the status scanner's `new → current → outdated → current` path,
 the local confirmed-answer inbox and provider, and restart/failure health
 behavior. A deterministic test page exercises the
-source-to-wiki contract; model-driven wiki publication and the future
-publisher/worker pipeline are not part of this suite yet. It also checks that
+source-to-wiki contract; the separate synthetic-model ingest test covers worker
+publication. It also checks that
 one-shot Paperless fails against an unreachable disposable endpoint. The
 runner removes its project, network, and data on exit.
 

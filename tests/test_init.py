@@ -282,36 +282,31 @@ class ConfigTests(unittest.TestCase):
         orchestrator = (
             ROOT / "config" / "skills" / "wiki-ingest-orchestrator" / "SKILL.md"
         ).read_text()
-        renderer = (ROOT / "config" / "tools" / "wiki_ingest_journal_core.mjs").read_text()
-        # Bulk runs link the authoritative private file; single-source details
-        # and the durable renderer's evidence contract remain unchanged.
+        renderer = (ROOT / "config" / "tools" / "wiki_ingest_batch_core.mjs").read_text()
         self.assertIn("dauerhaften Berichtspfad", template)
-        self.assertIn("Verlinke jeden privaten Bericht", template)
+        self.assertIn("Verlinke den privaten Bericht", template)
         self.assertIn("kurzen Zusammenfassung", template)
         self.assertIn("[Vollständiger Einlesebericht](<report_path>)", orchestrator)
         self.assertIn("Bei null Quellen keine Auswertung erfinden", orchestrator)
-        for field in ("content", "contradictions", "extraction_limits"):
+        for field in ("Befunde", "Widersprüche/offene Fragen", "Extraktionsgrenzen"):
             self.assertIn(field, skill)
         # The report renderer keeps every detail block; the source path itself
         # is the block heading.
         for field in (
             "Commit",
             "Geänderte Seiten",
-            "Inhalt",
-            "Widersprüche/offene Fragen",
-            "Extraktionsgrenzen",
         ):
-            self.assertIn(f"**{field}:**", renderer)
-        self.assertIn("record.source_path", renderer)
-        self.assertIn("keinen verifizierten Commit", skill)
+            self.assertIn(f"{field}:", renderer)
+        self.assertIn("source.source_path", renderer)
+        self.assertIn("Commit meldet nur der aufrufende Code", skill)
         self.assertIn("Nicht ermittelt", renderer)
-        self.assertIn("Aktuelle Quellen werden nicht erneut ausgewertet", orchestrator)
-        self.assertIn("exakten `source_path`", orchestrator)
-        self.assertIn("Keine Duplikatseite", skill)
+        self.assertIn("Aktuelle Quellen nicht erneut auswerten", orchestrator)
+        self.assertIn("`source_path` aus `wiki_ingest_status`", orchestrator)
+        self.assertIn("vermeide Duplikatseiten", skill)
         # Evidence is durable per source, written only after the verified
         # commit, and unverified results are recorded as blocked.
         self.assertIn("wiki_ingest_batch", skill)
-        self.assertIn("Erfolgsdatensätze entstehen erst nach", skill)
+        self.assertIn("verifizierten Commit", skill)
 
     def test_skills_declare_matching_frontmatter(self):
         skills = ROOT / "config" / "skills"
@@ -336,25 +331,20 @@ class ConfigTests(unittest.TestCase):
         self.assertIn("assets/analyses/", save_skill)
         self.assertIn(".fs/assets/analyses/", save_skill)
         self.assertIn("render-analysis", save_skill)
-        # Reader-mode saves are prepared as a strict authoring block and
-        # admitted only through the trusted channel command.
         self.assertIn("test -w /knowledge/wiki", save_skill)
-        self.assertIn("karpathy-authoring", save_skill)
-        self.assertIn("Vorbereiten im vertrauenswürdigen Kanal", save_skill)
-        self.assertIn("/analysis-save", save_skill)
+        self.assertIn("Nur-Lese-Modus", save_skill)
+        self.assertNotIn("karpathy-authoring", save_skill)
         gap_skill = (skills / "wiki-gap-review" / "SKILL.md").read_text()
-        self.assertIn("karpathy-authoring", gap_skill)
-        self.assertIn("/answer-save", gap_skill)
+        self.assertNotIn("karpathy-authoring", gap_skill)
         self.assertIn("<!-- END CONFIRMED ANSWERS -->", gap_skill)
         template = (skills / "wiki-analysis-save" / "print-template.html").read_text()
         self.assertIn("{{inhalt}}", template)
         self.assertIn('lang="de"', template)
         dockerfile = (ROOT / "opencode" / "Dockerfile").read_text()
         self.assertIn("COPY config/skills /etc/opencode/skills", dockerfile)
-        # The trusted writer derives print views itself with the same renderer.
+        # Writable analysis saves retain the deterministic renderer.
         self.assertIn("COPY opencode/render_analysis.py /usr/local/bin/render-analysis", dockerfile)
         self.assertIn("python3-markdown python3-bleach", dockerfile)
-        self.assertIn("KARPATHY_WIKI_PRINT_TEMPLATE", dockerfile)
 
     def test_compose_passes_profiles_to_init(self):
         compose = (ROOT / "compose.yaml").read_text()

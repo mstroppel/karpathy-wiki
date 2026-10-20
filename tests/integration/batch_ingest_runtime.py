@@ -14,14 +14,7 @@ from pathlib import Path
 
 WIKI = Path("/knowledge/wiki")
 SOURCE = Path("/knowledge/sources/webdav")
-RESULT = [
-    {
-        "index": 0,
-        "content": "Synthetic finding, source line 1.",
-        "contradictions": "None observed.",
-        "extraction_limits": "Fully read line 1.",
-    }
-]
+RESULT = "Synthetic finding, source line 1.\nContradictions: none.\nLimits: fully read line 1."
 CALLS: list[str] = []
 
 
@@ -33,6 +26,17 @@ class Model(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         messages = body.get("messages", [])
         worker = "Batchdaten:" in json.dumps(messages)
+        batch = None
+        for message in messages:
+            value = message.get("content", "")
+            texts = (
+                [value]
+                if isinstance(value, str)
+                else [part.get("text", "") for part in value or []]
+            )
+            for text in texts:
+                if "Batchdaten:\n" in text:
+                    batch = json.loads(text.split("Batchdaten:\n", 1)[1])
         tools = {tool["function"]["name"]: tool["function"] for tool in body.get("tools", [])}
         names = list(tools)
         content = "Synthetic batch completed."
@@ -52,27 +56,31 @@ class Model(BaseHTTPRequestHandler):
             call = (name, {key: str(reports[0])})
         elif not worker:
             details = json.dumps(history[-1])
-            assert str(RESULT[0]["contradictions"]) in details, details
-            assert str(RESULT[0]["extraction_limits"]) in details, details
+            assert "Contradictions: none" in details, details
+            assert "Limits: fully read line 1" in details, details
+        elif batch and batch["sources"][0]["source_key"] == "unreadable.md":
+            content = "SKIP: Synthetic unreadable source."
         elif worker and not history:
             # Exercise real worker read permission, not a plugin-owned file read.
             name = next(name for name in names if name == "read")
             props = tools[name]["parameters"]["properties"]
             key = next(key for key in ("path", "filePath", "file_path") if key in props)
-            call = (name, {key: str(SOURCE / "notes.md")})
+            assert batch
+            call = (name, {key: batch["sources"][0]["source_path"]})
         elif worker and len(history) == 1:
+            assert batch
             name = next(name for name in names if name == "write")
             props = tools[name]["parameters"]["properties"]
             key = next(key for key in ("path", "filePath", "file_path") if key in props)
             call = (
                 name,
                 {
-                    key: str(WIKI / "sources/webdav/notes.md"),
-                    "content": "# Synthetic finding\nSource line 1.\n",
+                    key: batch["sources"][0]["wiki_path"],
+                    "content": "# Synthetic finding  \nSource line 1.\n\n\n",
                 },
             )
         elif worker:
-            content = json.dumps(RESULT)
+            content = RESULT
         if call:
             name, args = call
             CALLS.append(name)
@@ -130,7 +138,8 @@ def main():
     for name in ("index.md", "overview.md", "log.md", "AGENTS.md"):
         WIKI.joinpath(name).write_text(f"# Synthetic {name}\n")
     text = "Synthetic source line 1.\n"
-    SOURCE.joinpath("notes.md").write_text(text)
+    for name in ("notes.md", "unreadable.md", "next.md"):
+        SOURCE.joinpath(name).write_text(text)
     revision = hashlib.sha256(text.encode()).hexdigest()
     SOURCE.joinpath("manifest.json").write_text(
         json.dumps(
@@ -142,17 +151,18 @@ def main():
                 "generated_at": 1760000000,
                 "items": [
                     {
-                        "source_key": "notes.md",
-                        "source_path": "notes.md",
-                        "wiki_path": "webdav/notes.md",
+                        "source_key": name,
+                        "source_path": name,
+                        "wiki_path": f"webdav/{name}",
                         "source_revision": revision,
                         "frontmatter": {
                             "source": "webdav",
-                            "source_path": "notes.md",
+                            "source_path": name,
                             "source_revision": revision,
                         },
-                        "claim": {"source": "webdav", "source_path": "notes.md"},
+                        "claim": {"source": "webdav", "source_path": name},
                     }
+                    for name in ("notes.md", "unreadable.md", "missing.md", "next.md")
                 ],
                 "revoked": [],
                 "errors": [],
@@ -214,16 +224,27 @@ def main():
             reports = list(Path("/knowledge/incoming/ingest-journal/batches").glob("*/state.json"))
             assert len(reports) == 1, reports
             state = json.loads(reports[0].read_text())
-            assert state["status"] == "ingested", state
-            assert state["commit"], state
-            assert CALLS == ["wiki_ingest_batch", "read", "write", "read"], CALLS
+            assert state["status"] == "partial", state
+            assert [source["status"] for source in state["sources"]] == [
+                "ingested",
+                "skipped",
+                "skipped",
+                "ingested",
+            ], state
+            assert sum(bool(source["commit"]) for source in state["sources"]) == 2, state
+            assert CALLS == ["wiki_ingest_batch", "read", "write", "read", "write", "read"], CALLS
             assert revision in WIKI.joinpath("sources/webdav/notes.md").read_text()
             assert SOURCE.joinpath("notes.md").read_text() == text
             count = subprocess.check_output(
                 ["git", "-C", str(WIKI), "rev-list", "--count", "HEAD"], text=True
             )
-            assert count.strip() == "2", count
-            print("batch-ingest-runtime: permissions, commit and report detail read OK")
+            assert count.strip() == "3", count
+            assert WIKI.joinpath("sources/webdav/next.md").is_file()
+            assert not WIKI.joinpath("sources/webdav/unreadable.md").exists()
+            print(
+                "batch-ingest-runtime: one request, sequential sources, isolated skips, "
+                "Markdown hard breaks, commits and report OK"
+            )
         finally:
             backend.terminate()
             backend.wait(timeout=30)

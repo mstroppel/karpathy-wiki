@@ -306,7 +306,7 @@ function emptyResult() {
   }
 }
 
-function finishAdapters(adapters, includeCurrent) {
+function finishAdapters(adapters, includeCurrent, targetCounts) {
   const targets = new Map()
   for (const [sourceName, result] of Object.entries(adapters)) {
     for (const status of ['new', 'outdated', 'current']) {
@@ -318,7 +318,7 @@ function finishAdapters(adapters, includeCurrent) {
     }
   }
   for (const [wikiPath, entries] of targets) {
-    if (entries.length < 2) continue
+    if (targetCounts.get(wikiPath) < 2) continue
     for (const { sourceName, status, item } of entries) {
       const result = adapters[sourceName]
       result[status] = result[status].filter((candidate) => candidate !== item)
@@ -363,6 +363,15 @@ export async function scanIngestStatus({ sourceRoot, wikiSourceRoot, includeCurr
   }
 
   const owned = Object.entries(adapters).filter(([, adapter]) => adapter.manifest)
+  // Reserve every parsed manifest target before root/identity classification.
+  // Invalid roots and conflicted identities must not expose targets to workers.
+  const targetCounts = new Map()
+  for (const [, adapter] of owned) {
+    for (const item of adapter.manifest.items) {
+      const target = path.join(wikiSourceRoot, item.wiki_path)
+      targetCounts.set(target, (targetCounts.get(target) ?? 0) + 1)
+    }
+  }
   // The contract requires wiki_roots to be unique across sources; duplicate
   // roots would make page attribution depend on directory iteration order, so
   // colliding manifests are reported invalid.
@@ -439,7 +448,11 @@ export async function scanIngestStatus({ sourceRoot, wikiSourceRoot, includeCurr
     // outdated). A page that drops another declared field, or changed its
     // value, is invalid instead of current.
     if (typeof fields.source_revision !== 'string' || !REVISION_RE.test(fields.source_revision)) {
-      owner.state.invalid.push({ path: pagePath, error: 'source_revision ist ungültig' })
+      owner.state.invalid.push({
+        source_key: item.source_key,
+        path: pagePath,
+        error: 'source_revision ist ungültig',
+      })
       continue
     }
     const mismatch = Object.entries(item.frontmatter).find(
@@ -447,6 +460,7 @@ export async function scanIngestStatus({ sourceRoot, wikiSourceRoot, includeCurr
     )
     if (mismatch) {
       owner.state.invalid.push({
+        source_key: item.source_key,
         path: pagePath,
         error: `Frontmatter-Feld ${mismatch[0]} weicht ab`,
       })
@@ -479,7 +493,11 @@ export async function scanIngestStatus({ sourceRoot, wikiSourceRoot, includeCurr
       const pages = adapter.state.pending.get(item.source_key) ?? []
       for (const page of pages) {
         if (page.pagePath !== wiki_path)
-          result.invalid.push({ path: page.pagePath, error: `erwarteter Pfad: ${wiki_path}` })
+          result.invalid.push({
+            source_key: item.source_key,
+            path: page.pagePath,
+            error: `erwarteter Pfad: ${wiki_path}`,
+          })
       }
       if (pages.length > 1) {
         result.conflict.push({
@@ -512,7 +530,7 @@ export async function scanIngestStatus({ sourceRoot, wikiSourceRoot, includeCurr
     results[sourceName] = result
   }
 
-  finishAdapters(results, includeCurrent)
+  finishAdapters(results, includeCurrent, targetCounts)
   const summary = Object.fromEntries(
     RESULT_NAMES.map((name) => [
       name,
