@@ -37,13 +37,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Email ingest (#78): the optional `email` profile receives one TLS IMAP mailbox
   using `.env` username/password configuration and an exact, explicitly trusted
-  delivery address, with optional From allowlisting. Matching old and new mail
-  is archived unchanged (including attachments) in a private durable `.eml` store
-  before targeted UIDPLUS server deletion. Locally redacted body text and decoded
-  headers publish through the provider manifest; originals and restart-safe
-  deletion/extraction state are never mounted into OpenCode. Explicit offline
-  replay preserves source IDs. Unredacted originals have indefinite retention;
-  automatic wiki ingestion and attachment extraction remain out of scope.
+  delivery address, with optional From and To/Cc/Bcc recipient allowlisting.
+  Matching old and new mail is archived unchanged (including attachments) in a
+  private durable `.eml` store before targeted UIDPLUS server deletion. Locally
+  redacted body text and decoded headers publish through the provider manifest;
+  originals and restart-safe deletion/extraction state are never mounted into
+  OpenCode. Explicit offline replay preserves source IDs. Unredacted originals
+  have indefinite retention; automatic wiki ingestion and attachment extraction
+  remain out of scope. Recipient filtering reads only decoded To/Cc/Bcc headers,
+  so blind-carbon copies delivered without them stay on the server.
 
 - Launcher updates now require a verified stopped snapshot of the complete
   instance, including configuration, external file secrets and installed images.

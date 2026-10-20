@@ -12,7 +12,7 @@ from email import policy
 from email.parser import BytesHeaderParser
 from typing import Any
 
-from .settings import Settings, mailboxes
+from .settings import Settings, mailboxes, recipient_mailboxes
 from .store import Store
 
 
@@ -45,17 +45,27 @@ def connection(settings: Settings):
 
 def authorized(raw: bytes, settings: Settings) -> bool:
     # The configured account/folder is the trust boundary. Only the optional
-    # From filter reads headers; it is not sender authentication. Bad MIME bodies
-    # can still be archived and recovered after server deletion.
-    if not settings.allowlist:
+    # sender and recipient filters read headers; neither authenticates mail.
+    # Delivery headers never match. Bad MIME bodies can still be archived and
+    # recovered after server deletion.
+    if not settings.allowlist and not settings.recipients:
         return True
     message = BytesHeaderParser(policy=policy.default).parsebytes(raw)
     if message.defects:
         return False
-    senders = message.get_all("From", [])
-    return len(senders) == 1 and mailboxes([str(senders[0])]) in [
-        [sender] for sender in settings.allowlist
-    ]
+    if settings.allowlist:
+        senders = message.get_all("From", [])
+        if len(senders) != 1 or mailboxes([str(senders[0])]) not in [
+            [sender] for sender in settings.allowlist
+        ]:
+            return False
+    if settings.recipients:
+        destinations = recipient_mailboxes(
+            [str(value) for field in ("To", "Cc", "Bcc") for value in message.get_all(field, [])]
+        )
+        if not destinations & set(settings.recipients):
+            return False
+    return True
 
 
 def literal(data: Any, uid: str) -> bytes:

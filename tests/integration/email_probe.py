@@ -21,15 +21,21 @@ ROOT = Path("/data")
 RECIPIENT = "server+fs-wiki@example.com"
 
 
-def fixture(field: str, *, sender: str = "sender@example.com") -> bytes:
+def fixture(
+    field: str,
+    *,
+    sender: str = "sender@example.com",
+    recipient: str = RECIPIENT,
+    note: str = "",
+) -> bytes:
     message = EmailMessage(policy=policy.SMTP)
     message["From"] = sender
     message["Subject"] = "Secret Person integration fixture"
     # Received BCC mail has no BCC header. No delivery headers are needed.
     message["To" if field == "Bcc" else field] = (
-        "reader@example.com" if field == "Bcc" else RECIPIENT
+        "reader@example.com" if field == "Bcc" else recipient
     )
-    message.set_content(f"Secret Person approved the {field} fixture.")
+    message.set_content(f"Secret Person approved the {field} fixture.{note}")
     message.add_attachment(b"PRIVATE ATTACHMENT", maintype="application", subtype="pdf")
     return message.as_bytes()
 
@@ -172,6 +178,26 @@ def run():
             check=True,
         )
         assert not json.loads(settings.health.read_text())["failed"]
+        # Optional recipient filter on a real TLS connection: decoded To/Cc/Bcc
+        # only. Delivery-header-only mail and a BCC copy without recipient
+        # headers cannot match and must stay on the server.
+        MESSAGES["6"] = fixture("To", recipient="reader@example.com", note=" Unmatched To.")
+        MESSAGES["7"] = fixture("Cc", note=" Matched Cc.")
+        MESSAGES["8"] = fixture("Delivered-To", note=" Delivery headers never match.")
+        with (
+            patch(
+                "karpathy_wiki_ingest_email.mailbox.ssl.create_default_context",
+                return_value=client_context,
+            ),
+            patch("karpathy_wiki_ingest_email.receive", new=verified_receive),
+        ):
+            assert cycle(replace(settings, recipients=(RECIPIENT,))) == 0
+        # 3 and 4 were already consumed by the sender-filter run; 5 fails the
+        # sender filter, and 6/8 have no matching To/Cc/Bcc mailbox.
+        assert set(MESSAGES) == {"5", "6", "8"}, f"unexpected server state: {sorted(MESSAGES)}"
+        assert len(list(settings.archive.glob("*.eml"))) == 5
+        filtered = json.loads((settings.sanitized / "manifest.json").read_text())
+        assert len(filtered["items"]) == 5
         (ROOT / "wiki/sources").mkdir(parents=True)
         print("email protocol/archive/restart/replay: OK")
     finally:

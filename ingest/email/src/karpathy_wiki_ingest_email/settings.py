@@ -23,6 +23,11 @@ def mailboxes(values: list[str]) -> list[str]:
     return [address(mailbox) for _, mailbox in getaddresses(values)]
 
 
+def recipient_mailboxes(values: list[str]) -> set[str]:
+    """Exact To/Cc/Bcc mailboxes; entries without a mailbox cannot match."""
+    return {address(mailbox) for _, mailbox in getaddresses(values) if mailbox}
+
+
 def positive(name: str, default: str) -> int:
     value = int(os.getenv(name, default))
     if value <= 0:
@@ -45,7 +50,8 @@ class Settings:
     batch: int = 25
     max_bytes: int = 25 * 1024 * 1024
     timeout: int = 30
-    allowlist: tuple[str, ...] = ()
+    allowlist: tuple[str, ...] = ()  # optional exact From mailboxes
+    recipients: tuple[str, ...] = ()  # optional exact To/Cc/Bcc mailboxes
 
     @classmethod
     def from_env(cls, *, offline: bool = False) -> Settings:
@@ -66,6 +72,11 @@ class Settings:
             allowlist=tuple(
                 address(item.strip())
                 for item in os.getenv("EMAIL_FROM_ALLOWLIST", "").split(",")
+                if item.strip()
+            ),
+            recipients=tuple(
+                address(item.strip())
+                for item in os.getenv("EMAIL_RECIPIENT_ALLOWLIST", "").split(",")
                 if item.strip()
             ),
         )

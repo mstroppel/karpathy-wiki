@@ -6,10 +6,11 @@ only body text and decoded message headers; no attachment extraction, speech,
 OAuth, SMTP receiver, or automatic wiki commits are included.
 
 **The configured account/folder is the trust boundary. There is no recipient
-verification or strict mode.** To/Cc/Bcc and delivery headers do not filter mail.
-Enabling reception can archive and delete **all eligible existing and new
-messages in that folder**, subject to the optional From allowlist and size and
-durability safeguards below. Use a dedicated mailbox or reliably isolated folder.
+verification or strict mode.** Without the optional recipient allowlist below,
+To/Cc/Bcc and delivery headers do not filter mail. Enabling reception can archive
+and delete **all eligible existing and new messages in that folder**, subject to
+the optional sender and recipient allowlists and size and durability safeguards
+below. Use a dedicated mailbox or reliably isolated folder.
 
 ## Before enabling destructive reception
 
@@ -20,7 +21,8 @@ durability safeguards below. Use a dedicated mailbox or reliably isolated folder
    supported. Some providers require OAuth and cannot use this connector.
 3. Verify the selected folder contains only mail intended for this wiki, including
    its backlog. If you need recipient routing, configure and verify server-side
-   delivery rules into a dedicated folder before enabling reception. Missing,
+   delivery rules into a dedicated folder before enabling reception. The optional
+   recipient allowlist is a filter, not routing or verification. Missing,
    repeated or differing delivery headers do not prevent ingestion/deletion.
 4. Configure the shared deny-list redactions secret. Review output before model
    access: deny-list redaction is not complete anonymization.
@@ -32,6 +34,16 @@ durability safeguards below. Use a dedicated mailbox or reliably isolated folder
 Sender filtering requires one exact From mailbox if configured. Domains compare
 case-insensitively; local parts and plus tags remain exact. Without an allowlist,
 headers are not checked before archiving.
+
+Recipient filtering accepts a message when at least one decoded To, Cc or Bcc
+mailbox exactly matches `EMAIL_RECIPIENT_ALLOWLIST`. Domains compare
+case-insensitively; local parts and plus tags remain exact, so
+`test+email@example.com` does not match `test@example.com`. Delivery headers
+(`X-Original-To`, `Delivered-To`, `Envelope-To`, `Received`) are never consulted,
+and mail delivered without recipient headers — typically blind-carbon copies —
+cannot match and stays on the server. Route BCC-only mail with server-side
+delivery rules if you need it. Both allowlists must pass when both are
+configured; an empty list disables its filter.
 
 The server must advertise **UIDPLUS**. Deletion uses only `UID STORE` for the
 matched UID and `UID EXPUNGE <uid>`; never general `EXPUNGE` or `CLOSE`, which could
@@ -51,6 +63,8 @@ EMAIL_IMAP_PASSWORD=replace-with-app-password
 EMAIL_IMAP_FOLDER=INBOX
 # Optional exact decoded From mailboxes, comma-separated:
 EMAIL_FROM_ALLOWLIST=sender@example.com
+# Optional exact decoded To/Cc/Bcc mailboxes, comma-separated:
+EMAIL_RECIPIENT_ALLOWLIST=test+email@example.com
 EMAIL_POLL_INTERVAL=60s
 EMAIL_BATCH_SIZE=25
 EMAIL_MAX_BYTES=26214400
@@ -77,7 +91,7 @@ restarting it. To pause destructive reception, run
 to keep it disabled on future starts. Stopping cannot undo server deletion;
 verified originals remain in the private archive.
 
-**Activation can delete all eligible old mail in the folder.** Non-allowlisted,
+**Activation can delete all eligible old mail in the folder.** Non-matching,
 oversized or incomplete messages stay on the server. Batches reserve
 half their slots (rounded down) for newest UIDs; the remainder advances an
 independent rotating backlog cursor. Batch size 1 alternates backlog and newest
@@ -111,9 +125,10 @@ hour, stop after five attempts, and remain unhealthy/content-free errors until
 repair/replay. An unreachable IMAP server does not prevent local extraction.
 No stateless destructive or publication fallback exists.
 
-Pending server deletes recheck the archived message against the current From
-allowlist as well as archive integrity. MIME identity processing occurs only after
-the original is durable; pathological MIME falls back to exact-original-byte deduplication.
+Pending server deletes recheck the archived message against the current sender
+and recipient allowlists as well as archive integrity. MIME identity processing
+occurs only after the original is durable; pathological MIME falls back to
+exact-original-byte deduplication.
 Failed replay retains the last successful projection, subject to the current
 privacy gate, and reports the failure without discarding safe published text.
 
