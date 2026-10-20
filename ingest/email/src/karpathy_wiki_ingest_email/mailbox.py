@@ -137,12 +137,11 @@ def receive(client: Any, settings: Settings, store: Store) -> tuple[int, int]:
         try:
             previous = store.delivery(scope, epoch, uid)
             if previous is not None:
-                if not previous["deleted"] and authorized(
-                    store.read(previous["original"]), settings
-                ):
+                if not previous["deleted"]:
                     operation = "delete"
                     original = previous["original"]
-                    delete(client, store, scope, epoch, uid, previous["original"])
+                    if authorized(store.read(original), settings):
+                        delete(client, store, scope, epoch, uid, original)
                 continue
             data = checked(client.uid("FETCH", uid, "(UID RFC822.SIZE)"))
             sizes = [

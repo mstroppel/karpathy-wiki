@@ -548,7 +548,10 @@ class EmailTests(unittest.TestCase):
         receive(client, self.settings, self.store)
         next(self.settings.archive.rglob("*.eml")).write_bytes(b"corrupt")
         client.commands.clear()
-        self.assertEqual(receive(client, self.settings, self.store), (0, 1))
+        original = self.store.sources()[0]["original"]
+        with self.assertLogs("karpathy-wiki-email", level="ERROR") as captured:
+            self.assertEqual(receive(client, self.settings, self.store), (0, 1))
+        self.assertIn(f"Email delete failed original_id={original}", captured.output[0])
         self.assertFalse(any(command[0] == "STORE" for command in client.commands))
 
     def test_uidvalidity_reuse_archives_new_bytes_instead_of_old_delete(self):
