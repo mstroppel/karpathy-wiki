@@ -66,8 +66,6 @@ mkdir -p "$sources/webdav" \
   "$KNOWLEDGE_ROOT/incoming/webdav" \
   "$KNOWLEDGE_ROOT/incoming/answers" \
   "$KNOWLEDGE_ROOT/state" \
-  "$KNOWLEDGE_ROOT/publisher" \
-  "$KNOWLEDGE_ROOT/incoming/ingest-journal/runs" \
   "$KNOWLEDGE_ROOT/incoming/ingest-journal/batches" \
   "$wiki/assets" \
   "$wiki/sources/webdav" \
@@ -98,11 +96,9 @@ chown -R "$PUID:$PGID" "$KNOWLEDGE_ROOT"
 # the configured user, including when init is rerun on an existing data tree.
 chmod 0700 "$KNOWLEDGE_ROOT/incoming/answers"
 chmod 0700 "$KNOWLEDGE_ROOT/openchamber"
-chmod 0700 "$KNOWLEDGE_ROOT/publisher"
 # Ingest journal and reports hold source-derived summaries of processed
 # sources. They are private to OpenCode and its operator, never published.
 chmod 0700 "$KNOWLEDGE_ROOT/incoming/ingest-journal"
-chmod 0700 "$KNOWLEDGE_ROOT/incoming/ingest-journal/runs"
 chmod 0700 "$KNOWLEDGE_ROOT/incoming/ingest-journal/batches"
 
 # Install generated files through a hard link so an existing path, including a

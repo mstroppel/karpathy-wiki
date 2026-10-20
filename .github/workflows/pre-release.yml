@@ -1,89 +1,32 @@
 name: Pre-release
 
 on:
-  push:
-    branches: [main]
-  workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: write
   packages: write
+  actions: read
 
 concurrency:
   group: pre-release
   cancel-in-progress: false
 
 jobs:
-  tests:
-    name: Tests
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.14"
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "24"
-      - name: Run unit tests
-        run: |
-          python -m pip install -r requirements-dev.txt
-          python -m pip install --no-deps ./ingest/core ./ingest/webdav ./ingest/paperless ./ingest/audio ./ingest/speech ./ingest/email
-          python -m unittest discover -s tests -v
-          node --test tests/test_wiki_ingest_status.mjs tests/test_contract_fixtures.mjs tests/test_wiki_ingest_journal.mjs tests/test_ingest_context_budget.mjs
-          node --test tests/test_chat_bootstrap.mjs
-          (cd ingest && python -m unittest discover -s tests -v)
-
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.14"
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "24"
-      - name: Install pinned Python tooling
-        run: python -m pip install -r requirements-dev.txt
-      - name: Install pinned ShellCheck
-        run: |
-          scripts/install-shellcheck.sh
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - name: Run lint and formatting checks
-        run: scripts/lint.sh
-
-  chat-integration:
-    name: Primary chat integration
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - name: Configure Docker Hub mirror for daemon builds
-        run: sh scripts/setup-ci-docker.sh
-      - name: Build and test chat images
-        run: |
-          docker build --target opencode -t kw-opencode:integration -f opencode/Dockerfile .
-          docker build --target openchamber -t kw-openchamber:integration -f opencode/Dockerfile .
-          sh tests/integration/chat.sh
-
   pre-release:
     name: Pre-release
-    needs: [tests, lint, chat-integration]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - name: Configure Docker Hub mirror for builder bootstrap
-        run: sh scripts/setup-ci-docker.sh
       - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
-      - uses: docker/setup-qemu-action@v4
-      - uses: docker/setup-buildx-action@v4
+      - uses: actions/download-artifact@v8
         with:
-          buildkitd-config: .github/docker/buildkitd.toml
+          name: release-image-metadata
       - name: Log in to GHCR
         uses: docker/login-action@v4
         with:
@@ -129,10 +72,10 @@ jobs:
           git config user.email "${GITHUB_ACTOR}@users.noreply.github.com"
           git tag -f "v${VERSION}" "$GITHUB_SHA"
           git push origin "v${VERSION}" --force
-      - name: Build and publish pre-release images
+      - name: Promote tested CI images by digest without rebuilding
         env:
           IMAGE_VERSION: ${{ steps.version.outputs.version }}
-        run: sh scripts/publish-images.sh release
+        run: python3 scripts/promote-images.py image-metadata.json
       - name: Create GitHub pre-release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

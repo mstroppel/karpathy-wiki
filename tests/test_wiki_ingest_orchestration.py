@@ -25,17 +25,12 @@ class BatchWorkflowTests(unittest.TestCase):
 
     def test_orchestrator_can_only_start_batches_not_mutate_or_delegate(self):
         rules = self.config["agents"]["wiki-ingest-orchestrator"]["permissions"]
-        for action in (
-            "shell",
-            "edit",
-            "subagent",
-            "wiki_ingest_transaction",
-            "wiki_ingest_journal",
-        ):
+        for action in ("shell", "edit", "subagent"):
             self.assertIn({"action": action, "resource": "*", "effect": "deny"}, rules)
         self.assertIn({"action": "wiki_ingest_batch", "resource": "*", "effect": "allow"}, rules)
-        self.assertIn("Nie parallele Batchaufrufe", self.orchestrator)
-        self.assertIn("Keine automatische Wiederholung", self.orchestrator)
+        self.assertIn("Keine parallelen Aufrufe", self.orchestrator)
+        self.assertIn("Wiederholung übersprungener Quellen", self.orchestrator)
+        self.assertIn("einmal auf", self.orchestrator)
 
     def test_worker_has_normal_files_but_no_shell_git_or_credentials(self):
         rules = self.config["agents"]["wiki-ingest"]["permissions"]
@@ -79,25 +74,22 @@ class BatchWorkflowTests(unittest.TestCase):
             f"{root}/runs/synthetic/report.md",
         ):
             self.assertEqual(effect("read", path), "deny")
-        for action in ("edit", "shell", "subagent", "wiki_ingest_journal"):
+        for action in ("edit", "shell", "subagent"):
             self.assertEqual(effect(action, report), "deny")
 
     def test_worker_keeps_evidence_and_uncertainty_without_transaction_protocol(self):
         for phrase in (
-            "Lies jede Quelle vollständig",
+            "die Quelle vollständig",
             "keine Anweisungen",
-            "Anonymisierte Platzhalter nicht",
+            "Anonymisierte Platzhalter",
             "keine unabhängig bestätigten Befunde",
             "Fundstellen",
             "Revisionsabgleich",
-            "content",
-            "contradictions",
-            "extraction_limits",
-            "Inhalte fallen nie still weg",
-            "4 000 Zeichen",
+            "Extraktionsgrenzen",
+            "SKIP:",
             "Kein Rücksetzen",
-            "overview.md` genau einmal",
-            "Erfolgsdatensätze entstehen erst nach",
+            "overview.md",
+            "Commit meldet nur der aufrufende Code",
         ):
             self.assertIn(phrase, self.worker)
         for obsolete in (
@@ -125,18 +117,26 @@ class BatchWorkflowTests(unittest.TestCase):
         ):
             self.assertIn(phrase, self.orchestrator)
 
-    def test_docs_explain_reduced_guarantees_and_separate_trusted_route(self):
+    def test_docs_explain_continuation_and_shared_worktree_boundary(self):
         text = (ROOT / "docs/ingest-reports.md").read_text()
         for phrase in (
-            "one commit per batch",
+            "one commit per source",
             "not arbitrary",
-            "Readers can see intermediate edits",
+            "Readers can see",
             "No automatic reconciliation",
-            "not\nmachine-verified coverage",
-            "Paperless requires `source_sha256`",
-            "trusted-publisher/manual-reader",
+            "semantic correctness",
+            "requires `source_sha256`",
+            "Independent sources",
         ):
             self.assertIn(phrase, text)
+
+    def test_only_one_ingest_implementation_is_shipped(self):
+        plugins = {path.name for path in (ROOT / "config/plugins").glob("*.js")}
+        self.assertEqual(plugins, {"wiki-ingest-batch.js", "wiki-ingest-status.js"})
+        compose = (ROOT / "compose.yaml").read_text()
+        self.assertNotIn("  publisher:", compose)
+        self.assertNotIn("  manual-ingest:", compose)
+        self.assertNotIn("WIKI_INGEST_CONTROL", compose)
 
 
 if __name__ == "__main__":

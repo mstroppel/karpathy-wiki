@@ -6,6 +6,11 @@ variable "IMAGE_VERSION" {
   default = "dev"
 }
 
+# Opt in only inside Actions, where runtime cache credentials are available.
+variable "BUILD_CACHE" {
+  default = ""
+}
+
 # Third-party tool version for the ingest image's rclone build stage, pinned
 # by tag and digest so a registry retag cannot swap the copied binary. Find
 # the digest with `docker buildx imagetools inspect rclone/rclone:1.75.1`;
@@ -15,18 +20,19 @@ variable "RCLONE_VERSION" {
 }
 
 group "default" {
-  targets = ["opencode", "openchamber", "publisher", "ingest", "ingest-webdav", "ingest-audio", "ingest-speech", "ingest-paperless", "ingest-email"]
+  targets = ["opencode", "openchamber", "ingest", "ingest-webdav", "ingest-audio", "ingest-speech", "ingest-paperless", "ingest-email"]
 }
 
 group "release" {
-  targets = ["opencode-release", "openchamber-release", "publisher-release", "ingest-release", "ingest-webdav-release", "ingest-audio-release", "ingest-speech-release", "ingest-paperless-release", "ingest-email-release"]
+  targets = ["opencode-release", "openchamber-release", "ingest-release", "ingest-webdav-release", "ingest-audio-release", "ingest-speech-release", "ingest-paperless-release", "ingest-email-release"]
 }
 
 group "stable" {
-  targets = ["opencode-stable", "openchamber-stable", "publisher-stable", "ingest-stable", "ingest-webdav-stable", "ingest-audio-stable", "ingest-speech-stable", "ingest-paperless-stable", "ingest-email-stable"]
+  targets = ["opencode-stable", "openchamber-stable", "ingest-stable", "ingest-webdav-stable", "ingest-audio-stable", "ingest-speech-stable", "ingest-paperless-stable", "ingest-email-stable"]
 }
 
 target "common" {
+  platforms = ["linux/amd64"]
   labels = {
     "org.opencontainers.image.source" = "https://github.com/mstroppel/karpathy-wiki"
     "org.opencontainers.image.licenses" = "MIT"
@@ -35,6 +41,8 @@ target "common" {
 
 target "opencode" {
   inherits = ["common"]
+  cache-from = BUILD_CACHE == "gha" ? ["type=gha,scope=kw-opencode"] : []
+  cache-to = BUILD_CACHE == "gha" ? ["type=gha,scope=kw-opencode,mode=max"] : []
   context = "."
   dockerfile = "opencode/Dockerfile"
   target = "opencode"
@@ -43,6 +51,8 @@ target "opencode" {
 
 target "openchamber" {
   inherits = ["common"]
+  cache-from = BUILD_CACHE == "gha" ? ["type=gha,scope=kw-openchamber"] : []
+  cache-to = BUILD_CACHE == "gha" ? ["type=gha,scope=kw-openchamber,mode=max"] : []
   context = "."
   dockerfile = "opencode/Dockerfile"
   target = "openchamber"
@@ -51,6 +61,8 @@ target "openchamber" {
 
 target "ingest" {
   inherits = ["common"]
+  cache-from = BUILD_CACHE == "gha" ? ["type=gha,scope=kw-ingest"] : []
+  cache-to = BUILD_CACHE == "gha" ? ["type=gha,scope=kw-ingest,mode=max"] : []
   context = "ingest"
   target = "core"
   args = {
@@ -59,26 +71,10 @@ target "ingest" {
   tags = ["karpathy-wiki-ingest:test"]
 }
 
-target "publisher" {
-  inherits = ["common"]
-  context = "."
-  dockerfile = "opencode/Dockerfile"
-  target = "publisher"
-  tags = ["karpathy-wiki-publisher:test"]
-}
-
-target "publisher-release" {
-  inherits = ["publisher"]
-  tags = ["${REGISTRY}/karpathy-wiki-publisher:${IMAGE_VERSION}"]
-}
-
-target "publisher-stable" {
-  inherits = ["publisher"]
-  tags = ["${REGISTRY}/karpathy-wiki-publisher:${IMAGE_VERSION}", "${REGISTRY}/karpathy-wiki-publisher:latest"]
-}
-
 target "ingest-webdav" {
   inherits = ["common"]
+  cache-from = BUILD_CACHE == "gha" ? ["type=gha,scope=kw-ingest-webdav"] : []
+  cache-to = BUILD_CACHE == "gha" ? ["type=gha,scope=kw-ingest-webdav,mode=max"] : []
   context = "ingest"
   target = "webdav"
   args = {
@@ -89,6 +85,8 @@ target "ingest-webdav" {
 
 target "ingest-audio" {
   inherits = ["common"]
+  cache-from = BUILD_CACHE == "gha" ? ["type=gha,scope=kw-ingest-audio"] : []
+  cache-to = BUILD_CACHE == "gha" ? ["type=gha,scope=kw-ingest-audio,mode=max"] : []
   context = "ingest"
   target = "audio"
   args = {
@@ -99,6 +97,8 @@ target "ingest-audio" {
 
 target "ingest-speech" {
   inherits = ["common"]
+  cache-from = BUILD_CACHE == "gha" ? ["type=gha,scope=kw-ingest-speech"] : []
+  cache-to = BUILD_CACHE == "gha" ? ["type=gha,scope=kw-ingest-speech,mode=max"] : []
   context = "ingest"
   target = "speech"
   args = {
@@ -109,6 +109,8 @@ target "ingest-speech" {
 
 target "ingest-paperless" {
   inherits = ["common"]
+  cache-from = BUILD_CACHE == "gha" ? ["type=gha,scope=kw-ingest-paperless"] : []
+  cache-to = BUILD_CACHE == "gha" ? ["type=gha,scope=kw-ingest-paperless,mode=max"] : []
   context = "ingest"
   target = "paperless"
   args = {
@@ -124,6 +126,8 @@ target "opencode-release" {
 
 target "ingest-email" {
   inherits = ["common"]
+  cache-from = BUILD_CACHE == "gha" ? ["type=gha,scope=kw-ingest-email"] : []
+  cache-to = BUILD_CACHE == "gha" ? ["type=gha,scope=kw-ingest-email,mode=max"] : []
   context = "ingest"
   target = "email"
   args = {

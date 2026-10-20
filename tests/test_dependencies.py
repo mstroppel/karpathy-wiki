@@ -79,9 +79,7 @@ class OpenCodeDownloadTests(unittest.TestCase):
         content = read(OPENCODE_DOCKERFILE)
         self.assertRegex(content, r"(?m)^ARG OPENCODE_VERSION=\S+$", msg=content)
         self.assertRegex(content, r"(?m)^ARG OPENCODE_SHA512_LINUX_X64=[0-9a-f]{128}$", msg=content)
-        self.assertRegex(
-            content, r"(?m)^ARG OPENCODE_SHA512_LINUX_ARM64=[0-9a-f]{128}$", msg=content
-        )
+        self.assertNotIn("ARM64", content)
 
     def test_download_is_checksum_verified(self):
         content = read(OPENCODE_DOCKERFILE)
@@ -94,7 +92,7 @@ class OpenCodeDownloadTests(unittest.TestCase):
         self.assertIn("registry.npmjs.org/@opencode/cli-linux-x64/latest", workflow)
         self.assertIn("@opencode/cli-$1/-/cli-$1-", workflow)
         self.assertIn("download linux-x64", workflow)
-        self.assertIn("download linux-arm64", workflow)
+        self.assertNotIn("linux-arm64", workflow)
         self.assertIn("sha512sum", workflow)
         self.assertIn("OPENCODE_VERSION", workflow)
 
@@ -108,7 +106,7 @@ class IngestPackageTests(unittest.TestCase):
             for path in (ROOT / "ingest").glob("*/pyproject.toml")
         }
         self.assertTrue(packages)
-        for workflow in ("ci.yml", "pre-release.yml"):
+        for workflow in ("ci.yml",):
             with self.subTest(workflow=workflow):
                 content = read(ROOT / ".github" / "workflows" / workflow)
                 install_lines = [
@@ -153,10 +151,8 @@ class IngestPackageTests(unittest.TestCase):
                 self.assertNotIn(name, pins, "duplicate speech dependency")
                 pins[name] = set(re.findall(r"--hash=sha256:([0-9a-f]{64})", line))
         self.assertIn("faster_whisper", pins)
-        # These native dependencies need distinct amd64 and arm64 wheels on
-        # CPython 3.14 (the speech stage base). Catch missing pins and
-        # single-architecture lock updates; actual wheel compatibility/digests
-        # are verified with pip download.
+        # Native dependencies need a pinned CPython 3.14 amd64 wheel. Actual
+        # wheel compatibility/digests are verified by the image build.
         for name in (
             "ctranslate2",
             "av",
@@ -169,7 +165,7 @@ class IngestPackageTests(unittest.TestCase):
         ):
             with self.subTest(native_dependency=name):
                 self.assertIn(name, pins)
-                self.assertGreaterEqual(len(pins[name]), 2, "missing amd64/arm64 wheel hashes")
+                self.assertGreaterEqual(len(pins[name]), 1, "missing wheel hashes")
 
     def test_speech_optional_dependencies_are_hash_pinned(self):
         """Every speech extra installs from the hash-pinned runtime lockfile."""

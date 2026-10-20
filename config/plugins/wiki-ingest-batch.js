@@ -8,7 +8,7 @@ export default {
       tools.add({
         name: 'wiki_ingest_batch',
         description:
-          'Verarbeitet exklusiv bis zu fünf neue/geänderte Quellen: direkter Wiki-Worker, ein Commit und privater Bericht pro Batch. Fehler bleiben zur manuellen Prüfung liegen; kein automatisches Rücksetzen.',
+          'Verarbeitet alle ausgewählten neuen/geänderten Quellen sequenziell, mit frischem Worker und Commit je Quelle. Isolierte Quellenfehler überspringen; kein Rücksetzen.',
         input: {
           type: 'object',
           properties: {
@@ -16,7 +16,6 @@ export default {
               type: 'string',
               description: 'Optional: genau diese neue/geänderte Quelle statt Sammelbatch.',
             },
-            max_sources: { type: 'integer', minimum: 1, maximum: 5 },
           },
           additionalProperties: false,
         },
@@ -25,7 +24,6 @@ export default {
           const result = await runIngestBatch(
             {
               sourcePath: args.source_path,
-              maxSources: args.max_sources,
               signal: context.signal,
             },
             (batch) => runBatchWorker(ctx, context, batch),

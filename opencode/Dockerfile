@@ -1,12 +1,11 @@
 FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587 AS opencode
 
 # The OpenCode CLI is downloaded from the npm registry and verified against
-# these pinned sha512 digests (hex, one per supported target architecture).
-# Digests must be updated together with OPENCODE_VERSION; the scheduled
-# OpenCode update workflow opens a pull request that bumps all three.
-ARG OPENCODE_VERSION=2.0.32
-ARG OPENCODE_SHA512_LINUX_X64=439d287c143781dc230fa65086b551f1f5659bc0f6c4f32c872e1dca763a97a6fea8b74a801489f56a68683cab417d585a67f6b3b20de116d79a85d77498ad0c
-ARG OPENCODE_SHA512_LINUX_ARM64=611e4ed378abbe6a2dfc6d1ff16e3d7a1be19f9baa085377bdff494ec0a1bdfe3b5ba95d8ca08dbec6824974b648fdba74f394310067ed6a9b2a7c87ceb351e7
+# the pinned sha512 digest (hex) for the supported amd64 architecture.
+# Update the digest together with OPENCODE_VERSION; the scheduled
+# OpenCode update workflow opens a pull request that bumps both.
+ARG OPENCODE_VERSION=2.1.0
+ARG OPENCODE_SHA512_LINUX_X64=98d7b506bef50bef50652f4a621b38b2816eb8aa06e80e9b188df1b1d7014112bc35ce3de020c69e77143cd18b784529f73ce933004c076edd99eb57224c19eb
 ARG TARGETARCH
 ARG APP_UID=1000
 ARG APP_GID=100
@@ -18,7 +17,6 @@ RUN apt-get update \
 RUN arch="${TARGETARCH:-$(dpkg --print-architecture)}" \
     && case "${arch}" in \
         amd64) target=linux-x64; digest="${OPENCODE_SHA512_LINUX_X64}" ;; \
-        arm64) target=linux-arm64; digest="${OPENCODE_SHA512_LINUX_ARM64}" ;; \
         *) printf 'unsupported architecture: %s\n' "${arch}" >&2; exit 1 ;; \
     esac \
     && curl --fail --location --retry 3 \
@@ -61,15 +59,12 @@ RUN apt-get update \
 WORKDIR /opt/chat
 COPY openchamber/package.json openchamber/package-lock.json ./
 # Integrity-locked dependencies only; lifecycle scripts may fetch unverified
-# binaries. node-pty ships its Linux x64/arm64 prebuilds in the locked tarball.
+# binaries. node-pty ships its Linux x64 prebuild in the locked tarball.
 RUN npm ci --omit=dev --ignore-scripts \
     && node -e "require('node-pty')" \
     && npm cache clean --force
 COPY --from=opencode /usr/local/bin/opencode /usr/local/bin/opencode
 COPY openchamber/bootstrap.mjs openchamber/healthcheck.mjs /etc/openchamber/
-COPY openchamber/manual-ingest.mjs /etc/openchamber/
-COPY openchamber/patch-manual-ingest.mjs /etc/openchamber/
-RUN node /etc/openchamber/patch-manual-ingest.mjs /opt/chat/node_modules/@openchamber/web/server/index.js
 COPY openchamber/entrypoint.sh /usr/local/bin/karpathy-wiki-chat
 RUN chmod 0755 /usr/local/bin/karpathy-wiki-chat \
     && install -d -o 1000 -g 1000 /home/openchamber/.config/openchamber /knowledge/wiki
@@ -77,20 +72,3 @@ ENV HOME=/home/openchamber NODE_ENV=production OPENCHAMBER_DATA_DIR=/home/opench
 USER 1000:1000
 WORKDIR /knowledge/wiki
 ENTRYPOINT ["karpathy-wiki-chat"]
-
-# Trusted writer only: no OpenCode, chat, npm packages, model credentials or API.
-# The deterministic analysis renderer ships here so the trusted channel derives
-# print views itself instead of trusting runtime-produced artifacts.
-FROM node:26-bookworm-slim@sha256:298992629d69bbd5b2b03ad57094d8e4fcb3a8eeb7c4e25d29de656519568913 AS publisher
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends git python3 python3-markdown python3-bleach \
-    && rm -rf /var/lib/apt/lists/*
-COPY config/tools /opt/karpathy-wiki/config/tools
-COPY publisher /opt/karpathy-wiki/publisher
-COPY opencode/render_analysis.py /usr/local/bin/render-analysis
-COPY config/skills/wiki-analysis-save/print-template.html /opt/karpathy-wiki/print-template.html
-ENV KARPATHY_WIKI_PRINT_TEMPLATE=/opt/karpathy-wiki/print-template.html
-RUN chmod 0755 /opt/karpathy-wiki/publisher/entrypoint.sh /usr/local/bin/render-analysis
-USER 1000:1000
-WORKDIR /knowledge/wiki
-ENTRYPOINT ["/opt/karpathy-wiki/publisher/entrypoint.sh"]

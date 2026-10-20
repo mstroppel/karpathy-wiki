@@ -50,15 +50,10 @@ concurrent writer sessions: this stack does not add writer serialization.
 
 The optional [reader-only backend mode](runtime-write-isolation.md) additionally
 prevents all backend wiki, source, journal and answer-inbox writes at the kernel
-boundary. With the separate [trusted manual ingest route](manual-ingest.md)
-enabled, immediate browser `/ingest-new`, `/analysis-save` and `/answer-save`
-commands are admitted through the trusted channel and written by it; the runtime
-only prepares content. `/lint` maintenance, repair/rollback and other authoring
-remain unsupported; this is not automatic ingestion
-or a general API sandbox.
+boundary. No authoring is supported in that mode; it is not a general API sandbox.
 
 The UI wiki mount is read-only. Ingest run records and reports are also mounted
-read-only at `/knowledge/incoming/ingest-journal/runs`, using the same absolute
+read-only at `/knowledge/incoming/ingest-journal/batches`, using the same absolute
 paths as OpenCode. Local report links open through OpenChamber's authenticated
 file viewer; they are outside the wiki workspace and use outside-workspace reads.
 Private transaction preparations and answer/audio inboxes are not mounted.
@@ -105,19 +100,19 @@ model/provider budget. Do not use private sources for these checks.
 - [ ] Select the wiki project and model. Confirm all four wiki commands and
   wiki agents/skills are visible; switch agents and verify the next turn uses
   the selected agent.
-- [ ] Run `/ingest-new` on a synthetic published source: verify streamed output,
-  a wiki commit, and the page in SilverBullet. Click the final report link and
+- [ ] In writable mode, run `/ingest-new` on a synthetic published source: verify
+  streamed output, a wiki commit, and the page in SilverBullet. Click the final report link and
   verify the viewer shows that run's report, not a previously opened wiki page;
   repeat with a second run. Run `/analysis`, then
   `/analysis-save` in the same conversation: verify the saved page and HTML view.
-- [ ] With the manual ingest route in reader mode: prepare an analysis save and
-  admit it with `/analysis-save`; verify page, print view, index/log entries and
-  exactly one focused commit, and that command arguments are refused.
-- [ ] With `answers` enabled, run `/gap-review`: answer and defer questions
-  across turns. No answer source may be published before explicit confirmation;
-  after confirmation verify local redaction and normal ingest. In reader mode
-  admit the confirmed save with `/answer-save` and verify only the inbox draft
-  appears, unpublished.
+- [ ] In reader mode, attempt `/ingest-new`, `/analysis-save` and a confirmed
+  `/answer-save`: verify refusal and no wiki, source, journal or answer-inbox
+  mutations, including no new commit, page, print view or index/log entry.
+- [ ] In writable mode with `answers` enabled, run `/gap-review`: answer and defer
+  questions across turns. No answer source may be published before explicit confirmation;
+  after confirmation verify local redaction and normal ingest. With `answers`
+  disabled, verify a confirmed `/answer-save` creates only the local inbox draft,
+  unpublished.
 - [ ] Trigger a harmless permission request with a disposable test agent:
   deny it and verify no operation occurs; approve another and verify it runs
   once. Trigger a native question and verify the response resumes the same turn.

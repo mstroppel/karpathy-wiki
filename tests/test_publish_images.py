@@ -52,10 +52,7 @@ class PublishImagesTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
             calls,
-            [
-                "0.2.2-pre.51|buildx bake --file docker-bake.hcl --push "
-                "--set *.platform=linux/amd64,linux/arm64 release"
-            ],
+            ["0.2.2-pre.51|buildx bake --file docker-bake.hcl --push release"],
         )
         self.assertEqual(delays, [])
 
@@ -88,7 +85,7 @@ class PublishImagesTests(unittest.TestCase):
         self.assertEqual(delays, [])
 
     def test_release_workflows_use_retry_script(self):
-        for name in ("pre-release.yml", "images.yml"):
+        for name in ("images.yml",):
             with self.subTest(workflow=name):
                 workflow = (ROOT / ".github/workflows" / name).read_text()
                 self.assertIn("run: sh scripts/publish-images.sh", workflow)

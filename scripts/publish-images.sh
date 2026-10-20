@@ -13,7 +13,7 @@ esac
 attempt=1
 while :; do
   if docker buildx bake --file docker-bake.hcl --push \
-    --set '*.platform=linux/amd64,linux/arm64' "$target"; then
+    "$target"; then
     exit 0
   else
     status=$?

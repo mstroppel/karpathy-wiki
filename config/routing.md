@@ -59,14 +59,12 @@ Bestätigte Bereinigung nach einem Ingest-Blocker gehört an `wiki-lint`, danach
 frische Statusprüfung und gegebenenfalls Fortsetzung über `/ingest-new`.
 
 Bei einem Auftrag für **alle** neuen und geänderten Quellen starte `/ingest-new`.
-Der Orchestrator ruft `wiki_ingest_batch` sequenziell auf: ein exklusiver Worker,
-bis zu fünf Quellen und ein Commit pro Batch. Der Worker bearbeitet Markdown
-direkt; Index und Log erzeugt Code einmal am Batch-Ende. Andere Schreibaufträge
-und manuelle Änderungen während des Ingests sind nicht unterstützt. Beende erst
-nach `new=0` und `outdated=0` oder nenne den konkreten Blocker. Verlinke die
-privaten Batchberichte, nenne Batch-IDs, Commits und den dauerhaften Berichtspfad.
-Bei Fehlern Änderungen zur manuellen Prüfung liegen lassen; kein automatisches
-Rücksetzen. Details nur auf Nachfrage, keine erfundenen Berichte oder Erfolge.
+Der Orchestrator ruft `wiki_ingest_batch` einmal auf. Code arbeitet alle
+ausgewählten Quellen sequenziell ab: ein frischer Worker und Commit je Quelle,
+ein privater Bericht. Isolierte Quellenfehler überspringen; nur unsichere
+gemeinsame Änderungen stoppen den Lauf. Andere Writer müssen währenddessen
+ruhen. Restarbeit und Berichtspfad nennen; kein Rücksetzen, keine erfundenen
+Erfolge. Details nur auf Nachfrage.
 
 Ist die Absicht mehrdeutig, verwende den Abfragemodus. Behandle nicht
 eingelesene Dateien unter `/knowledge/sources` nicht als Wiki-Wissen. Verwende

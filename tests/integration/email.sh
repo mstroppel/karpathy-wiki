@@ -16,7 +16,9 @@ trap cleanup EXIT
 openssl req -x509 -newkey rsa:2048 -nodes -days 1 -keyout "$scratch/key.pem" \
   -out "$scratch/cert.pem" -subj '/CN=localhost' -addext 'subjectAltName=DNS:localhost' \
   >/dev/null 2>&1
-docker build --target email -t kw-ingest-email:integration ingest/
+if [ "${SKIP_IMAGE_BUILD:-0}" != 1 ]; then
+  docker build --target email -t kw-ingest-email:integration ingest/
+fi
 container=$(docker create --network none --user "$(id -u):$(id -g)" \
   --entrypoint python kw-ingest-email:integration /probe.py)
 # Copy fixtures instead of host bind mounts, also supporting a remote daemon.

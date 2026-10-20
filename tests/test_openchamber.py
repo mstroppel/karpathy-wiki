@@ -27,20 +27,16 @@ class OpenChamberTests(unittest.TestCase):
         self.assertIn("OPENCODE_SKIP_START:", chat)
         self.assertIn("service_healthy", chat)
 
-    def test_frontend_has_read_only_wiki_and_report_runs_and_own_settings(self):
+    def test_frontend_has_read_only_wiki_and_reports_and_own_settings(self):
         chat = service("openchamber")
         self.assertIn("/wiki:/knowledge/wiki:ro", chat)
         self.assertIn("/openchamber:/home/openchamber/.config/openchamber:rw", chat)
-        self.assertIn(
-            "/incoming/ingest-journal/runs:/knowledge/incoming/ingest-journal/runs:ro",
-            chat,
-        )
         mounts = re.findall(r"^      - (.*:/.*:[a-z]+)$", chat, re.MULTILINE)
         self.assertIn(
             "/incoming/ingest-journal/batches:/knowledge/incoming/ingest-journal/batches:ro",
             chat,
         )
-        self.assertEqual(len(mounts), 4, mounts)
+        self.assertEqual(len(mounts), 3, mounts)
         forbidden_paths = (
             "/sources",
             "/incoming/answers",
@@ -60,8 +56,8 @@ class OpenChamberTests(unittest.TestCase):
 
     def test_init_prepares_private_report_mount_before_frontend_start(self):
         init = (ROOT / "config/init.sh").read_text()
-        self.assertIn('"$KNOWLEDGE_ROOT/incoming/ingest-journal/runs" \\', init)
-        self.assertIn('chmod 0700 "$KNOWLEDGE_ROOT/incoming/ingest-journal/runs"', init)
+        self.assertIn('"$KNOWLEDGE_ROOT/incoming/ingest-journal/batches" \\', init)
+        self.assertIn('chmod 0700 "$KNOWLEDGE_ROOT/incoming/ingest-journal/batches"', init)
 
     def test_chat_dependencies_are_locked_and_build_uses_shared_cli(self):
         manifest = json.loads((ROOT / "openchamber/package.json").read_text())
@@ -86,7 +82,10 @@ class OpenChamberTests(unittest.TestCase):
             self.assertIn("openchamber", block)
         self.assertIn("directory: /openchamber", (ROOT / ".github/dependabot.yml").read_text())
         prerelease = (ROOT / ".github/workflows/pre-release.yml").read_text()
-        self.assertIn("needs: [tests, lint, chat-integration]", prerelease)
+        self.assertIn("workflow_call:", prerelease)
+        ci = (ROOT / ".github/workflows/ci.yml").read_text()
+        self.assertIn("needs: [tests, lint, integration-gate, images]", ci)
+        self.assertIn("script: tests/integration/chat.sh", ci)
         publication = (ROOT / ".github/workflows/images.yml").read_text()
         self.assertLess(
             publication.index("sh tests/integration/chat.sh"),
