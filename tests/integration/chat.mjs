@@ -54,7 +54,7 @@ assert.ok(cookie, 'UI login did not issue a cookie')
 
 // File links use the frontend FS API, not the backend filesystem. Reports live
 // outside the wiki workspace and must be read by exact path under UI auth.
-const reportRoot = '/knowledge/incoming/ingest-journal/runs'
+const reportRoot = '/knowledge/incoming/ingest-journal/batches'
 for (const [run, expected] of [
   ['run-smoke-a', '# Synthetic report A\n'],
   ['run-smoke-b', '# Synthetic report B\n'],

@@ -9,52 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Default writable wiki ingestion now uses an exclusive live-edit worker for up
-  to five sources and one commit per batch. Canonical source metadata, index/log
-  appends and private batch reports are code-owned. Failed edits stay for manual
-  review; private per-page drafts and automatic publication recovery are removed
-  from this default path. Concurrent manual writers and atomic reader visibility
-  are explicitly unsupported. The opt-in trusted reader/publisher route is unchanged.
-
-- Ingest recovery can isolate a failed private draft even when a worker mistypes
-  its preparation ID, using a unique persisted run/wiki/source match rather than
-  fuzzy ID matching. Original error evidence and all publication safety checks
-  remain intact; unrelated sources continue without a confirmation prompt.
+- Ingest now drains the selected backlog in one tool call, with a fresh worker
+  and commit per source. Isolated source failures are skipped; Markdown hard
+  breaks, whitespace and report-storage failures no longer stop independent
+  sources. Reports are ordinary Markdown rather than a strict worker JSON protocol.
+- Removed the speculative auto-ingest publisher/controller, trusted browser save
+  route, transaction clones/receipts and their configuration. Automatic ingestion
+  (#157) is deferred until after 1.0. The optional kernel-enforced reader mode
+  remains read-only, without an alternate writer.
+  **Operators using `publisher` or `manual-ingest`:** stop those old services and
+  remove those profiles and `WIKI_INGEST_CONTROL_*` settings before updating.
+  Keep `WIKI_RUNTIME_READ_ONLY=true` for a reader-only installation; explicitly
+  choose `false` and recreate OpenCode only if manual authoring is wanted.
+  Existing journal/recovery data is retained; no automatic cleanup or data moves.
 
 - Launcher updates preflight required recovery images before staging or stopping
   writers, with actionable image-specific errors. Disabled services without
   containers no longer require unused images. Updates show ordered progress and
   support `-v`/`--verbose` for safe operation context and timings without exposing
   private subprocess output (#227).
-
-- Ingest proposals now use isolated shallow baseline clones instead of copying
-  the full wiki history per source. Operator-only journal maintenance defaults
-  to dry run; confirmed compaction with configurable completed-draft retention
-  preserves transaction proof, reports, audit records and live recovery backups.
-  Unresolved preparations are never pruned; maintenance is not auto-scheduled.
-  Cleanup requires creation-time ownership proof for nested Git metadata and
-  validates existing controller boot authority without rewriting it. Drafts with
-  unknown metadata, extra backup files or missing ownership proof are retained.
-  Live-backup accounting tolerates hardlinks without relaxing deletion checks;
-  missing locks and delete-phase evidence failures have distinct safe diagnostics.
-
-- Journal report assembly, including the model-facing `report` tool, now shares
-  the exclusive per-run `records.lock` with record appends and run completion.
-  It creates the lock when absent, queues in-process and refuses cross-process
-  contention instead of interleaving report writes.
-
-- Trusted manual ingest and authoring now share a controller execution fence:
-  an in-flight worker/publication/report prevents controller boot replacement,
-  and an old boot cannot admit or recover writes. Private content-free
-  `controller.json` and its initialization marker must be included in stopped
-  backups. Reader isolation and default writable operation remain unchanged;
-  automatic scheduling and priority handover are still unimplemented.
-
-- Ingestion report instructions now require concrete thematic findings with
-  evidence locations, changes against the previous wiki, and justified omissions
-  in the private per-source records. Compact chat summaries remain unchanged;
-  run-report links are explicitly distinguished from existing wiki source pages.
-  Journal schemas, size budgets, and access permissions are unchanged.
 
 ### Added
 
@@ -77,18 +50,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   automatically pruned. Safe updates require the matching `launcher_backup.py`,
   Python 3.11+ and GNU tar; unsupported storage topologies fail closed. No data
   migration, automatic rollback, encryption or cloud upload is introduced.
-
-- The opt-in reader-mode [manual ingest route](docs/manual-ingest.md) now also
-  routes `/analysis-save` and confirmed `/answer-save` writes through its
-  UI-authenticated trusted channel: the model runtime prepares page or answer
-  content as data, the empty browser command admits the save, and the trusted
-  writer performs it with content-free durable state, exclusive writer
-  ownership shared with ingest runs, one focused analysis commit (page, rendered
-  print view, index and log) and explicit verified `resume` recovery. Default
-  writable manual behavior is unchanged; command arguments, `overview.md` links
-  and `/lint`/repair authoring remain unsupported in reader mode. Trusted
-  analysis saves need `WIKI_PUBLIC_URL` in the `manual-ingest` service and the
-  publisher image now ships the deterministic `render-analysis` renderer.
 
 - OpenChamber is now the default chat interface, with a release-built locked
   image, separate browser authentication, persistent UI settings, read-only wiki
@@ -140,19 +101,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `simple-git` and `@simple-git/argv-parser` dependencies pending upstream
   compatibility with the patched major. Security alerts stay open; #168 tracks
   the accepted risk and removal criteria. Runtime dependencies are unchanged.
-
-- `/ingest-new` now bounds model context during bulk ingestion (#152): a narrow
-  orchestrator plans batches against a documented working-context budget and
-  runs one `wiki-ingest` worker session per batch, strictly sequential with one
-  commit per source. Every processed source leaves a durable result record in
-  the new private journal below `${DATA_ROOT}/incoming/ingest-journal`, runs resume
-  after interruption or rollover, and the complete per-source report is written
-  there as a file. The bulk-run final answer now carries the overall status,
-  unfinished sources with blockers, and the report path instead of repeating
-  the per-source detail blocks inline (agreed contract change); explicit
-  single-source `/ingest` orders still answer with the inline detail block. The
-  budget is configured with `WIKI_INGEST_BATCH_BUDGET_TOKENS`,
-  `WIKI_INGEST_BATCH_MAX_SOURCES`, and `WIKI_INGEST_RUN_MAX_BATCHES`.
 
 ### Fixed
 

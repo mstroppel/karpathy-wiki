@@ -189,7 +189,7 @@ def main(mode):
     assert wait_file("/tmp/core-probe-result.json") == {
         "journal_core": "EROFS",
         "publication_lock": "EROFS",
-        "publisher_core": "rejected_before_publication",
+        "ingest_core": "rejected_before_publication",
     }
     check_unchanged()
     # Configuration and plugin changes cannot grant kernel write authority.
@@ -198,7 +198,7 @@ def main(mode):
     assert write("/knowledge/wiki/isolation-sentinel", b"configuration bypass") >= 400
     assert snapshot() == baseline, "protected tree bytes, metadata or entries changed"
     print(
-        "runtime-write-isolation: API, location/session shells, PTY, publisher/journal cores, "
+        "runtime-write-isolation: API, location/session shells, PTY, ingest/storage cores, "
         "aliases and remount denied; bytes unchanged"
     )
 
