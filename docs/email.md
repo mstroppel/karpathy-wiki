@@ -38,12 +38,13 @@ headers are not checked before archiving.
 Recipient filtering accepts a message when at least one decoded To, Cc or Bcc
 mailbox exactly matches `EMAIL_RECIPIENT_ALLOWLIST`. Domains compare
 case-insensitively; local parts and plus tags remain exact, so
-`test+email@example.com` does not match `test@example.com`. Delivery headers
-(`X-Original-To`, `Delivered-To`, `Envelope-To`, `Received`) are never consulted,
-and mail delivered without recipient headers — typically blind-carbon copies —
-cannot match and stays on the server. Route BCC-only mail with server-side
-delivery rules if you need it. Both allowlists must pass when both are
-configured; an empty list disables its filter.
+`test+email@example.com` does not match `test@example.com`. Entries that are not
+exact mailboxes (group placeholders, broken addresses) cannot match and never
+veto a matching recipient. Delivery headers (`X-Original-To`, `Delivered-To`,
+`Envelope-To`, `Received`) are never consulted, and mail delivered without
+recipient headers — typically blind-carbon copies — cannot match and stays on the
+server. Route BCC-only mail with server-side delivery rules if you need it. Both
+allowlists must pass when both are configured; an empty list disables its filter.
 
 The server must advertise **UIDPLUS**. Deletion uses only `UID STORE` for the
 matched UID and `UID EXPUNGE <uid>`; never general `EXPUNGE` or `CLOSE`, which could

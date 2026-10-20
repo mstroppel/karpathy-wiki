@@ -211,8 +211,17 @@ class EmailTests(unittest.TestCase):
                 restricted,
             )
         )
-        with self.assertRaises(ValueError):
-            authorized(mail(to="not-an-address"), restricted)
+        # Entries that are not exact mailboxes cannot match and never veto a
+        # matching recipient.
+        self.assertFalse(authorized(mail(to="not-an-address"), restricted))
+        self.assertTrue(
+            authorized(mail(to="test+email@example.com", cc="not-an-address"), restricted)
+        )
+        self.assertTrue(
+            authorized(
+                mail(to="test+email@example.com", bcc="undisclosed-recipients:;"), restricted
+            )
+        )
 
     def test_sender_and_recipient_allowlists_must_both_match(self):
         restricted = replace(
