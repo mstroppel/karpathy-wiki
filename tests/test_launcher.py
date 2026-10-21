@@ -24,13 +24,21 @@ if failure and failure in args:
     print('synthetic-private-secret', file=sys.stderr)
     sys.exit(17)
 if args[:2] == ['image', 'inspect']:
+    if args[-1] == os.environ.get('STUB_MISSING_ID'):
+        marker = Path(os.environ['STUB_PULL_MARKER'])
+        if not marker.exists() or os.environ.get('STUB_NO_PULL_IMAGE'):
+            print('synthetic-private-secret', file=sys.stderr)
+            sys.exit(1)
     if args[-1] == os.environ.get('STUB_MISSING_IMAGE'):
         print('No such image: synthetic-private-secret', file=sys.stderr)
         sys.exit(1)
     info = {'Id': 'sha256:' + 'a' * 64}
+    info['RepoDigests'] = json.loads(os.environ.get('STUB_REPO_DIGESTS', '[]'))
     if os.environ.get('STUB_INSPECTED_IMAGE_ID'):
         info['Id'] = os.environ['STUB_INSPECTED_IMAGE_ID']
     print(json.dumps([info]))
+elif args[:2] == ['image', 'pull']:
+    Path(os.environ['STUB_PULL_MARKER']).touch()
 elif args[:2] == ['image', 'save']:
     if os.environ.get('STUB_INCOMPLETE'):
         Path(args[args.index('--output') + 1]).write_bytes(b'incomplete archive')
@@ -440,6 +448,9 @@ class LauncherTests(unittest.TestCase):
             ("1.2.3", "2.0.0"),
             ("--no-backup", "../bad"),
             ("--no-backup=false",),
+            ("--backup-images", "--backup-images"),
+            ("--backup-images", "--no-backup"),
+            ("--no-backup", "--backup-images"),
         ):
             result = self.run_launcher("update", *args)
             self.assertNotEqual(result.returncode, 0)
@@ -473,11 +484,140 @@ class LauncherTests(unittest.TestCase):
                 self.assertFalse((self.project / "backups").exists())
                 self.assertFalse(any(c[0] == "stop" or "pull" in c for c in self.docker_calls()))
 
+    def test_default_backup_omits_images_records_digests_and_restores_cached_ids(self):
+        self.write_env("KARPATHY_WIKI_VERSION=0.0.1\n")
+        image_id = "sha256:" + "a" * 64
+        reference = "registry.example/synthetic@sha256:" + "b" * 64
+        result = self.run_launcher(
+            "update",
+            "1.2.3",
+            env={"STUB_FAIL": "save", "STUB_REPO_DIGESTS": json.dumps([reference])},
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        metadata = self.snapshot_metadata()[0]
+        self.assertEqual(metadata["image_digests"], {image_id: [reference]})
+        self.assertEqual(set(metadata["sha256"]), {"snapshot.tar"})
+        self.assertFalse((self.project / "backups" / metadata["id"] / "images.tar").exists())
+        self.assertIn("Image contents omitted", result.stderr)
+        self.assertFalse(any(c[:2] == ["image", "save"] for c in self.docker_calls()))
+        self.docker_log.write_text("")
+        result = self.run_launcher("rollback", metadata["id"], input=f"rollback {metadata['id']}\n")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = self.docker_calls()
+        self.assertFalse(any(c[:2] in (["image", "pull"], ["image", "load"]) for c in calls))
+        self.assertIn(["image", "tag", image_id, "synthetic:0.0.1"], calls)
+        rescue = next(m for m in self.snapshot_metadata() if m["kind"] == "rescue")
+        self.assertIn("images.tar", rescue["sha256"])
+
+    def test_backup_images_accepts_option_order_channel_and_verbose(self):
+        for args in (
+            ("--backup-images", "1.2.3"),
+            ("1.2.3", "--backup-images", "-v"),
+            ("--backup-images",),
+        ):
+            with self.subTest(args=args):
+                self.write_env("KARPATHY_WIKI_VERSION=0.0.1\nKARPATHY_WIKI_CHANNEL=pre\n")
+                before = {m["id"] for m in self.snapshot_metadata()}
+                result = self.run_launcher("update", *args)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                metadata = next(m for m in self.snapshot_metadata() if m["id"] not in before)
+                self.assertIn("images.tar", metadata["sha256"])
+                self.assertTrue(
+                    (self.project / "backups" / metadata["id"] / "images.tar").is_file()
+                )
+                self.assertNotIn("Image contents omitted", result.stderr)
+
+    def test_rollback_fetches_only_saved_digest_before_stopping_writers(self):
+        self.write_env("KARPATHY_WIKI_VERSION=0.0.1\n")
+        image_id = "sha256:" + "a" * 64
+        reference = "registry.example/synthetic@sha256:" + "b" * 64
+        result = self.run_launcher(
+            "update", "1.2.3", env={"STUB_REPO_DIGESTS": json.dumps([reference])}
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        metadata = self.snapshot_metadata()[0]
+        self.docker_log.write_text("")
+        result = self.run_launcher(
+            "rollback",
+            metadata["id"],
+            input=f"rollback {metadata['id']}\n",
+            env={
+                "STUB_MISSING_ID": image_id,
+                "STUB_PULL_MARKER": str(self.project / "pulled"),
+                "STUB_CONTAINERS": "1",
+            },
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = self.docker_calls()
+        pull = calls.index(["image", "pull", reference])
+        stop = next(i for i, c in enumerate(calls) if c[0] == "stop")
+        self.assertLess(pull, stop)
+        self.assertTrue(all(c[-1] == reference for c in calls if c[:2] == ["image", "pull"]))
+
+    def test_unavailable_or_wrong_rollback_images_leave_live_state_untouched(self):
+        self.write_env("KARPATHY_WIKI_VERSION=0.0.1\n")
+        reference = "registry.example/synthetic@sha256:" + "b" * 64
+        result = self.run_launcher(
+            "update", "1.2.3", env={"STUB_REPO_DIGESTS": json.dumps([reference])}
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        metadata = self.snapshot_metadata()[0]
+        current_env = (self.project / ".env").read_bytes()
+        for extra in (
+            {"STUB_FAIL": "pull"},
+            {"STUB_NO_PULL_IMAGE": "1"},
+            {"STUB_INSPECTED_IMAGE_ID": "sha256:" + "c" * 64},
+        ):
+            with self.subTest(extra=extra):
+                self.docker_log.write_text("")
+                result = self.run_launcher(
+                    "rollback",
+                    metadata["id"],
+                    input=f"rollback {metadata['id']}\n",
+                    env={
+                        "STUB_MISSING_ID": "sha256:" + "a" * 64,
+                        "STUB_PULL_MARKER": str(self.project / "pulled"),
+                        "STUB_CONTAINERS": "1",
+                        **extra,
+                    },
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("rollback image unavailable", result.stderr)
+                self.assertNotIn("synthetic-private-secret", result.stdout + result.stderr)
+                self.assertEqual((self.project / ".env").read_bytes(), current_env)
+                self.assertEqual(len(self.snapshot_metadata()), 1)
+                self.assertFalse(
+                    any(
+                        c[0] == "stop"
+                        or c[:2] in (["image", "tag"], ["image", "save"])
+                        or "down" in c
+                        for c in self.docker_calls()
+                    )
+                )
+
+    def test_no_registry_digest_fails_closed_when_local_image_is_gone(self):
+        self.write_env("KARPATHY_WIKI_VERSION=0.0.1\n")
+        self.assertEqual(self.run_launcher("update", "1.2.3").returncode, 0)
+        metadata = self.snapshot_metadata()[0]
+        self.docker_log.write_text("")
+        result = self.run_launcher(
+            "rollback",
+            metadata["id"],
+            input=f"rollback {metadata['id']}\n",
+            env={
+                "STUB_MISSING_ID": "sha256:" + "a" * 64,
+                "STUB_PULL_MARKER": str(self.project / "pulled"),
+            },
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("rollback image unavailable", result.stderr)
+        self.assertFalse(any("pull" in c or c[0] == "stop" for c in self.docker_calls()))
+
     def test_missing_tag_uses_matching_container_image_id_and_remains_restorable(self):
         self.write_env("KARPATHY_WIKI_VERSION=0.0.1\n")
         image_id = "sha256:" + "a" * 64
         environment = {"STUB_MISSING_IMAGE": "synthetic:0.0.1", "STUB_CONTAINERS": "1"}
-        result = self.run_launcher("update", "1.2.3", env=environment)
+        result = self.run_launcher("update", "1.2.3", "--backup-images", env=environment)
         self.assertEqual(result.returncode, 0, result.stderr)
         metadata = self.snapshot_metadata()[0]
         self.assertEqual(metadata["images"], {"synthetic:0.0.1": image_id})
@@ -551,7 +691,7 @@ class LauncherTests(unittest.TestCase):
             "rollback", metadata["id"], input=f"rollback {metadata['id']}\n", env=environment
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertTrue(any(c[:2] == ["image", "load"] for c in self.docker_calls()))
+        self.assertFalse(any(c[:2] == ["image", "load"] for c in self.docker_calls()))
 
     def test_active_profiles_dependencies_and_stopped_containers_require_images(self):
         for values, extra, config in (
@@ -705,7 +845,7 @@ class LauncherTests(unittest.TestCase):
                 with self.subTest(options=options, failure=failure):
                     self.write_env("KARPATHY_WIKI_VERSION=0.0.1\nTOKEN=synthetic-env-secret\n")
                     result = self.run_launcher(
-                        "update", "1.2.3", *options, env={"STUB_FAIL": failure}
+                        "update", "1.2.3", "--backup-images", *options, env={"STUB_FAIL": failure}
                     )
                     self.assertNotEqual(result.returncode, 0)
                     self.assertIn("failed during " + expected, result.stderr)
@@ -1118,7 +1258,7 @@ class LauncherTests(unittest.TestCase):
     def test_archive_failure_blocks_update_without_changing_env_or_data(self):
         original = "KARPATHY_WIKI_VERSION=0.0.1\n"
         self.write_env(original)
-        result = self.run_launcher("update", "1.2.3", env={"STUB_FAIL": "save"})
+        result = self.run_launcher("update", "1.2.3", "--backup-images", env={"STUB_FAIL": "save"})
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual((self.project / ".env").read_text(), original)
         self.assertEqual(self.snapshot_metadata(), [])
@@ -1141,7 +1281,9 @@ class LauncherTests(unittest.TestCase):
 
     def test_stop_all_writers_precedes_image_archive_and_pull(self):
         self.write_env("KARPATHY_WIKI_VERSION=0.0.1\n")
-        result = self.run_launcher("update", "1.2.3", env={"STUB_CONTAINERS": "1"})
+        result = self.run_launcher(
+            "update", "1.2.3", "--backup-images", env={"STUB_CONTAINERS": "1"}
+        )
         self.assertEqual(result.returncode, 0, result.stderr)
         calls = self.docker_calls()
         stop = next(i for i, c in enumerate(calls) if c[0] == "stop")
@@ -1262,7 +1404,7 @@ class LauncherTests(unittest.TestCase):
 
     def test_restore_failure_keeps_target_and_rescue_snapshots(self):
         self.write_env("KARPATHY_WIKI_VERSION=0.0.1\n")
-        self.assertEqual(self.run_launcher("update", "1.2.3").returncode, 0)
+        self.assertEqual(self.run_launcher("update", "1.2.3", "--backup-images").returncode, 0)
         identifier = self.snapshot_metadata()[0]["id"]
         result = self.run_launcher(
             "rollback", identifier, input=f"rollback {identifier}\n", env={"STUB_FAIL": "load"}
@@ -1333,7 +1475,9 @@ class LauncherTests(unittest.TestCase):
     def test_incomplete_archive_blocks_update_before_version_changes(self):
         original = "KARPATHY_WIKI_VERSION=0.0.1\n"
         self.write_env(original)
-        result = self.run_launcher("update", "1.2.3", env={"STUB_INCOMPLETE": "1"})
+        result = self.run_launcher(
+            "update", "1.2.3", "--backup-images", env={"STUB_INCOMPLETE": "1"}
+        )
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual((self.project / ".env").read_text(), original)
         self.assertEqual(self.snapshot_metadata(), [])

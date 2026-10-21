@@ -168,6 +168,7 @@ cmd_update() {
   require_backup_runtime
   cu_target=""
   cu_no_backup=""
+  cu_backup_images=""
   for cu_arg in "$@"; do
     case "$cu_arg" in
       -v|--verbose) update_verbose=--verbose ;;
@@ -175,14 +176,19 @@ cmd_update() {
         [ -z "$cu_no_backup" ] || die "duplicate --no-backup"
         cu_no_backup=--no-backup
         ;;
+      --backup-images)
+        [ -z "$cu_backup_images" ] || die "duplicate --backup-images"
+        cu_backup_images=--backup-images
+        ;;
       -*) die "unknown update option" ;;
       *)
-        [ -z "$cu_target" ] || die "usage: karpathy-wiki.sh update [version] [--no-backup] [-v|--verbose]"
+        [ -z "$cu_target" ] || die "usage: karpathy-wiki.sh update [version] [--backup-images|--no-backup] [-v|--verbose]"
         validate_version "$cu_arg" || die "invalid version"
         cu_target=$cu_arg
         ;;
     esac
   done
+  [ -z "$cu_no_backup" ] || [ -z "$cu_backup_images" ] || die "--backup-images conflicts with --no-backup"
   [ -f "$env_file" ] || die "missing .env"
   update_progress "version resolution"
   cu_current=$(resolve_version)
@@ -209,6 +215,9 @@ cmd_update() {
   if [ -n "$cu_no_backup" ]; then
     set -- "$@" "$cu_no_backup"
   fi
+  if [ -n "$cu_backup_images" ]; then
+    set -- "$@" "$cu_backup_images"
+  fi
   if [ -n "$update_verbose" ]; then
     set -- "$@" "$update_verbose"
   fi
@@ -233,11 +242,13 @@ next to this script is applied automatically.
 
 Usage:
   karpathy-wiki.sh <compose args...>   Forward to docker compose (up -d, ps, logs, ...)
-  karpathy-wiki.sh update [version] [--no-backup] [-v|--verbose]
+  karpathy-wiki.sh update [version] [--backup-images|--no-backup] [-v|--verbose]
                                       Pin version (default: latest release, or
                                        latest pre-release when the pre channel is
-                                       set); whole-instance backup by default,
+                                       set); data/config backup by default,
                                        pull images, restart and verify health
+                                      --backup-images includes installed images
+                                       for self-contained offline recovery
                                       --no-backup explicitly skips the snapshot;
                                        no new rollback point, manual recovery risk
                                       -v/--verbose adds safe context and timings;
@@ -262,6 +273,7 @@ Environment:
 Updates stop all instance writers. Backups contain plaintext secrets: use trusted,
 preferably encrypted storage. Direct Compose calls bypass this safety guarantee.
 Rollback loses all changes since the selected snapshot; no automatic rollback.
+Default update backups need cached images or registry access by saved digest.
 EOF
 }
 

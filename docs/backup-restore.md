@@ -16,15 +16,39 @@ Safe updates require Python 3.11+, GNU tar with ACL/xattr support, Docker Compos
 all files and their ownership. `.env` is authoritative; transient shell overrides
 of stack configuration are not supported for safe update/rollback. Pin the actual
 installed release and cache its Compose file before updating. Images must exist
-locally and match the installed containers; no registry access is needed to restore
-saved images. Reconcile mismatched/orphan containers before a new update.
+locally and match the installed containers. Reconcile mismatched/orphan containers
+before a new update.
+
+Update snapshots **omit image contents by default**: they record exact local image
+IDs and available `RepoDigests`, while still fully archiving data, configuration,
+file secrets and launcher files. This skips Docker image export and image-archive
+hashing/verification. Rollback requires the exact IDs in the local cache or registry
+access to pull one of their saved immutable digests. It never pulls mutable tags
+and verifies the resulting local image ID before stopping writers. Missing digests,
+unreachable registries or wrong images block rollback without replacing live state.
+Images built/imported locally may have no registry digest: retain their cache or
+a separate trusted image archive, or opt into image contents on update:
+
+```bash
+./karpathy-wiki.sh update --backup-images
+./karpathy-wiki.sh update 0.2.0 --backup-images --verbose
+```
+
+`--backup-images` makes the snapshot self-contained for offline image recovery.
+It applies to this update only, can appear before/after the version, and conflicts
+with `--no-backup`. Rollback's mandatory current-state rescue snapshot **always
+includes images**, independently of how the selected update snapshot was made.
+Already-created image-inclusive snapshots remain selectable; no snapshots are
+rewritten. To use an image-omitting snapshot, the executing launcher must support
+this mode; a rollback restores the launcher pair saved in that snapshot too.
 
 For update snapshots, required software means every unprofiled service, every
 service enabled by saved `COMPOSE_PROFILES` (including `*`, with whitespace around
 comma-separated names ignored), their required dependencies,
 and every service with an existing project container, even stopped or in a disabled
-profile. Only disabled services without containers are excluded from the image
-archive; enabling them later requires installing their software separately.
+profile. Only disabled services without containers are excluded from recorded
+software (and the optional image archive); enabling them later requires installing
+their software separately.
 An optional dependency (`required: false`) does not enable a disabled service;
 its edge may remain in the resolved model even when that service is absent.
 Configuration/data/file secrets remain fully covered, including disabled profiles.
@@ -45,7 +69,7 @@ backup storage creation, or stopping writers. A failed inspection names the imag
 and the phase: check Docker access first, then restore the exact originally
 installed image from a trusted saved archive or an independently verified immutable
 digest and reconcile the configured tag with container image IDs. Do not pull a
-mutable tag and assume it is the installed software. The launcher never acquires
+mutable tag and assume it is the installed software. Update preflight never acquires
 missing recovery images automatically and never bypasses a required-image failure.
 Compose downloads may populate `.cache` during earlier version resolution; the
 installed pair, `.env`, data and running containers stay untouched on preflight failure.
@@ -54,7 +78,7 @@ Updates print concise phases on stderr in execution order, including early
 resolution/configuration/staging failures. Use `update -v`, `update --verbose`, or
 `update <version> --verbose` for elapsed phase/operation times and safe operation
 names. Options belong after `update`, on either side of the optional version;
-`--no-backup` can appear anywhere there too. Repeated verbose flags are idempotent.
+`--backup-images` or `--no-backup` can appear anywhere there too. Repeated verbose flags are idempotent.
 Startup and health verification are one Compose `up --wait` phase. Verbose mode
 does not disable secret protection: arguments, raw stdout/stderr, Compose config,
 environment values and secret files are never dumped. Failures report curated
@@ -128,7 +152,7 @@ Configure `KARPATHY_WIKI_BACKUP_DIR` in `.env` (default `./backups`, relative to
 installation). It must be outside `DATA_ROOT`, owned by the operator, mode `0700`.
 All snapshot files are private. Choose trusted, preferably encrypted local storage:
 there is no built-in encryption, cloud upload, offsite copy or protection against
-failure of the same disk. Allow space for complete data and image archives plus
+failure of the same disk. Allow space for complete data, optional image archives plus
 restore staging and a rescue snapshot; archive/write/verification errors block
 updates without changing the data, version or configuration. The stack can remain
 stopped on failure: inspect the error and restart the unchanged release explicitly.
@@ -144,7 +168,8 @@ inactive-profile and orphan writers. Unless `--no-backup` is explicitly given, i
 files, Git history, SQLite and queue state, sessions and credentials), `.env`, both
 launcher files, the old cached Compose configuration, override, file secrets,
 service env files, and external read-only bind sources. It saves actual local
-image IDs and image contents, verifies SHA-256 and reads archive bodies before
+image IDs and available registry digests (image contents only with `--backup-images`),
+verifies SHA-256 and reads all included archive bodies before
 changing `.env`. Pull, startup and health failures report the snapshot ID and
 explicit rollback command. Successful startup requires Compose `up --wait` (up to
 600 seconds); services without health checks are checked for running state, not
@@ -182,12 +207,16 @@ disable the mandatory rescue snapshot for `rollback`.
 
 Rollback works immediately or after days and additional updates. It displays the
 date and current/target versions and warns that **all changes since the snapshot
-are lost in the restored state**. Type the exact requested confirmation. It then
-stops writers and verifies a separate `rescue` snapshot of the current state. If
+are lost in the restored state**. Type the exact requested confirmation. For a
+snapshot without images, it first verifies/fetches the saved image IDs while the
+current writers are still running; no tags are changed at this stage. It then
+stops writers and verifies a separate `rescue` snapshot of the current state, always
+including current image contents. If
 that fails, current data/configuration are not replaced. The chosen snapshot is
 staged beside each destination, current containers removed, and complete roots
-replaced, not overlaid or merged. Saved images are loaded and tagged before the
-old stack starts without pulling; health verification precedes success. A restore
+replaced, not overlaid or merged. Included images are loaded, all saved image IDs
+are rechecked, and configured tags are restored before removing current containers
+or replacing live roots. The old stack starts without pulling; health verification precedes success. A restore
 failure can leave a stopped/partially restored installation: retain target and
 rescue snapshots and do not start writers until recovery. Neither error path
 automatically rolls back data. There are no data migrations or legacy fallbacks.
