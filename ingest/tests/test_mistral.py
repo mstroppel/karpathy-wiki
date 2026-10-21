@@ -290,7 +290,6 @@ class TimestampConversionTests(unittest.TestCase):
             [{"text": "x", "start": "0", "end": 1}],
             [{"text": "x", "start": True, "end": 1}],
             [{"text": "x", "start": -1, "end": 1}],
-            [{"text": "x", "start": 2, "end": 1}],
             [{"text": "x", "start": float("inf"), "end": 1}],
             [{"text": "x", "start": 0, "end": float("nan")}],
         ]
@@ -299,6 +298,48 @@ class TimestampConversionTests(unittest.TestCase):
                 with self.assertRaises(HostedResponseError) as caught:
                     parse_transcription(transcript(segments=segments), diarize=False)
                 self.assertNotIn("Guten", str(caught.exception))
+
+    def test_reversed_segment_is_clamped_without_losing_text_or_speaker(self):
+        with self.assertLogs("karpathy-wiki-speech", level="WARNING") as logs:
+            segments, language, model = parse_transcription(
+                transcript(
+                    segments=[
+                        {
+                            "text": "private first",
+                            "start": 2.125,
+                            "end": 1.5,
+                            "speaker_id": "private label",
+                        },
+                        {"text": "second", "start": 3, "end": 4, "speaker_id": "other"},
+                    ]
+                ),
+                diarize=True,
+            )
+        self.assertEqual(
+            [(s.start_ms, s.end_ms, s.text, s.speaker_id) for s in segments],
+            [(2125, 2125, "private first", 0), (3000, 4000, "second", 1)],
+        )
+        self.assertEqual((language, model), ("de", "voxtral-mini-2602"))
+        warning = "\n".join(logs.output)
+        self.assertIn("segment 0", warning)
+        self.assertIn("start_ms=2125 end_ms=1500", warning)
+        self.assertNotIn("private", warning)
+
+    def test_equal_overlapping_and_rounding_collapsed_segments_are_preserved(self):
+        segments, _, _ = parse_transcription(
+            transcript(
+                segments=[
+                    {"text": "equal", "start": 1, "end": 1},
+                    {"text": "overlap", "start": 0.5, "end": 2},
+                    {"text": "rounded", "start": 2.0002, "end": 2.0001},
+                ]
+            ),
+            diarize=False,
+        )
+        self.assertEqual(
+            [(s.start_ms, s.end_ms) for s in segments],
+            [(1000, 1000), (500, 2000), (2000, 2000)],
+        )
 
     def test_transcript_text_that_no_timed_segment_carries_is_rejected(self):
         with self.assertRaises(HostedResponseError):
@@ -645,6 +686,29 @@ class Harness(unittest.TestCase):
 
 
 class WorkerHandoffTests(Harness):
+    def test_reversed_segment_completes_and_replays_without_another_upload(self):
+        self.answer_with(
+            answered(
+                transcript(
+                    segments=[
+                        {"text": "Guten Morgen.", "start": 2, "end": 1},
+                    ]
+                )
+            )
+        )
+        self.request()
+        with self.assertLogs(speech_worker.LOG, level="WARNING"):
+            self.assertEqual(self.run_worker(), (1, 0))
+        result = speech_client.load_result(self.speech_root, self.digest, self.options)
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertEqual(result.segments[0].start_ms, 2000)
+        self.assertEqual(result.segments[0].end_ms, 2000)
+        self.assertEqual(result.segments[0].text, "Guten Morgen.")
+        self.force_request()
+        self.assertEqual(self.run_worker(), (1, 0))
+        self.assertEqual(len(self.transport.calls), 1)
+
     def test_completed_result_replays_without_a_second_paid_request(self):
         self.request()
         self.assertEqual(self.run_worker(), (1, 0))

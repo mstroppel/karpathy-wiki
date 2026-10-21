@@ -310,7 +310,12 @@ and recreate the worker with the updated image and Compose configuration:
 ```
 
 Subsequent request failures include the exception message and traceback, including
-the failing validation line. This cannot recover details from past failures and
+the failing validation line. DEBUG also adds the container-local recording path
+and filename before transcription and on failure, correlated by request ID.
+This is the staged `recordings/.../<hash>.<extension>` file passed to the backend,
+not the original upstream filename. Paths are escaped to keep entries on one
+line. Cache replays do not log a transcription start or send audio again.
+This cannot recover details from past failures and
 does not rearm dead jobs. Another hosted attempt may incur transcription charges.
 DEBUG applies only to the speech worker logger, not dependency loggers; it does
 not explicitly dump API responses. Exception details can nevertheless contain
@@ -322,8 +327,17 @@ every level. Invalid levels fail startup rather than silently falling back.
 Retry limits, quarantine, and all-or-nothing publication remain unchanged. A dead
 job is not automatically rearmed; diagnose the failure before making an explicit
 operator recovery decision. No recording-specific paths or raw exception messages
-are added to the default request-failure logs; the opt-in DEBUG tracebacks are
+are added to the default request-failure logs; the opt-in DEBUG diagnostics are
 the exception described above.
+
+Mistral can return a segment whose end timestamp precedes its start timestamp.
+The parser clamps that end to the start (a zero-duration segment), retaining
+the text and speaker without guessing a duration or dropping the transcript.
+A warning reports the segment index and original millisecond timestamps, never
+the transcript or speaker label. Equal timestamps and overlapping segments are
+preserved. Missing, negative, non-finite, or nonnumeric timestamps remain errors.
+Malformed answers are not automatically retried; a new hosted transcription
+can incur another charge.
 
 ## What is published
 

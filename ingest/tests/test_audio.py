@@ -365,6 +365,63 @@ class WorkerCacheTests(unittest.TestCase):
         self.assertEqual(failure, "speech:processing:LimitExceededError")
         self.assertFalse((self.root / "requests" / f"{identifier}.json").exists())
 
+    def test_audio_paths_are_opt_in_and_escaped(self):
+        self.addCleanup(speech_worker.LOG.setLevel, speech_worker.LOG.level)
+        reference = "recordings/private\nmeeting.mp3"
+        with mock.patch.dict(os.environ, {"SPEECH_LOG_LEVEL": "INFO"}):
+            speech_worker.configure_logging()
+            self.assertEqual(speech_worker.audio_log_context(self.root, reference), "")
+        with mock.patch.dict(os.environ, {"SPEECH_LOG_LEVEL": "DEBUG"}):
+            speech_worker.configure_logging()
+            context = speech_worker.audio_log_context(self.root, reference)
+        self.assertIn("private\\nmeeting.mp3", context)
+        self.assertNotIn("\n", context)
+
+    def test_transcription_logs_staged_path_only_when_enabled(self):
+        for enabled in ("INFO", "DEBUG"):
+            with self.subTest(enabled=enabled):
+                self.queue_request()
+                path = str(self.root / "recordings" / audio_digest()[:2] / f"{audio_digest()}.mp3")
+                with (
+                    mock.patch.dict(os.environ, {"SPEECH_LOG_LEVEL": enabled}),
+                    self.assertLogs(speech_worker.LOG, level="INFO") as logs,
+                ):
+                    speech_worker.configure_logging()
+                    # Fresh worker identity prevents a cache replay on the second iteration.
+                    speech_worker.run_cycle(
+                        self.root,
+                        ScriptedBackend(),
+                        TranscriptionOptions(),
+                        enabled,
+                        DEFAULT_LIMITS,
+                        decode=False,
+                    )
+                output = "\n".join(logs.output)
+                self.assertIn("transcribing", output)
+                self.assertEqual(path in output, enabled == "DEBUG")
+
+    def test_debug_failure_logs_path_but_keeps_failure_report_content_free(self):
+        self.queue_request()
+        with (
+            mock.patch.dict(os.environ, {"SPEECH_LOG_LEVEL": "DEBUG"}),
+            mock.patch.object(
+                ScriptedBackend, "transcribe", side_effect=RuntimeError("private text")
+            ),
+            self.assertLogs(speech_worker.LOG, level="ERROR") as logs,
+        ):
+            speech_worker.configure_logging()
+            self.assertEqual(self.run_worker(), (0, 1))
+        output = "\n".join(logs.output)
+        self.assertIn(f"{audio_digest()}.mp3", output)
+        self.assertIn("RuntimeError", output)
+        self.assertIn("private text", output)
+        from karpathy_wiki_ingest_audio.speech_client import load_failure
+
+        self.assertEqual(
+            load_failure(self.root, audio_digest(), TranscriptionOptions()),
+            "speech:processing:RuntimeError",
+        )
+
     def test_malformed_reference_is_dropped(self):
         identifier = self.queue_request()
         request_path = self.root / "requests" / f"{identifier}.json"
