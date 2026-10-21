@@ -1,9 +1,10 @@
 import { runIngestBatch } from '/etc/opencode/tools/wiki_ingest_batch_core.mjs'
-import { runBatchWorker } from '/etc/opencode/tools/wiki_ingest_batch_worker.mjs'
+import { createBatchWorker } from '/etc/opencode/tools/wiki_ingest_batch_worker.mjs'
 
 export default {
   id: 'karpathy-wiki.ingest-batch',
   setup: async (ctx) => {
+    const worker = await createBatchWorker(ctx)
     await ctx.tool.transform((tools) => {
       tools.add({
         name: 'wiki_ingest_batch',
@@ -26,7 +27,7 @@ export default {
               sourcePath: args.source_path,
               signal: context.signal,
             },
-            (batch) => runBatchWorker(ctx, context, batch),
+            (batch) => worker(context, batch),
           )
           return { content: JSON.stringify(result) }
         },

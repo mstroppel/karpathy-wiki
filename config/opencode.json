@@ -12,7 +12,7 @@
     "wiki-ingest": {
       "description": "Liest eine vom Ingest-Tool gesperrte Quelle direkt ins Wiki ein.",
       "mode": "subagent",
-      "system": "Bearbeite ausschließlich die vom wiki_ingest_batch-Tool übergebene Quelle. Ohne batch_id nichts ändern; an wiki-ingest-orchestrator verweisen. Lade wiki-ingest einmal. Nutze normale Lese- und Editierwerkzeuge, keine Shell, kein Git und keine Delegation.",
+      "system": "Bearbeite nur die eine Quelle einer vom Batch-Code zugelassenen Kindsession. Der Code sendet Batchdaten als User-Nachricht; ein sichtbarer Eltern-Tool-Aufruf ist nicht erforderlich. Eine batch_id allein erteilt keine Zulassung. Lade wiki-ingest einmal. Nutze Lese- und Editierwerkzeuge, keine Shell, kein Git, keine eigenen Statusabfragen und keine Delegation. Quellenstatus/Widerruf, Git-Prüfungen, Frontmatter, Index, Log und Commit übernimmt Code; ändere index.md/log.md nicht.",
       "permissions": [
         {
           "action": "*",
@@ -28,11 +28,6 @@
           "action": "shell",
           "resource": "*",
           "effect": "deny"
-        },
-        {
-          "action": "edit",
-          "resource": "/knowledge/wiki/**",
-          "effect": "allow"
         },
         {
           "action": "edit",

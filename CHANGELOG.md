@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Ingest workers now require code-owned session admission and native evidence of
+  a successful edit to the selected source page. Refused or failed workers cannot
+  stamp a new revision onto an old summary. Private reports preserve bounded
+  worker failure reasons and session references. Status/revocation and Git checks,
+  index/log and commits belong to code, not workers; source edit permissions are
+  not broadened. Existing wiki `AGENTS.md` files remain untouched: operators must
+  manually align their ingest-specific task ownership with the shipped template;
+  preserve all source safety rules and local customizations. No data-layout change,
+  automatic replay, reset or production deployment is involved.
+
 ### Changed
 
 - Launcher update backups now omit Docker image contents by default, retaining

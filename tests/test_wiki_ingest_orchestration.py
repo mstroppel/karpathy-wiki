@@ -35,7 +35,8 @@ class BatchWorkflowTests(unittest.TestCase):
     def test_worker_has_normal_files_but_no_shell_git_or_credentials(self):
         rules = self.config["agents"]["wiki-ingest"]["permissions"]
         self.assertEqual(rules[0], {"action": "*", "resource": "*", "effect": "deny"})
-        self.assertIn(
+        self.assertIn({"action": "edit", "resource": "sources/*.md", "effect": "allow"}, rules)
+        self.assertNotIn(
             {"action": "edit", "resource": "/knowledge/wiki/**", "effect": "allow"}, rules
         )
         self.assertIn(
@@ -116,6 +117,18 @@ class BatchWorkflowTests(unittest.TestCase):
             "keinen Link erfinden",
         ):
             self.assertIn(phrase, self.orchestrator)
+
+    def test_worker_instructions_assign_checks_and_catalog_to_code(self):
+        texts = [
+            self.worker,
+            self.config["agents"]["wiki-ingest"]["system"],
+            (ROOT / "config/routing.md").read_text(),
+            (ROOT / "config/init.sh").read_text(),
+        ]
+        for text in texts:
+            with self.subTest(text=text[:30]):
+                for phrase in ("User-Nachricht", "Widerruf", "Frontmatter", "Commit"):
+                    self.assertIn(phrase, text)
 
     def test_docs_explain_continuation_and_shared_worktree_boundary(self):
         text = (ROOT / "docs/ingest-reports.md").read_text()

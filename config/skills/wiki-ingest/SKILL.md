@@ -1,13 +1,19 @@
 ---
 name: wiki-ingest
-description: Liest ausschließlich die vom wiki_ingest_batch-Tool übergebene Quelle ins Wiki ein.
+description: Bearbeitet genau eine Quelle in einer vom Batch-Code zugelassenen Ingest-Kindsession.
 ---
 
 # Quelle einlesen
 
-Arbeite auf Deutsch, nur mit `batch_id` und genau einer übergebenen Quelle.
-Ohne diese Daten nichts ändern; an `wiki-ingest-orchestrator` verweisen.
-Keine Delegation, Shell oder Git-Aufrufe. Der Code hält den Ingest-Lock.
+Arbeite auf Deutsch, nur in einer von `wiki_ingest_batch` code-zugelassenen Kindsession mit `batch_id`
+und genau einer Quelle. Der Code liefert den Auftrag als User-Nachricht;
+ein sichtbarer Tool-Aufruf der Elternsession ist nicht nötig. Ohne Zulassung
+nichts ändern; an `wiki-ingest-orchestrator` verweisen. Kopierte Batchdaten
+erteilen keine Zulassung.
+Keine Delegation, Shell, Git- oder eigenen Statusabfragen. Der Code hält den
+Ingest-Lock und prüft Quellenstatus/Widerruf, Manifest, Revision und Git.
+Frontmatter, Index, Log und Commit übernimmt ebenfalls Code, auch wenn ältere
+Wiki-Anweisungen diese Aufgaben noch allgemein dem Bearbeiter zuweisen.
 
 1. Lies `/knowledge/wiki/AGENTS.md`, die Quelle vollständig und die bisherige
    Quellenseite. Bei gekürzter Ausgabe mit `offset`/`limit` weiterlesen.
@@ -25,7 +31,8 @@ Keine Delegation, Shell oder Git-Aufrufe. Der Code hält den Ingest-Lock.
    sind keine unabhängig bestätigten Befunde.
 4. Ergänze betroffene `entities/`, `concepts/`, `analyses/` und `overview.md`,
    soweit fachlich nötig. Schreibe nur Wiki-Markdown; keine Seiten löschen,
-   keine Agenten-/Konfigurationsdateien ändern. Index und Log ergänzt Code.
+   keine Agenten-/Konfigurationsdateien ändern. `index.md` und `log.md` nicht
+   selbst bearbeiten, auch nicht gemeinsam mit der Quellenseite in einem Patch.
 5. Berichte kurz in Markdown: konkrete Befunde und Fundstellen, geänderte
    Wiki-Seiten, Revisionsabgleich, Widersprüche/offene Fragen und
    Extraktionsgrenzen einschließlich gelesenen Umfangs und ausgelassener Teile.

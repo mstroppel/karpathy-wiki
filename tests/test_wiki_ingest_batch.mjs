@@ -7,7 +7,7 @@ import path from 'node:path'
 import test from 'node:test'
 import { promisify } from 'node:util'
 import { runIngestBatch } from '../config/tools/wiki_ingest_batch_core.mjs'
-import { runBatchWorker } from '../config/tools/wiki_ingest_batch_worker.mjs'
+import { createBatchWorker, workerEvidence } from '../config/tools/wiki_ingest_batch_worker.mjs'
 import { withIngestLock } from '../config/tools/wiki_ingest_storage.mjs'
 
 const exec = promisify(execFile)
@@ -60,7 +60,12 @@ async function fixture(t, count = 3) {
   const worker = async ({ sources }) => {
     assert.equal(sources.length, 1)
     await writeFile(sources[0].wiki_path, '# Supported finding\nSource line 1.\n')
-    return '**Befunde:** Source line 1; newly added.\n**Widersprüche:** None observed.\n**Extraktionsgrenzen:** Fully read line 1.'
+    return {
+      content:
+        '**Befunde:** Source line 1; newly added.\n**Widersprüche:** None observed.\n**Extraktionsgrenzen:** Fully read line 1.',
+      source_written: true,
+      errors: [],
+    }
   }
   return { opts, git, manifest, publish, worker }
 }
@@ -111,7 +116,8 @@ test('missing/corrupt source and pre-write worker failure skip only that source'
       const result = await runIngestBatch(f.opts, async (batch) => {
         if (batch.sources[0].source_path === target) {
           if (kind === 'worker') throw new Error('PRIVATE_NATIVE_ERROR')
-          if (kind === 'skip') return 'SKIP: No legible source text.'
+          if (kind === 'skip')
+            return { content: 'SKIP: No legible source text.', source_written: false, errors: [] }
         }
         return f.worker(batch)
       })
@@ -277,7 +283,7 @@ test('uncertain live changes, source races and conflict markers retain edits and
           await rm(batch.sources[0].wiki_path)
           await symlink(batch.sources[0].source_path, batch.sources[0].wiki_path)
         }
-        return kind === 'skip-after-edit' ? 'SKIP: unsafe after edit' : text
+        return kind === 'skip-after-edit' ? { ...text, content: 'SKIP: unsafe after edit' } : text
       })
       assert.equal(result.status, 'blocked')
       assert.equal(result.commit, null)
@@ -331,6 +337,117 @@ test('single-source filter never imports unrelated sources', async (t) => {
   assert.equal(result.ingested, 1)
   assert.equal(result.remaining, 2)
   await assert.rejects(runIngestBatch({ ...f.opts, sourcePath }, f.worker), /nicht new\/outdated/)
+})
+
+test('a refused outdated source never receives a new revision or commit', async (t) => {
+  const f = await fixture(t, 1)
+  await runIngestBatch(f.opts, f.worker)
+  const page = path.join(f.opts.wikiRoot, 'sources/webdav/note-0.md')
+  const before = await readFile(page, 'utf8')
+  const head = await f.git('rev-parse', 'HEAD')
+  const source = path.join(f.opts.sourceRoot, 'webdav/note-0.md')
+  await writeFile(source, 'Changed synthetic fact.\n')
+  f.manifest.items[0].source_revision = sha(await readFile(source))
+  f.manifest.items[0].frontmatter.source_revision = f.manifest.items[0].source_revision
+  await f.publish()
+  const result = await runIngestBatch(f.opts, async () => ({
+    content: 'Keine Änderungen: vorgeschriebene Prüfung nicht verfügbar.',
+    source_written: false,
+    errors: [],
+  }))
+  assert.equal(result.status, 'partial')
+  assert.equal(result.ingested, 0)
+  assert.equal(result.remaining, 1)
+  assert.equal(await readFile(page, 'utf8'), before)
+  assert.equal(await f.git('rev-parse', 'HEAD'), head)
+  assert.match(await readFile(result.report_path, 'utf8'), /worker_no_source_write/)
+})
+
+test('an explicit source rewrite may retain unchanged findings for a new revision', async (t) => {
+  const f = await fixture(t, 1)
+  await runIngestBatch(f.opts, f.worker)
+  const file = path.join(f.opts.wikiRoot, 'sources/webdav/note-0.md')
+  const before = await readFile(file, 'utf8')
+  const source = path.join(f.opts.sourceRoot, 'webdav/note-0.md')
+  await writeFile(source, 'Changed synthetic source; same supported finding.\n')
+  const revision = sha(await readFile(source))
+  f.manifest.items[0].source_revision = revision
+  f.manifest.items[0].frontmatter.source_revision = revision
+  await f.publish()
+  const result = await runIngestBatch(f.opts, async () => {
+    await writeFile(file, before)
+    return {
+      content: 'Fully reread; supported finding unchanged.',
+      source_written: true,
+      errors: [],
+    }
+  })
+  assert.equal(result.ingested, 1)
+  assert.equal(result.remaining, 0)
+  assert.match(await readFile(file, 'utf8'), new RegExp(revision))
+})
+
+test('worker refusal, permission error and overview-only edits have distinct safe outcomes', async (t) => {
+  for (const kind of ['refusal', 'permission', 'overview', 'error-after-write']) {
+    await t.test(kind, async (t) => {
+      const f = await fixture(t, 1)
+      if (kind === 'overview')
+        await writeFile(path.join(f.opts.wikiRoot, 'overview.md'), '# Baseline\n')
+      if (kind === 'overview') {
+        await f.git('add', '.')
+        await f.git('commit', '-qm', 'baseline overview')
+      }
+      const head = await f.git('rev-parse', 'HEAD')
+      const result = await runIngestBatch(f.opts, async (batch) => {
+        if (kind === 'overview')
+          await writeFile(path.join(f.opts.wikiRoot, 'overview.md'), '# Worker partial edit\n')
+        if (kind === 'error-after-write') await f.worker(batch)
+        return {
+          content: 'Synthetic refused or incomplete worker.',
+          source_written: kind === 'error-after-write',
+          errors:
+            kind.includes('permission') || kind === 'error-after-write'
+              ? [{ code: 'worker_permission_denied', tool: 'patch' }]
+              : [],
+        }
+      })
+      assert.equal(result.ingested, 0)
+      assert.equal(
+        result.status,
+        ['overview', 'error-after-write'].includes(kind) ? 'blocked' : 'partial',
+      )
+      assert.equal(await f.git('rev-parse', 'HEAD'), head)
+      const report = await readFile(result.report_path, 'utf8')
+      assert.match(
+        report,
+        kind === 'permission' || kind === 'error-after-write'
+          ? /worker_permission_denied/
+          : /worker_no_source_write/,
+      )
+    })
+  }
+})
+
+test('revocation before dispatch or during a worker never publishes the selected source', async (t) => {
+  for (const when of ['before', 'during']) {
+    await t.test(when, async (t) => {
+      const f = await fixture(t, 1)
+      const revoke = async () => {
+        const [item] = f.manifest.items.splice(0)
+        f.manifest.revoked.push({ source_key: item.source_key, claim: item.claim })
+        await f.publish()
+      }
+      if (when === 'before') await revoke()
+      const result = await runIngestBatch(f.opts, async (batch) => {
+        const result = await f.worker(batch)
+        await revoke()
+        return result
+      })
+      assert.equal(result.ingested ?? 0, 0)
+      assert.equal(await f.git('rev-list', '--count', 'HEAD'), '1')
+      assert.equal(result.status, when === 'during' ? 'blocked' : 'done')
+    })
+  }
 })
 
 test('Paperless revisions require an independent digest and matching source metadata', async (t) => {
@@ -430,7 +547,9 @@ test('session adapter uses the parent model, final text and waits for actual wor
   const controller = new AbortController()
   const events = []
   const ctx = {
+    permission: { hook: async () => {} },
     session: {
+      hook: async () => {},
       get: async ({ sessionID }) =>
         sessionID === 'ses_parent'
           ? { model: { providerID: 'synthetic', id: 'fixture' } }
@@ -455,11 +574,22 @@ test('session adapter uses the parent model, final text and waits for actual wor
     },
   }
   assert.equal(
-    await runBatchWorker(
-      ctx,
-      { sessionID: 'ses_parent', signal: controller.signal },
-      { batch_id: 'synthetic', sources: [] },
-    ),
+    (
+      await (
+        await createBatchWorker(ctx)
+      )(
+        { sessionID: 'ses_parent', signal: controller.signal },
+        {
+          batch_id: 'synthetic',
+          sources: [
+            {
+              source_path: '/knowledge/sources/webdav/a.md',
+              wiki_path: '/knowledge/wiki/sources/webdav/a.md',
+            },
+          ],
+        },
+      )
+    ).content,
     'Report',
   )
   assert.deepEqual(events[0][1].model, { providerID: 'synthetic', id: 'fixture' })
@@ -467,5 +597,166 @@ test('session adapter uses the parent model, final text and waits for actual wor
   assert.deepEqual(
     events.slice(-2).map(([name]) => name),
     ['stop', 'wait'],
+  )
+})
+
+test('native worker evidence distinguishes exact source writes, errors and unrelated edits', () => {
+  const source = '/knowledge/wiki/sources/webdav/a.md'
+  const tool = (name, input, status = 'completed', error) => ({
+    type: 'assistant',
+    content: [{ type: 'tool', name, state: { input, status, error } }],
+  })
+  for (const [name, input] of [
+    ['write', { path: source }],
+    ['edit', { path: 'sources/webdav/a.md' }],
+    [
+      'patch',
+      {
+        patchText:
+          '*** Begin Patch\n*** Update File: sources/webdav/a.md\n@@\n-old\n+new\n*** End Patch',
+      },
+    ],
+  ])
+    assert.equal(workerEvidence([tool(name, input)], source, 'succeeded').source_written, true)
+  assert.equal(
+    workerEvidence([tool('write', { path: 'overview.md' })], source, 'succeeded').source_written,
+    false,
+  )
+  const evidence = workerEvidence(
+    [
+      tool('patch', { patchText: `*** Add File: ${source}` }, 'error', {
+        type: 'permission.rejected',
+        message: 'PRIVATE',
+      }),
+      { type: 'assistant', content: [{ type: 'text', text: 'Done!' }] },
+    ],
+    source,
+    'succeeded',
+  )
+  assert.equal(evidence.source_written, false)
+  assert.deepEqual(evidence.errors, [{ code: 'worker_permission_denied', tool: 'patch' }])
+  assert.doesNotMatch(JSON.stringify(evidence), /PRIVATE/)
+  assert.equal(workerEvidence([], source, 'failed').errors[0].code, 'worker_session_failed')
+  assert.equal(
+    workerEvidence([tool('read', { path: source })], source, 'succeeded').source_written,
+    false,
+  )
+  const readErrors = Array.from({ length: 25 }, () =>
+    tool('read', { path: source }, 'error', { type: 'permission.rejected' }),
+  )
+  const bounded = workerEvidence(readErrors, source, 'succeeded')
+  assert.equal(bounded.errors.length, 20)
+  assert.deepEqual(bounded.errors[0], { code: 'worker_permission_denied', tool: 'read' })
+})
+
+test('failed reads and skills after a source write prevent publication despite session success', async (t) => {
+  for (const name of ['read', 'skill']) {
+    await t.test(name, async (t) => {
+      const f = await fixture(t, 1)
+      const head = await f.git('rev-parse', 'HEAD')
+      const result = await runIngestBatch(f.opts, async (batch) => {
+        const report = await f.worker(batch)
+        return workerEvidence(
+          [
+            {
+              type: 'assistant',
+              content: [
+                {
+                  type: 'tool',
+                  name: 'write',
+                  state: { status: 'completed', input: { path: batch.sources[0].wiki_path } },
+                },
+                {
+                  type: 'tool',
+                  name,
+                  state: {
+                    status: 'error',
+                    error: { type: 'tool.execution', message: 'PRIVATE_NATIVE_ERROR' },
+                  },
+                },
+                { type: 'text', text: report.content },
+              ],
+            },
+          ],
+          batch.sources[0].wiki_path,
+          'succeeded',
+        )
+      })
+      assert.equal(result.ingested, 0)
+      assert.equal(result.status, 'blocked')
+      assert.equal(await f.git('rev-parse', 'HEAD'), head)
+      const report = await readFile(result.report_path, 'utf8')
+      assert.match(report, /worker_tool_failed/)
+      assert.match(report, new RegExp(`"tool":"${name}"`))
+      assert.match(report, /Quellschreibvorgang: belegt/)
+      assert.doesNotMatch(report, /PRIVATE_NATIVE_ERROR/)
+    })
+  }
+})
+
+test('admission is session-bound, restricts source targets, and expires after worker exit', async () => {
+  let permission
+  let contextHook
+  const ctx = {
+    permission: {
+      hook: async (_name, callback) => {
+        permission = callback
+      },
+    },
+    session: {
+      hook: async (_name, callback) => {
+        contextHook = callback
+      },
+      get: async () => ({ agent: 'wiki-ingest', model: { id: 'synthetic' }, outcome: 'succeeded' }),
+      create: async () => ({ id: 'ses_child' }),
+      prompt: async () => {
+        const event = {
+          sessionID: 'ses_child',
+          action: 'edit',
+          agent: 'wiki-ingest',
+          effect: 'allow',
+          resources: ['sources/webdav/a.md', 'overview.md'],
+        }
+        await permission(event)
+        assert.equal(event.effect, 'allow')
+        for (const resource of ['sources/webdav/other.md', 'index.md', 'log.md', '../escape.md']) {
+          const invalid = { ...event, resources: [resource] }
+          await permission(invalid)
+          assert.equal(invalid.effect, 'deny')
+        }
+        const outgoing = { sessionID: 'ses_child', system: [] }
+        contextHook(outgoing)
+        assert.match(outgoing.system[0].text, /Code-zugelassener/)
+      },
+      wait: async () => {},
+      interrupt: async () => {},
+      context: async () => [],
+    },
+  }
+  const worker = await createBatchWorker(ctx)
+  const standalone = {
+    sessionID: 'ses_standalone',
+    action: 'edit',
+    effect: 'allow',
+    resources: ['sources/webdav/a.md'],
+  }
+  await permission(standalone)
+  assert.equal(standalone.effect, 'deny')
+  const input = {
+    batch_id: 'synthetic',
+    sources: [
+      {
+        source_path: '/knowledge/sources/webdav/a.md',
+        wiki_path: '/knowledge/wiki/sources/webdav/a.md',
+      },
+    ],
+  }
+  await worker({ sessionID: 'ses_parent', signal: new AbortController().signal }, input)
+  const after = { ...standalone, sessionID: 'ses_child', effect: 'allow' }
+  await permission(after)
+  assert.equal(after.effect, 'deny')
+  await assert.rejects(
+    worker({ signal: new AbortController().signal }, { ...input, sources: [] }),
+    /Ungültiger/,
   )
 })
