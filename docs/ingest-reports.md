@@ -58,10 +58,12 @@ paths; an attempted multi-file patch touching a forbidden file is denied in full
 Before stamping a revision, code requires a successful native mutation of the
 selected source page in this worker attempt. A pre-existing page, session
 `succeeded`, or prose success claim is not evidence of processing. An explicit
-write of unchanged findings is allowed. Mutation errors and failed sessions
-prevent publication; unclear live edits remain in place for manual inspection.
-Private reports identify the worker and bounded code-owned failure reasons such
-as `worker_permission_denied`, `worker_tool_failed`, `worker_session_failed` and
+write of unchanged findings is allowed. Native tool errors (including reads and
+skills) and failed sessions prevent publication; unclear live edits remain in
+place for manual inspection.
+Private reports distinguish proven source writes from failed tool attempts,
+identify the worker and bounded code-owned failure reasons such as
+`worker_permission_denied`, `worker_tool_failed`, `worker_session_failed` and
 `worker_no_source_write`. Native error bodies are not copied into those reasons.
 
 Runtime tests use a deterministic synthetic model to verify transport, tool

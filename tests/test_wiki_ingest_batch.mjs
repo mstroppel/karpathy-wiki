@@ -637,6 +637,61 @@ test('native worker evidence distinguishes exact source writes, errors and unrel
   assert.deepEqual(evidence.errors, [{ code: 'worker_permission_denied', tool: 'patch' }])
   assert.doesNotMatch(JSON.stringify(evidence), /PRIVATE/)
   assert.equal(workerEvidence([], source, 'failed').errors[0].code, 'worker_session_failed')
+  assert.equal(
+    workerEvidence([tool('read', { path: source })], source, 'succeeded').source_written,
+    false,
+  )
+  const readErrors = Array.from({ length: 25 }, () =>
+    tool('read', { path: source }, 'error', { type: 'permission.rejected' }),
+  )
+  const bounded = workerEvidence(readErrors, source, 'succeeded')
+  assert.equal(bounded.errors.length, 20)
+  assert.deepEqual(bounded.errors[0], { code: 'worker_permission_denied', tool: 'read' })
+})
+
+test('failed reads and skills after a source write prevent publication despite session success', async (t) => {
+  for (const name of ['read', 'skill']) {
+    await t.test(name, async (t) => {
+      const f = await fixture(t, 1)
+      const head = await f.git('rev-parse', 'HEAD')
+      const result = await runIngestBatch(f.opts, async (batch) => {
+        const report = await f.worker(batch)
+        return workerEvidence(
+          [
+            {
+              type: 'assistant',
+              content: [
+                {
+                  type: 'tool',
+                  name: 'write',
+                  state: { status: 'completed', input: { path: batch.sources[0].wiki_path } },
+                },
+                {
+                  type: 'tool',
+                  name,
+                  state: {
+                    status: 'error',
+                    error: { type: 'tool.execution', message: 'PRIVATE_NATIVE_ERROR' },
+                  },
+                },
+                { type: 'text', text: report.content },
+              ],
+            },
+          ],
+          batch.sources[0].wiki_path,
+          'succeeded',
+        )
+      })
+      assert.equal(result.ingested, 0)
+      assert.equal(result.status, 'blocked')
+      assert.equal(await f.git('rev-parse', 'HEAD'), head)
+      const report = await readFile(result.report_path, 'utf8')
+      assert.match(report, /worker_tool_failed/)
+      assert.match(report, new RegExp(`"tool":"${name}"`))
+      assert.match(report, /Quellschreibvorgang: belegt/)
+      assert.doesNotMatch(report, /PRIVATE_NATIVE_ERROR/)
+    })
+  }
 })
 
 test('admission is session-bound, restricts source targets, and expires after worker exit', async () => {

@@ -19,6 +19,138 @@ CALLS: list[str] = []
 ERRORS: list[str] = []
 MODE = "normal"
 TARGET = ""
+DENIED_TOOL = "write"
+
+
+def update_patch(target, old, new):
+    return (
+        "patch",
+        {
+            "patchText": (
+                f"*** Begin Patch\n*** Update File: {target}\n@@\n-{old}\n+{new}\n*** End Patch"
+            )
+        },
+    )
+
+
+def worker_calls(batch):
+    source = batch["sources"][0]["wiki_path"]
+    relative = str(Path(source).relative_to(WIKI))
+    subject_pages = [f"{folder}/matrix.md" for folder in ("entities", "concepts", "analyses")]
+    if MODE == "denied":
+        if DENIED_TOOL == "patch":
+            # Existing targets get valid matching hunks; absent targets get Add.
+            file = Path(TARGET) if Path(TARGET).is_absolute() else WIKI / TARGET
+            if file.is_file():
+                old = file.read_text().splitlines()[0]
+                return [update_patch(TARGET, old, "Forbidden synthetic write.")]
+            return [
+                (
+                    "patch",
+                    {
+                        "patchText": (
+                            f"*** Begin Patch\n*** Add File: {TARGET}\n"
+                            "+Forbidden synthetic write.\n*** End Patch"
+                        )
+                    },
+                )
+            ]
+        if DENIED_TOOL == "edit":
+            file = Path(TARGET) if Path(TARGET).is_absolute() else WIKI / TARGET
+            # Seeded existing forbidden targets ensure permission, not ENOENT, is tested.
+            return [
+                (
+                    "edit",
+                    {
+                        "path": TARGET,
+                        "oldString": file.read_text().splitlines()[0],
+                        "newString": "Forbidden synthetic write.",
+                    },
+                )
+            ]
+        return [("write", {"path": TARGET, "content": "Forbidden synthetic write.\n"})]
+    if MODE == "mixed":
+        return [
+            (
+                "patch",
+                {
+                    "patchText": (
+                        f"*** Begin Patch\n*** Update File: {relative}\n@@\n"
+                        "-# Edited synthetic finding  \n+# Should not be published\n"
+                        "*** Update File: index.md\n@@\n"
+                        " # Synthetic index.md\n+Forbidden worker index edit\n*** End Patch"
+                    )
+                },
+            )
+        ]
+    if MODE == "patch":
+        calls = []
+        for target in [relative, *subject_pages, "overview.md"]:
+            old = "# Edited synthetic finding  " if target == relative else f"# Synthetic {target}"
+            new = "# Patched synthetic finding  " if target == relative else f"# Patched {target}"
+            calls.append(update_patch(str(WIKI / target), old, new))
+            calls.append(update_patch(target, new, new + "\n+Relative patch evidence."))
+        # Real allowed multi-file patch with mixed absolute/relative targets.
+        calls.append(
+            (
+                "patch",
+                {
+                    "patchText": (
+                        f"*** Begin Patch\n*** Update File: {relative}\n@@\n"
+                        " # Patched synthetic finding  \n+Combined patch evidence.\n"
+                        "*** Update File: /knowledge/wiki/overview.md\n@@\n"
+                        " # Patched overview.md\n+Combined patch evidence.\n*** End Patch"
+                    )
+                },
+            )
+        )
+        return calls
+    if MODE in ("separate", "read-error"):
+        write = ("write", {"path": source, "content": "# Preserved live finding\n"})
+        failure = (
+            ("write", {"path": "index.md", "content": "Forbidden index write.\n"})
+            if MODE == "separate"
+            else ("read", {"path": "/knowledge/wiki/.env"})
+        )
+        return [write, failure]
+    calls = [
+        ("write", {"path": source, "content": "# Synthetic finding  \nSource line 1.\n\n\n"}),
+        ("write", {"path": relative, "content": "# Synthetic finding  \nSource line 1.\n\n\n"}),
+        (
+            "edit",
+            {
+                "path": source,
+                "oldString": "# Synthetic finding",
+                "newString": "# Absolute edited finding",
+            },
+        ),
+        (
+            "edit",
+            {
+                "path": relative,
+                "oldString": "# Absolute edited finding",
+                "newString": "# Edited synthetic finding",
+            },
+        ),
+    ]
+    for target in [*subject_pages, "overview.md"]:
+        text = f"# Synthetic {target}\n"
+        calls.extend(
+            [
+                ("write", {"path": target, "content": text}),
+                ("write", {"path": str(WIKI / target), "content": text}),
+                ("edit", {"path": target, "oldString": "# Synthetic", "newString": "# Edited"}),
+                (
+                    "edit",
+                    {
+                        "path": str(WIKI / target),
+                        "oldString": "# Edited",
+                        "newString": "# Synthetic",
+                    },
+                ),
+            ]
+        )
+    return calls
 
 
 class Model(BaseHTTPRequestHandler):
@@ -98,59 +230,15 @@ class Model(BaseHTTPRequestHandler):
                 else batch["sources"][0]["source_path"]
             )
             call = (name, {key: target})
-        elif worker and len(history) == 3:
-            assert batch
-            if MODE == "mixed":
-                call = (
-                    "patch",
-                    {
-                        "patchText": (
-                            "*** Begin Patch\n"
-                            "*** Update File: sources/webdav/notes.md\n@@\n"
-                            "-# Edited synthetic finding  \n+# Should not be published\n"
-                            "*** Update File: index.md\n@@\n"
-                            " # Synthetic index.md\n+Forbidden worker index edit\n*** End Patch"
-                        )
-                    },
-                )
-            elif MODE == "patch":
-                call = (
-                    "patch",
-                    {
-                        "patchText": (
-                            "*** Begin Patch\n*** Update File: sources/webdav/notes.md\n@@\n"
-                            "-# Edited synthetic finding  \n+# Patched synthetic finding  \n"
-                            "*** Update File: /knowledge/wiki/overview.md\n@@\n"
-                            " # Synthetic overview.md\n+Synthetic overview evidence.\n*** End Patch"
-                        )
-                    },
-                )
-            elif MODE == "denied":
-                call = ("write", {"path": TARGET, "content": "Forbidden synthetic write.\n"})
-            else:
-                name = next(name for name in names if name == "write")
-                props = tools[name]["parameters"]["properties"]
-                key = next(key for key in ("path", "filePath", "file_path") if key in props)
-                call = (
-                    name,
-                    {
-                        key: batch["sources"][0]["wiki_path"],
-                        "content": "# Synthetic finding  \nSource line 1.\n\n\n",
-                    },
-                )
-        elif worker and len(history) == 4 and MODE == "normal":
-            props = tools["edit"]["parameters"]["properties"]
-            key = next(key for key in ("path", "filePath", "file_path") if key in props)
-            old = next(key for key in ("oldString", "old_string", "oldText") if key in props)
-            new = next(key for key in ("newString", "new_string", "newText") if key in props)
-            assert batch
-            relative = str(Path(batch["sources"][0]["wiki_path"]).relative_to(WIKI))
-            call = (
-                "edit",
-                {key: relative, old: "# Synthetic finding", new: "# Edited synthetic finding"},
-            )
         elif worker:
-            content = RESULT
+            assert batch
+            calls = worker_calls(batch)
+            step = len(history) - 3
+            if step < len(calls):
+                call = calls[step]
+                assert call[0] in tools, (MODE, call[0], names)
+            else:
+                content = RESULT
         if call:
             name, args = call
             CALLS.append(name)
@@ -203,7 +291,7 @@ def request(route, data=None):
 
 
 def main():
-    global MODE, TARGET
+    global MODE, TARGET, DENIED_TOOL
     subprocess.run(
         ["sh", "/etc/opencode/init.sh"],
         env={
@@ -220,6 +308,10 @@ def main():
     assert "Quellenstatus/Widerruf" in WIKI.joinpath("AGENTS.md").read_text()
     for name in ("index.md", "overview.md", "log.md"):
         WIKI.joinpath(name).write_text(f"# Synthetic {name}\n")
+    for target in (".opencode/forbidden.md", "sources/webdav/other.md", "../forbidden.md"):
+        file = WIKI / target
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.write_text("# Protected synthetic target\n")
     text = "Synthetic source line 1.\n"
     for name in ("notes.md", "unreadable.md", "next.md"):
         SOURCE.joinpath(name).write_text(text)
@@ -318,13 +410,13 @@ def main():
                 "ingested",
             ], state
             assert sum(bool(source["commit"]) for source in state["sources"]) == 2, state
-            assert CALLS == ["wiki_ingest_batch"] + [
-                "skill",
-                "read",
-                "read",
+            expected = ["skill", "read", "read", "write", "write", "edit", "edit"] + [
+                "write",
                 "write",
                 "edit",
-            ] * 2 + ["read"], CALLS
+                "edit",
+            ] * 4
+            assert CALLS == ["wiki_ingest_batch"] + expected * 2 + ["read"], CALLS
             assert revision in WIKI.joinpath("sources/webdav/notes.md").read_text()
             assert SOURCE.joinpath("notes.md").read_text() == text
             count = subprocess.check_output(
@@ -371,13 +463,13 @@ def main():
             note = next(item for item in manifest["items"] if item["source_key"] == "notes.md")
             note["source_revision"] = note["frontmatter"]["source_revision"] = new_revision
             manifest_path.write_text(json.dumps(manifest))
-            probes = [
-                ("refusal", "worker_no_source_write"),
-                ("mixed", "worker_permission_denied"),
-                ("patch", None),
+            probes: list[tuple[str, str | None, str, str]] = [
+                ("refusal", "worker_no_source_write", "", ""),
+                ("mixed", "worker_permission_denied", "", ""),
             ]
             forbidden = [
                 "AGENTS.md",
+                "index.md",
                 "/knowledge/wiki/log.md",
                 ".git/config",
                 ".opencode/forbidden.md",
@@ -385,19 +477,35 @@ def main():
                 "/knowledge/sources/webdav/notes.md",
                 "../forbidden.md",
             ]
-            # Denials run while the selected source is still outdated.
-            probes[2:2] = [("denied", "worker_permission_denied")] * len(forbidden)
-            for mode, reason in probes:
+            probes.extend(
+                ("denied", "worker_permission_denied", tool, target)
+                for tool in ("write", "edit", "patch")
+                for target in forbidden
+            )
+            probes.extend(
+                [
+                    ("separate", "worker_permission_denied", "", ""),
+                    ("read-error", "worker_permission_denied", "", ""),
+                    ("patch", None, "", ""),
+                ]
+            )
+            protected = {
+                target: (Path(target) if Path(target).is_absolute() else WIKI / target).read_bytes()
+                for target in forbidden
+            }
+            for mode, reason, denied_tool, target in probes:
                 MODE = mode
-                if mode == "denied":
-                    TARGET = forbidden.pop(0)
+                TARGET = target
+                DENIED_TOOL = denied_tool
                 probe = request(
                     "/api/session",
                     {
                         "agent": "wiki-ingest-orchestrator",
                         "model": {
                             "providerID": "fake",
-                            "id": "gpt-5-synthetic" if mode in ("mixed", "patch") else "synthetic",
+                            "id": "gpt-5-synthetic"
+                            if mode in ("mixed", "patch") or denied_tool == "patch"
+                            else "synthetic",
                         },
                         "location": {"directory": str(WIKI)},
                     },
@@ -411,10 +519,38 @@ def main():
                     max(reports, key=lambda report: report.stat().st_mtime_ns).read_text()
                 )
                 if reason:
-                    assert state["status"] == "partial", state
+                    live_write = mode in ("separate", "read-error")
+                    assert state["status"] == ("blocked" if live_write else "partial"), state
                     assert reason in state["sources"][0]["blocker"], state
-                    assert source_page.read_bytes() == before
+                    assert state["sources"][0]["source_written"] is live_write, state
                     assert new_revision not in source_page.read_text()
+                    if live_write:
+                        assert source_page.read_text() == "# Preserved live finding\n"
+                        native = request(
+                            f"/api/experimental/session/{state['sources'][0]['worker_session']}/export"
+                        )["data"]
+                        tools = [
+                            part
+                            for msg in native["messages"]
+                            if msg["type"] == "assistant"
+                            for part in msg["content"]
+                            if part["type"] == "tool"
+                        ]
+                        assert tools[-2]["state"]["status"] == "completed", tools
+                        assert tools[-1]["state"]["error"]["type"] == "permission.rejected", tools
+                        report = (
+                            max(reports, key=lambda file: file.stat().st_mtime_ns)
+                            .with_name("report.md")
+                            .read_text()
+                        )
+                        assert "Quellschreibvorgang: belegt" in report
+                        # Explicit test-harness recovery after verifying preserved live edits.
+                        source_page.write_bytes(before)
+                    else:
+                        assert source_page.read_bytes() == before
+                    for target, original in protected.items():
+                        file = Path(target) if Path(target).is_absolute() else WIKI / target
+                        assert file.read_bytes() == original, (mode, denied_tool, target)
                 else:
                     assert state["status"] == "done", state
                     assert new_revision in source_page.read_text()

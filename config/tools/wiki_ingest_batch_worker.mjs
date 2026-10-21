@@ -19,13 +19,13 @@ export function workerEvidence(messages, sourcePath, outcome) {
   const parts = messages.flatMap((message) =>
     message.type === 'assistant' ? (message.content ?? []) : [],
   )
-  const tools = parts.filter((part) => part.type === 'tool' && mutations.has(part.name))
+  const tools = parts.filter((part) => part.type === 'tool')
   const errors = tools
     .filter((part) => part.state?.status !== 'completed')
     .slice(0, 20)
     .map((part) => ({
       code:
-        part.state.error?.type === 'permission.rejected'
+        part.state?.error?.type === 'permission.rejected'
           ? 'worker_permission_denied'
           : 'worker_tool_failed',
       tool: part.name,
@@ -39,7 +39,10 @@ export function workerEvidence(messages, sourcePath, outcome) {
         .map((part) => part.text)
         .join('\n') ?? '',
     source_written: tools.some(
-      (part) => part.state?.status === 'completed' && targets(part).includes(sourcePath),
+      (part) =>
+        mutations.has(part.name) &&
+        part.state?.status === 'completed' &&
+        targets(part).includes(sourcePath),
     ),
     errors,
   }

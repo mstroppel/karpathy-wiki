@@ -112,6 +112,7 @@ function reportText(state) {
         `Commit: ${source.commit ?? 'Kein Commit verifiziert'}`,
         `Geänderte Seiten: ${(source.changed_pages ?? []).join(', ')}`,
         `Worker: ${source.worker_session ?? 'Nicht ermittelt'}`,
+        `Quellschreibvorgang: ${source.source_written === true ? 'belegt' : 'nicht belegt'}`,
         `Werkzeugfehler: ${JSON.stringify(source.worker_errors ?? [])}`,
         source.blocker ?? '',
         source.content ?? 'Nicht ermittelt',
@@ -197,6 +198,7 @@ export async function runIngestBatch(input, worker) {
         source.content = result?.content
         source.worker_session = result?.session_id
         source.worker_errors = result?.errors
+        source.source_written = result?.source_written === true
         signal?.throwIfAborted()
         if (result?.errors?.length) {
           const codes = new Set([
