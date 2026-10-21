@@ -135,7 +135,12 @@ export function workerEvidence(
       tool: part.name,
     }
     if (targetRead || repeatedRead || repeatedSkill || correctedPatch) recovered.push(item)
-    else if (errors.length < 20) errors.push(item)
+    else if (
+      errors.length < 20 ||
+      (item.code === 'worker_permission_denied' &&
+        !errors.some((failure) => failure.code === 'worker_permission_denied'))
+    )
+      errors.push(item)
   })
   if (sourcePath && !sourceRead) errors.push({ code: 'worker_source_not_read', tool: 'read' })
   if (sourcePath && !skillLoaded) errors.push({ code: 'worker_skill_not_loaded', tool: 'skill' })

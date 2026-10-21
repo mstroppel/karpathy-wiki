@@ -308,6 +308,17 @@ async function compactDraft(opts, state, attempt, baseline) {
   }
 }
 
+function repairFromAttempt(opts, batchId, attempt) {
+  if (!attempt?.repair_hashes) return null
+  return {
+    wiki: path.join(opts.root, 'drafts', batchId, attempt.id, 'wiki'),
+    files: Object.keys(attempt.repair_hashes),
+    hashes: attempt.repair_hashes,
+    base: attempt.base,
+    sourceHash: attempt.source_hash,
+  }
+}
+
 async function retainedBytes(opts) {
   const root = path.join(opts.root, 'drafts')
   try {
@@ -598,7 +609,11 @@ export async function runIngestBatch(input, worker) {
           continue
         }
         const deadline = Date.now() + opts.sourceBudgetMs
-        let repairDraft = null
+        let repairDraft = repairFromAttempt(
+          opts,
+          state.batch_id,
+          source.attempts.findLast((attempt) => attempt.repair_hashes),
+        )
         let runtimeRetries = 0
         let modelCalls = 0
         for (let attemptNumber = 0; attemptNumber < opts.maxAttempts; attemptNumber++) {
@@ -660,9 +675,11 @@ export async function runIngestBatch(input, worker) {
             ) {
               for (const file of repairDraft.files) {
                 const bytes = await fileBytes(path.join(repairDraft.wiki, file), repairDraft.wiki)
+                if (digest(bytes) !== repairDraft.hashes[file])
+                  throw new IngestFault('draft_changed')
                 await putFile(draft.wiki, file, bytes)
               }
-            }
+            } else repairDraft = null
             const result = await worker({
               batch_id: state.batch_id,
               wiki_root: draft.wiki,
@@ -765,12 +782,16 @@ export async function runIngestBatch(input, worker) {
                   path.relative(opts.wikiRoot, source.wiki_path),
                   opts.maxDraftBytes,
                 )
-                repairDraft = {
-                  wiki,
-                  files,
-                  base: attempt.base,
-                  sourceHash: digest(await verifyDigest(source, opts, attempt.source_hash)),
-                }
+                await verifyDigest(source, opts, attempt.source_hash)
+                attempt.repair_hashes = Object.fromEntries(
+                  await Promise.all(
+                    files.map(async (file) => [
+                      file,
+                      digest(await fileBytes(path.join(wiki, file), wiki)),
+                    ]),
+                  ),
+                )
+                repairDraft = repairFromAttempt(opts, state.batch_id, attempt)
                 // If source identity changed, prior interpretation cannot be reused.
                 if (source.blocker === 'source_changed') repairDraft = null
               } catch {

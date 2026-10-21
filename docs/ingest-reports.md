@@ -36,7 +36,9 @@ are allowed. Each child has at most 120 seconds; 96 model requests and a shared
 allowance of two runtime provider retries per source. Runtime backoff is retained
 only within that allowance/deadline; failed providers pause subsequent dispatch.
 Valid partial drafts are inspected and carried forward only with the same base
-and source digest; invalid/unbound drafts are retained but never reused.
+and original source digest. Allowed repair-file hashes are durable, so an approved
+continuation can inspect and reuse them after reopening; changed draft bytes are
+not silently adopted. Invalid/unbound drafts are retained but never reused.
 Changed sources require fresh processing; removed/revoked sources cannot publish.
 Independent sources continue after isolated failures, including post-write failures.
 OCR gaps and contradictions are extraction limits, not automatic rejection reasons.

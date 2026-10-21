@@ -624,6 +624,25 @@ test('refreshed questions display and process the same freshly approved revision
   assert.equal(done.status, 'done')
 })
 
+test('an approved continuation inspects and reuses a bound partial draft after reopening', async (t) => {
+  const f = await fixture(t, 1)
+  const paused = await runIngestBatch({ ...f.opts, maxAttempts: 1 }, async (batch) => {
+    await writeFile(batch.sources[0].wiki_path, '# Retained synthetic partial\n')
+    return { source_written: true, errors: [{ code: 'worker_permission_denied', tool: 'write' }] }
+  })
+  const inspected = await runIngestBatch(f.opts, () =>
+    assert.fail('inspection never starts workers'),
+  )
+  assert.equal(inspected.batch_id, paused.batch_id)
+  const result = await answer(f, inspected, inspected.questions[0], 'retry', async (batch) => {
+    assert.deepEqual(batch.repair_files, ['sources/webdav/note-0.md'])
+    assert.match(await readFile(batch.sources[0].wiki_path, 'utf8'), /Retained synthetic partial/)
+    return f.worker(batch)
+  })
+  assert.equal(result.status, 'done', result.blocker)
+  assert.equal(await f.git('rev-list', '--count', 'HEAD'), '2')
+})
+
 test('a permission rejection anywhere in native errors prevents automatic retries', async (t) => {
   const f = await fixture(t, 1)
   let calls = 0
@@ -1006,6 +1025,20 @@ test('session adapter uses the parent model, final text and waits for actual wor
 const nativeTool = (name, input, status = 'completed', error) => ({
   type: 'assistant',
   content: [{ type: 'tool', name, state: { input, status, error } }],
+})
+
+test('bounded native error summaries never hide a later explicit denial', () => {
+  const source = '/knowledge/wiki/sources/webdav/a.md'
+  const failures = Array.from({ length: 25 }, () =>
+    nativeTool('read', { path: '/knowledge/wiki/missing.md' }, 'error', {
+      type: 'tool.execution',
+      message: 'Synthetic failure',
+    }),
+  )
+  const denial = nativeTool('write', { path: source }, 'error', { type: 'permission.rejected' })
+  const result = workerEvidence([...failures, denial], source, 'succeeded')
+  assert.ok(result.errors.some((item) => item.code === 'worker_permission_denied'))
+  assert.ok(result.errors.length <= 21)
 })
 
 test('completion requires covered source reads and skill; explicit rejection is never forgiven', () => {
