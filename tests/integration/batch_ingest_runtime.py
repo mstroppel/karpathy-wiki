@@ -133,6 +133,10 @@ def worker_calls(batch):
             },
         ),
     ]
+    if MODE == "normal":
+        # Probe an absent new target, then recover through a real native write.
+        # The earlier failed read must not poison an otherwise valid worker.
+        calls.insert(0, ("read", {"path": source}))
     for target in [*subject_pages, "overview.md"]:
         text = f"# Synthetic {target}\n"
         calls.extend(
@@ -410,7 +414,27 @@ def main():
                 "ingested",
             ], state
             assert sum(bool(source["commit"]) for source in state["sources"]) == 2, state
-            expected = ["skill", "read", "read", "write", "write", "edit", "edit"] + [
+            for source in state["sources"]:
+                if source["status"] != "ingested":
+                    continue
+                assert source["worker_errors"] == [], source
+                native = request(f"/api/experimental/session/{source['worker_session']}/export")[
+                    "data"
+                ]
+                failures = [
+                    part
+                    for msg in native["messages"]
+                    if msg["type"] == "assistant"
+                    for part in msg["content"]
+                    if part["type"] == "tool" and part["state"]["status"] == "error"
+                ]
+                assert len(failures) == 1, failures
+                assert failures[0]["name"] == "read", failures
+                assert failures[0]["state"]["error"] == {
+                    "type": "tool.execution",
+                    "message": f"File not found: {source['wiki_path']}",
+                }, failures
+            expected = ["skill", "read", "read", "read", "write", "write", "edit", "edit"] + [
                 "write",
                 "write",
                 "edit",

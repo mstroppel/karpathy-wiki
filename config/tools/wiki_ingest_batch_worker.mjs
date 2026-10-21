@@ -1,3 +1,4 @@
+import { lstat } from 'node:fs/promises'
 import path from 'node:path'
 
 const wikiRoot = '/knowledge/wiki'
@@ -14,14 +15,39 @@ function targets(part) {
   return typeof input.path === 'string' ? [path.resolve(wikiRoot, input.path)] : []
 }
 
+function createsSource(part, sourcePath) {
+  if (part.state?.status !== 'completed') return false
+  if (part.name === 'write') return targets(part).includes(sourcePath)
+  if (part.name !== 'patch') return false
+  return [...(part.state.input?.patchText ?? '').matchAll(/^\*\*\* Add File: (.+)$/gm)].some(
+    (match) => path.resolve(wikiRoot, match[1]) === sourcePath,
+  )
+}
+
 // Evidence comes from native tool states, never a model-authored success claim.
-export function workerEvidence(messages, sourcePath, outcome) {
+export function workerEvidence(messages, sourcePath, outcome, { sourceAbsent = false } = {}) {
   const parts = messages.flatMap((message) =>
     message.type === 'assistant' ? (message.content ?? []) : [],
   )
   const tools = parts.filter((part) => part.type === 'tool')
+  const creation = tools.findIndex((part) => createsSource(part, sourcePath))
   const errors = tools
-    .filter((part) => part.state?.status !== 'completed')
+    .filter((part, index) => {
+      if (part.state?.status === 'completed') return false
+      // A new page may legitimately be probed before creation. Do not forgive
+      // other reads, permissions, failed mutations or post-creation failures.
+      const inputPath = part.state?.input?.path
+      return !(
+        sourceAbsent &&
+        index < creation &&
+        part.name === 'read' &&
+        part.state?.status === 'error' &&
+        typeof inputPath === 'string' &&
+        path.resolve(wikiRoot, inputPath) === sourcePath &&
+        part.state.error?.type === 'tool.execution' &&
+        part.state.error?.message === `File not found: ${sourcePath}`
+      )
+    })
     .slice(0, 20)
     .map((part) => ({
       code:
@@ -93,6 +119,15 @@ export async function createBatchWorker(ctx) {
     )
       throw new Error('Ungültiger interner Worker-Auftrag')
     context.signal.throwIfAborted()
+    // Snapshot before admitting the worker; never infer absence from its prose
+    // or from an ENOENT-looking error on a previously existing page.
+    const sourceAbsent = await lstat(batch.sources[0].wiki_path).then(
+      () => false,
+      (error) => {
+        if (error.code === 'ENOENT') return true
+        throw error
+      },
+    )
     const parent = await ctx.session.get({ sessionID: context.sessionID })
     const child = await ctx.session.create({
       parentID: context.sessionID,
@@ -121,6 +156,7 @@ export async function createBatchWorker(ctx) {
           await ctx.session.context({ sessionID: child.id }),
           batch.sources[0].wiki_path,
           info.outcome,
+          { sourceAbsent },
         ),
         session_id: child.id,
       }

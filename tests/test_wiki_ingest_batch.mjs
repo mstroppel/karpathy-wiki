@@ -600,6 +600,105 @@ test('session adapter uses the parent model, final text and waits for actual wor
   )
 })
 
+const nativeTool = (name, input, status = 'completed', error) => ({
+  type: 'assistant',
+  content: [{ type: 'tool', name, state: { input, status, error } }],
+})
+
+test('a missing target read followed by creation commits and continues to the next source', async (t) => {
+  for (const mutation of ['write', 'patch']) {
+    await t.test(mutation, async (t) => {
+      const f = await fixture(t, 2)
+      let calls = 0
+      const result = await runIngestBatch(f.opts, async (batch) => {
+        calls++
+        const source = batch.sources[0].wiki_path
+        await assert.rejects(readFile(source), { code: 'ENOENT' })
+        const report = await f.worker(batch)
+        return workerEvidence(
+          [
+            nativeTool('read', { path: source }, 'error', {
+              type: 'tool.execution',
+              message: `File not found: ${source}`,
+            }),
+            nativeTool(
+              mutation,
+              mutation === 'write'
+                ? { path: source }
+                : {
+                    patchText: `*** Begin Patch\n*** Add File: ${source}\n+# Finding\n*** End Patch`,
+                  },
+            ),
+            { type: 'assistant', content: [{ type: 'text', text: report.content }] },
+          ],
+          source,
+          'succeeded',
+          { sourceAbsent: true },
+        )
+      })
+      assert.equal(result.status, 'done', result.blocker)
+      assert.equal(result.ingested, 2)
+      assert.equal(calls, 2)
+      assert.equal(result.remaining, 0)
+      assert.equal(await f.git('status', '--porcelain'), '')
+      assert.equal(await f.git('rev-list', '--count', 'HEAD'), '3')
+    })
+  }
+})
+
+test('only an absent exact target read recovered by later creation is nonfatal', () => {
+  const source = '/knowledge/wiki/sources/webdav/a.md'
+  const missing = (
+    target = source,
+    type = 'tool.execution',
+    message = `File not found: ${target}`,
+  ) => nativeTool('read', { path: target }, 'error', { type, message })
+  const create = nativeTool('patch', {
+    patchText: `*** Begin Patch\n*** Add File: ${source}\n+# Finding\n*** End Patch`,
+  })
+  const recovered = [missing(), create]
+  assert.deepEqual(
+    workerEvidence(recovered, source, 'succeeded', { sourceAbsent: true }).errors,
+    [],
+  )
+  for (const messages of [
+    [missing()],
+    [create, missing()],
+    [missing('/knowledge/sources/webdav/a.md'), create],
+    [missing('/knowledge/wiki/overview.md'), create],
+    [missing(source, 'permission.rejected'), create],
+    [missing(source, 'tool.execution', 'Permission denied'), create],
+    [missing(), nativeTool('write', { path: source }, 'error', { type: 'tool.execution' })],
+    [missing(), nativeTool('edit', { path: source })],
+    [missing(), nativeTool('patch', { patchText: `*** Update File: ${source}` })],
+    [missing(), nativeTool('patch', { patchText: `*** Delete File: ${source}` })],
+    [missing(), nativeTool('write', { path: '/knowledge/wiki/overview.md' })],
+  ]) {
+    assert.ok(workerEvidence(messages, source, 'succeeded', { sourceAbsent: true }).errors.length)
+  }
+  assert.equal(workerEvidence(recovered, source, 'succeeded').errors.length, 1)
+  assert.equal(
+    workerEvidence(recovered, source, 'succeeded', { sourceAbsent: false }).errors.length,
+    1,
+  )
+  assert.deepEqual(workerEvidence(recovered, source, 'failed', { sourceAbsent: true }).errors, [
+    { code: 'worker_session_failed', tool: 'session' },
+  ])
+  const relative = 'sources/webdav/a.md'
+  assert.deepEqual(
+    workerEvidence(
+      [
+        missing(relative, 'tool.execution', `File not found: ${source}`),
+        nativeTool('write', { path: relative }),
+      ],
+      source,
+      'succeeded',
+      { sourceAbsent: true },
+    ).errors,
+    [],
+  )
+})
+
 test('native worker evidence distinguishes exact source writes, errors and unrelated edits', () => {
   const source = '/knowledge/wiki/sources/webdav/a.md'
   const tool = (name, input, status = 'completed', error) => ({
