@@ -59,8 +59,12 @@ Before stamping a revision, code requires a successful native mutation of the
 selected source page in this worker attempt. A pre-existing page, session
 `succeeded`, or prose success claim is not evidence of processing. An explicit
 write of unchanged findings is allowed. Native tool errors (including reads and
-skills) and failed sessions prevent publication; unclear live edits remain in
-place for manual inspection.
+skills) and failed sessions prevent publication. The sole exception is a native
+`File not found` read of the exact selected target, proven absent before the
+worker started and subsequently created by a successful native write or
+`Add File` patch. Missing source reads, permission errors and reads failing after
+creation still block publication. Unclear live edits remain in place for manual
+inspection.
 Private reports distinguish proven source writes from failed tool attempts,
 identify the worker and bounded code-owned failure reasons such as
 `worker_permission_denied`, `worker_tool_failed`, `worker_session_failed` and
