@@ -168,6 +168,7 @@ def run_cycle(
                 "Speech request %s failed with %s",
                 identifier_tail(identifier),
                 type(error).__name__,
+                exc_info=LOG.isEnabledFor(logging.DEBUG),
             )
             write_failure(root, identifier, f"processing:{type(error).__name__}")
             failed += 1
@@ -445,6 +446,15 @@ def health_check(path: Path) -> None:
         raise SystemExit(1) from error
 
 
+def configure_logging() -> None:
+    level = os.getenv("SPEECH_LOG_LEVEL", "INFO").strip().upper()
+    if level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
+        raise ValueError("SPEECH_LOG_LEVEL must be DEBUG, INFO, WARNING, ERROR or CRITICAL")
+    # Keep dependency loggers at INFO: HTTP debug traces can expose credentials.
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    LOG.setLevel(level)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Local speech processing worker")
     parser.add_argument("--once", action="store_true", help="process queued requests and exit")
@@ -454,7 +464,7 @@ def main() -> None:
         help="validate the worker heartbeat file and exit",
     )
     arguments = parser.parse_args()
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    configure_logging()
     speech_root = Path(os.getenv("SPEECH_ROOT", "/data/speech"))
     if arguments.health_check:
         health_check(Path(arguments.health_check))

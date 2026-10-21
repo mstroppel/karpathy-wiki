@@ -159,6 +159,7 @@ services:
       TZ: ${TZ:-UTC}
       SPEECH_ROOT: /data/speech
       SPEECH_BACKEND: ${SPEECH_BACKEND:-faster-whisper}
+      SPEECH_LOG_LEVEL: ${SPEECH_LOG_LEVEL:-INFO}
       SPEECH_MODEL: ${SPEECH_MODEL:-small}
       SPEECH_DEVICE: ${SPEECH_DEVICE:-cpu}
       SPEECH_COMPUTE_TYPE: ${SPEECH_COMPUTE_TYPE:-int8}
