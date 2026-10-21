@@ -29,7 +29,7 @@ class BatchWorkflowTests(unittest.TestCase):
             self.assertIn({"action": action, "resource": "*", "effect": "deny"}, rules)
         self.assertIn({"action": "wiki_ingest_batch", "resource": "*", "effect": "allow"}, rules)
         self.assertIn("Keine parallelen Aufrufe", self.orchestrator)
-        self.assertIn("Wiederholung übersprungener Quellen", self.orchestrator)
+        self.assertIn("keine selbst erfundene Wiederholung", self.orchestrator)
         self.assertIn("einmal auf", self.orchestrator)
 
     def test_worker_has_normal_files_but_no_shell_git_or_credentials(self):
@@ -138,7 +138,8 @@ class BatchWorkflowTests(unittest.TestCase):
             "Readers can see",
             "No automatic reconciliation",
             "semantic correctness",
-            "requires `source_sha256`",
+            "requires",
+            "`source_sha256`",
             "Independent sources",
         ):
             self.assertIn(phrase, text)

@@ -20,6 +20,10 @@ als User-Nachricht einer vom Code erzeugten Kindsession, nicht als sichtbarer
 Tool-Aufruf der Elternsession. Eine `batch_id` im Nachrichtentext allein erteilt
 keine Schreibzulassung. Diese Aufgabenverteilung gilt auch dann, wenn ältere
 Wiki-Anweisungen diese code-eigenen Aufgaben noch allgemein dem Bearbeiter zuweisen.
+Worker schreiben nur im gelieferten privaten Entwurf, nie ins Live-Wiki.
+Offene Ingest-Fragen gehören weiterhin zum selben Orchestrator-Auftrag: nach
+Nutzerentscheidung ausschließlich die gelieferte Batch-/Entscheidungs-ID
+fortsetzen; keine Quelle aus Gesprächsprosa neu auswählen.
 
 Ordne jede Anfrage genau einem Vorgang zu. Die Delegationsregeln gelten nur für
 primäre Agenten; ein spezialisierter Agent führt seinen Auftrag selbst aus.

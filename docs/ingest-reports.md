@@ -1,90 +1,105 @@
 # Wiki ingestion
 
-`/ingest-new` invokes `wiki_ingest_batch` once. Code snapshots the pending selection
-and processes it sequentially, with one fresh worker and one commit per source.
-`/ingest <source>` uses the same implementation with an exact source-path filter.
-Already-current sources are not reinterpreted. New arrivals wait for the next
-explicit request; there is no scheduler or automatic retry loop.
+`/ingest-new` starts `wiki_ingest_batch` once. Code snapshots the accepted pending
+selection and processes it sequentially, with one commit per source.
+`/ingest <source>` uses an exact source-path filter. Already-current sources are
+not reinterpreted. Later arrivals wait for another explicit request. No scheduler,
+background controller or per-source repository clone is introduced.
 
-## Failure handling
+## Drafts, evidence and repair
 
-- Missing/unusable sources, invalid source metadata, conflicting identities and
-  failures **before any write** affect only those sources. Independent sources
-  continue. A broken provider manifest does not stop other providers.
-- OCR gaps, contradictory accounts and missing details are extraction limits,
-  not reasons to reject otherwise useful knowledge.
-- Whitespace, Markdown hard breaks and report formatting are not publication
-  gates. Worker reports are ordinary Markdown, not a strict JSON protocol.
-- Report-storage failure is separate from ingestion: continue, retain verified
-  commit results and state clearly that no complete report is available.
-- Unrelated dirty Git at admission, unresolved live edits, real Git conflict
-  markers, changed source bytes during writing or cancellation stop safely.
-  Never reset, stash, discard edits or attempt automatic repair. A clean failure
-  is skipped once; an uncertain shared worktree requires manual inspection.
+Workers edit private Markdown copies without Git history under
+`incoming/ingest-journal/drafts/<batch>/<attempt>/wiki`. Read-only source material
+stays under `/knowledge/sources`. Native read/write/edit/patch operations use the
+draft Location. Absolute Live-Wiki writes are denied, not redirected. Code alone
+owns frontmatter, index/log and publication. Wiki safety instructions remain binding.
+The initializer never replaces existing `AGENTS.md`; operators must manually align
+task ownership and the private draft exception while preserving local safety rules.
 
-For bulk requests, `done` means no pending/invalid/conflicting sources remain;
-for a single-source request it means that source was committed. `partial` means the
-selection was attempted with remaining or unusable sources; `blocked` means the
-run could not safely continue. The returned counts and fresh status distinguish
-these outcomes. A source counts as ingested only after its verified commit.
+Admission is bound to the child, parent, exact source/target, draft and running
+Linux process incarnation, in private short-lived capability records. Prompt
+data, a copied batch ID or stale records after restart grant no admission. Ordinary
+file tools cannot edit control state; workers cannot read other drafts/control files.
 
-## Safety and reports
+The completion contract requires native evidence: a fully covered source read,
+successful skill loading and an explicit mutation of the exact selected page,
+plus valid final files, unchanged source identity/digest, permitted diff and a
+verified commit. Session success or model prose alone is insufficient. Rewriting
+unchanged supported findings is allowed. Native errors remain in the audit, but
+a corrected exact missing-target read, mandatory read/skill or patch no longer
+poisons a verified result. Explicit permission rejections are never forgiven.
+Catalog-containing patches are rejected before permission admission with a
+code-owned correction; the worker must recreate only permitted changes.
+
+At most three worker attempts and 300 seconds per source per accepted continuation
+are allowed. Each child has at most 120 seconds; 96 model requests and a shared
+allowance of two runtime provider retries per source. Runtime backoff is retained
+only within that allowance/deadline; failed providers pause subsequent dispatch.
+Valid partial drafts are inspected and carried forward only with the same base
+and source digest; invalid/unbound drafts are retained but never reused.
+Changed sources require fresh processing; removed/revoked sources cannot publish.
+Independent sources continue after isolated failures, including post-write failures.
+OCR gaps and contradictions are extraction limits, not automatic rejection reasons.
+
+Defaults reserve 32 MiB for a draft, limit individual files to 8 MiB and retained
+attempts to 256 MiB/16,384 entries. Unchanged copied files in failed attempts are
+reclaimed; uncertain evidence is retained. Successful source attempts are removed
+only after durable publication. Capacity exhaustion is a visible technical pause,
+never silent deletion of unresolved evidence. Control records/reports remain under
+the existing journal retention policy; back up the complete journal and wiki `.git`.
+
+## Questions and continuation
+
+Exhausted automatic repair means `paused`, not silent skipping or definitive
+failure. Questions contain opaque decision IDs, exact targets, reasons, proposals
+and allowed actions. Chat shows them and waits; subsequent calls may inspect more
+questions (`question_offset`) or answer only the supplied `batch_id`/`decision_id`.
+Answers require a separate `ingest_decision` approval with no saved wildcard,
+in the initiating chat. Bindings cover identity/revision, proposal/drafts, source
+bytes, base/index and dirty-file hashes. Changed/stale answers produce new questions;
+duplicate or wrong-session answers cannot act. Approval is revalidated after waiting.
+
+- `retry`: a new bounded continuation of the exact open work, not a new selection.
+- `reprocess`: only when offered for one exact dirty source at admission; inspect
+  and freshly process it after confirmation, never stamp it as already successful.
+- `defer` / `unresolved`: explicit user decisions, never budget-exhaustion defaults.
+- `cancel`: stop the accepted work; never wake it automatically.
+
+Source states distinguish pending/running/repairing, awaiting user/technical action,
+ingested, explicitly deferred/unresolved/cancelled. `done` means the accepted
+selection is complete; `partial` records explicit deferral/unresolved work;
+`paused` means questions/integrity problems; `cancelled` means explicitly stopped.
+Counts and fresh status expose remaining/invalid/conflicting sources separately.
+No automatic reconciliation of historical live leftovers is performed. Dirty
+admission returns hashes/paths and a bound proposal instead of a naked error.
+Production cleanup still needs fresh inspection and separate authorization.
+
+## Durable publication and reports
+
+Control state is required and fsynced before publication; unavailable control
+storage prevents live writes. Markdown reports are best effort, independently
+stored in `incoming/ingest-journal/batches/<id>/` (directories `0700`, files `0600`).
+OpenChamber mounts only the report tree read-only, not drafts/admissions.
+
+Code prepares a private Git index and a focused commit object, recording exact
+parent/tree/files and before/after hashes. It validates source/revocation again,
+then installs only reviewed files, updates index/HEAD and durably records success.
+After process termination, the next explicit entry reconstructs open work and
+offers continuation. A confirmed prepared publication verifies actual parent,
+tree, diff and hashes and completes missing steps, without another worker, duplicate
+commit or duplicate log entry. Foreign deviations are preserved and stop publication.
+Commit messages or `current` status alone are never recovery evidence.
 
 The lifetime kernel lock serializes cooperating ingest calls, **not arbitrary
-editors**. Start from clean Git and keep other writers idle. Readers can see
-intermediate edits. No automatic reconciliation or per-page transaction recovery
-is provided. Source hashes and canonical frontmatter are verified; Paperless
-requires `source_sha256` plus matching provider metadata. These checks do not prove
-semantic correctness or that a model read every passage.
+editors**. Keep other writers idle during publication. Readers can see intermediate
+file installations; this is not an atomic multi-file reader transaction or an OS
+barrier against foreign writers. Cancellation during publication leaves a visible
+technical recovery checkpoint, never an automatic reset or unattended restart.
+Source hashes and canonical frontmatter are verified; Paperless requires
+`source_sha256` plus matching metadata. These checks and read coverage do not prove
+semantic correctness, understanding or faithful extraction by a real model.
 
-Code stamps source identities and appends index/log entries; workers edit only
-Wiki Markdown and report findings, evidence, revision changes, contradictions and
-extraction limits. Reports and `state.json` live privately under
-`incoming/ingest-journal/batches/<id>/` (`0700` directories, `0600` files), with
-per-source commits and changed pages. OpenChamber mounts only this report tree
-read-only. Back up the entire journal and wiki `.git`; no automatic cleanup occurs.
-Chat links the report and gives counts/blockers; full details are read on request.
-
-## Worker admission and evidence
-
-The plugin admits only its own active child sessions. Pasting a `batch_id` into
-a standalone worker prompt grants no edit permission. The child receives its
-assignment as a user message; it does not need its parent's tool transcript.
-Code owns status/revocation and Git checks, frontmatter, index, log and commits.
-Workers write the exact selected source page and any necessary subject pages or
-overview, never index/log. Permission checks use normalized location-relative
-paths; an attempted multi-file patch touching a forbidden file is denied in full.
-
-Before stamping a revision, code requires a successful native mutation of the
-selected source page in this worker attempt. A pre-existing page, session
-`succeeded`, or prose success claim is not evidence of processing. An explicit
-write of unchanged findings is allowed. Native tool errors (including reads and
-skills) and failed sessions prevent publication. The sole exception is a native
-`File not found` read of the exact selected target, proven absent before the
-worker started and subsequently created by a successful native write or
-`Add File` patch. Missing source reads, permission errors and reads failing after
-creation still block publication. Unclear live edits remain in place for manual
-inspection.
-Private reports distinguish proven source writes from failed tool attempts,
-identify the worker and bounded code-owned failure reasons such as
-`worker_permission_denied`, `worker_tool_failed`, `worker_session_failed` and
-`worker_no_source_write`. Native error bodies are not copied into those reasons.
-
-Runtime tests use a deterministic synthetic model to verify transport, tool
-permissions and publication. They do not prove a real model interprets every
-instruction correctly or that extracted facts are semantically correct.
-
-### Operator acceptance (separate authorization)
-
-Before deployment, confirm the running image/OpenCode version and inspect the
-actual wiki instructions. The initializer never replaces an existing
-`AGENTS.md`: manually align only ingest task ownership with the shipped template,
-preserving local customizations and all source safety rules. Image updates alone
-do not perform that edit.
-
-After an authorized deployment, use synthetic new and changed sources to verify
-the summary, subject-page changes, revision, one focused commit and private
-report. A real-model acceptance run needs separate approval; deterministic tests
-are not a substitute. Rerun pending sources only on explicit request, selecting
-them through current status; do not reset, replay current sources, or clean up
-revoked knowledge automatically.
+Runtime acceptance uses the pinned OpenCode and a deterministic local model.
+Process-kill tests exercise publication checkpoints. Production deployment, old
+live leftovers and synthetic real-model acceptance (new/outdated source,
+correction, question/answer/resumption and cancellation) require separate approval.
