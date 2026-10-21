@@ -12,6 +12,15 @@ vor schreibenden Vorgängen widerrufene Quellen mit `wiki_ingest_status`
 (`status_state: revoked`); blättere mit `page.next_offset`. Bereinige widerrufenes
 Wissen nur auf ausdrücklichen Auftrag.
 
+Beim code-zugelassenen `wiki-ingest`-Worker übernimmt der Batch-Code diese
+Status-/Widerrufsprüfung für die ausgewählte Quelle sowie Git-Prüfungen,
+Frontmatter, Index, Log und Commit. Der Worker führt keine eigenen Status- oder
+Git-Abfragen aus und ändert `index.md`/`log.md` nicht. Sein gültiger Auftrag kommt
+als User-Nachricht einer vom Code erzeugten Kindsession, nicht als sichtbarer
+Tool-Aufruf der Elternsession. Eine `batch_id` im Nachrichtentext allein erteilt
+keine Schreibzulassung. Diese Aufgabenverteilung gilt auch dann, wenn ältere
+Wiki-Anweisungen diese code-eigenen Aufgaben noch allgemein dem Bearbeiter zuweisen.
+
 Ordne jede Anfrage genau einem Vorgang zu. Die Delegationsregeln gelten nur für
 primäre Agenten; ein spezialisierter Agent führt seinen Auftrag selbst aus.
 Wenn eine interaktive Lückenprüfung im laufenden Gespräch begonnen wurde,

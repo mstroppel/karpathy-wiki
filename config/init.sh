@@ -192,6 +192,13 @@ Einlesen alle betroffenen Quellen-, Entitäts-, Konzept- und Analyseseiten sowie
 \`overview.md\`, \`index.md\` und \`log.md\`. Jeder erfolgreiche schreibende
 Vorgang endet mit genau einem fokussierten Conventional Commit; reine Abfragen
 und Prüfungen ohne Änderungen erzeugen keinen Commit.
+
+Beim code-zugelassenen \`wiki-ingest\`-Worker übernimmt der Batch-Code
+Quellenstatus/Widerruf, Manifest-/Revisionsprüfung, Git-Prüfungen, Frontmatter,
+\`index.md\`, \`log.md\` und Commit. Der Worker liest die Quelle vollständig,
+schreibt ihre Quellenseite und ergänzt fachlich nötige Wiki-Seiten; er ruft
+weder Git/Shell noch Statuswerkzeuge auf und ändert Index/Log nicht selbst.
+Der Code liefert den Auftrag als User-Nachricht einer frischen Kindsession.
 EOF
 
 install_if_absent "$wiki/index.md" <<EOF

@@ -111,6 +111,8 @@ function reportText(state) {
         `Status: ${source.status}`,
         `Commit: ${source.commit ?? 'Kein Commit verifiziert'}`,
         `Geänderte Seiten: ${(source.changed_pages ?? []).join(', ')}`,
+        `Worker: ${source.worker_session ?? 'Nicht ermittelt'}`,
+        `Werkzeugfehler: ${JSON.stringify(source.worker_errors ?? [])}`,
         source.blocker ?? '',
         source.content ?? 'Nicht ermittelt',
       ].join('\n\n'),
@@ -191,10 +193,29 @@ export async function runIngestBatch(input, worker) {
         )
           throw new BatchBlocker('Ungültige Quellenseite; übersprungen')
         const digest = hash(await sourceBytes(source, opts))
-        source.content = await worker({ batch_id: batchId, sources: [candidate] })
+        const result = await worker({ batch_id: batchId, sources: [candidate] })
+        source.content = result?.content
+        source.worker_session = result?.session_id
+        source.worker_errors = result?.errors
         signal?.throwIfAborted()
+        if (result?.errors?.length) {
+          const codes = new Set([
+            'worker_permission_denied',
+            'worker_tool_failed',
+            'worker_session_failed',
+          ])
+          throw new BatchBlocker(
+            codes.has(result.errors[0].code) ? result.errors[0].code : 'worker_failed',
+          )
+        }
         if (typeof source.content === 'string' && source.content.trimStart().startsWith('SKIP:'))
           throw new BatchBlocker('Quelle nicht auswertbar; siehe Extraktionsgrenzen im Bericht')
+        if (result?.source_written !== true)
+          throw new BatchBlocker(
+            'worker_no_source_write: Kein belegter Schreibvorgang an der Quellenseite',
+          )
+        if (typeof source.content !== 'string' || !source.content.trim())
+          throw new BatchBlocker('worker_missing_report: Kein Worker-Bericht')
         if ((await git(wikiRoot, ['rev-parse', 'HEAD'])).trim() !== head)
           throw new BatchBlocker(
             'HEAD während des Einlesens geändert; manuelle Prüfung erforderlich',
