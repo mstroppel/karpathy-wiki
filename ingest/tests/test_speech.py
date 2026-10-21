@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import tempfile
 import unittest
 from dataclasses import replace
@@ -13,6 +14,34 @@ from karpathy_wiki_ingest_audio import speech_client
 from karpathy_wiki_speech import cache, worker
 from karpathy_wiki_speech.backends import FakeBackend
 from karpathy_wiki_speech.types import DEFAULT_LIMITS, TranscriptionOptions, file_revision
+
+
+class LoggingConfigurationTests(unittest.TestCase):
+    def test_levels_and_default_do_not_enable_dependency_debug_logging(self):
+        self.addCleanup(worker.LOG.setLevel, worker.LOG.level)
+        for configured, expected in [
+            (None, logging.INFO),
+            (" debug ", logging.DEBUG),
+            ("INFO", logging.INFO),
+            ("WARNING", logging.WARNING),
+            ("ERROR", logging.ERROR),
+            ("CRITICAL", logging.CRITICAL),
+        ]:
+            environment = {} if configured is None else {"SPEECH_LOG_LEVEL": configured}
+            with (
+                self.subTest(level=configured),
+                patch.dict("os.environ", environment, clear=True),
+                patch.object(logging, "basicConfig") as basic_config,
+            ):
+                worker.configure_logging()
+                self.assertEqual(worker.LOG.level, expected)
+                self.assertEqual(basic_config.call_args.kwargs["level"], logging.INFO)
+
+    def test_invalid_level_is_rejected(self):
+        for level in ("", "TRACE", "10"):
+            with self.subTest(level=level), patch.dict("os.environ", {"SPEECH_LOG_LEVEL": level}):
+                with self.assertRaisesRegex(ValueError, "SPEECH_LOG_LEVEL must be"):
+                    worker.configure_logging()
 
 
 class CacheReplayTests(unittest.TestCase):
@@ -143,6 +172,33 @@ class CacheReplayTests(unittest.TestCase):
             speech_client.load_failure(self.root, self.digest, self.options),
             "speech:processing:RuntimeError",
         )
+
+    def test_request_tracebacks_are_opt_in_and_reports_remain_content_free(self):
+        assert self.result_path is not None
+        self.result_path.unlink()
+        for level in (logging.INFO, logging.DEBUG):
+            with self.subTest(level=level):
+                self.force_replay_request()
+                with (
+                    self.assertLogs(worker.LOG, level=level) as logs,
+                    patch.object(
+                        self.backend,
+                        "transcribe",
+                        side_effect=RuntimeError("synthetic failure detail"),
+                    ),
+                ):
+                    self.assertEqual(self.run_worker(), (0, 1))
+                output = "\n".join(logs.output)
+                self.assertIn("failed with RuntimeError", output)
+                self.assertEqual("synthetic failure detail" in output, level == logging.DEBUG)
+                self.assertEqual(
+                    "Traceback (most recent call last)" in output, level == logging.DEBUG
+                )
+                self.assertEqual(
+                    speech_client.load_failure(self.root, self.digest, self.options),
+                    "speech:processing:RuntimeError",
+                )
+                self.assertFalse(self.request_path.exists())
 
     def test_index_cannot_point_outside_cache(self):
         index = cache.load_index(self.root, self.digest)
