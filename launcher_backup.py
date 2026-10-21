@@ -70,6 +70,7 @@ def operation(args):
         return "docker compose"
     for prefix in (
         ["docker", "image", "inspect"],
+        ["docker", "image", "pull"],
         ["docker", "image", "save"],
         ["docker", "image", "load"],
         ["docker", "image", "tag"],
@@ -562,7 +563,10 @@ def locked(instance):
 
 
 def verify(directory, metadata):
-    for filename in ("snapshot.tar", "images.tar"):
+    filenames = ["snapshot.tar"]
+    if "images.tar" in metadata["sha256"]:
+        filenames.append("images.tar")
+    for filename in filenames:
         if digest(directory / filename) != metadata["sha256"][filename]:
             raise BackupError("backup checksum verification failed")
         with tarfile.open(directory / filename) as archive:
@@ -575,10 +579,54 @@ def verify(directory, metadata):
                         pass
 
 
-def snapshot(instance, kind):
+def image_digests(images):
+    """Record registry identities, never mistake a config/image ID for a pull digest."""
+    result = {}
+    for image_id in sorted(set(images.values())):
+        info = json.loads(run(["docker", "image", "inspect", image_id]))[0]
+        if info["Id"] != image_id:
+            raise BackupError("installed image ID changed during backup preflight")
+        result[image_id] = info.get("RepoDigests") or []
+    return result
+
+
+def ensure_images(metadata, *, acquire):
+    """Resolve exact software without retagging or touching the running instance."""
+    for image_id in sorted(set(metadata["images"].values())):
+        if not re.fullmatch(r"sha256:[0-9a-f]{64}", image_id):
+            raise BackupError("invalid saved image ID")
+        try:
+            info = json.loads(run(["docker", "image", "inspect", image_id]))[0]
+            if info["Id"] == image_id:
+                continue
+        except BackupError:
+            pass
+        if acquire:
+            for reference in metadata["image_digests"][image_id]:
+                if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]*@sha256:[0-9a-f]{64}", reference):
+                    raise BackupError("invalid saved registry digest")
+                try:
+                    run(["docker", "image", "pull", reference])
+                    info = json.loads(run(["docker", "image", "inspect", image_id]))[0]
+                    if info["Id"] == image_id:
+                        break
+                except BackupError:
+                    continue
+            else:
+                raise BackupError(
+                    "rollback image unavailable: restore the exact saved image ID from a trusted "
+                    "archive or restore registry access to its saved digest, then retry. "
+                    "No mutable tags are pulled; current writers/data/configuration unchanged."
+                )
+        else:
+            raise BackupError("saved image ID unavailable; restore blocked before live replacement")
+
+
+def snapshot(instance, kind, *, backup_images=True):
     with phase("backup preflight and image checks"):
         instance.paths()
         images = instance.images(rescue=kind == "rescue")
+        digests = image_digests(images) if not backup_images else {}
     now = dt.datetime.now(dt.UTC)
     identifier = now.strftime("%Y%m%dT%H%M%SZ") + "-" + secrets.token_hex(6)
     temporary = instance.store / (".partial-" + identifier)
@@ -587,7 +635,16 @@ def snapshot(instance, kind):
         instance.stop()
     try:
         with phase("backup creation and verification"):
-            return archive_snapshot(instance, kind, images, now, identifier, temporary)
+            return archive_snapshot(
+                instance,
+                kind,
+                images,
+                now,
+                identifier,
+                temporary,
+                backup_images=backup_images,
+                digests=digests,
+            )
     except BaseException:
         print(
             "Snapshot failed; data/configuration unchanged; stack remains stopped.", file=sys.stderr
@@ -595,7 +652,7 @@ def snapshot(instance, kind):
         raise
 
 
-def archive_snapshot(instance, kind, images, now, identifier, temporary):
+def archive_snapshot(instance, kind, images, now, identifier, temporary, *, backup_images, digests):
     # Writers may have changed entries after the running-state preflight.
     paths = instance.paths()
     run(
@@ -613,16 +670,19 @@ def archive_snapshot(instance, kind, images, now, identifier, temporary):
             *(str(p).lstrip("/") for p in paths),
         ]
     )
-    run(
-        [
-            "docker",
-            "image",
-            "save",
-            "--output",
-            str(temporary / "images.tar"),
-            *sorted(set(images.values())),
-        ]
-    )
+    filenames = ["snapshot.tar"]
+    if backup_images:
+        run(
+            [
+                "docker",
+                "image",
+                "save",
+                "--output",
+                str(temporary / "images.tar"),
+                *sorted(set(images.values())),
+            ]
+        )
+        filenames.append("images.tar")
     metadata = {
         "id": identifier,
         "created": now.isoformat(),
@@ -634,8 +694,9 @@ def archive_snapshot(instance, kind, images, now, identifier, temporary):
         "data": str(instance.data),
         "compose": str(instance.compose),
         "images": images,
+        "image_digests": digests,
         "launcher": accepted_pair(LAUNCHER_DIR),
-        "sha256": {name: digest(temporary / name) for name in ("snapshot.tar", "images.tar")},
+        "sha256": {name: digest(temporary / name) for name in filenames},
     }
     verify(temporary, metadata)
     for entry in temporary.iterdir():
@@ -690,7 +751,7 @@ def set_version(project, version, ensure_password=True):
     sync_directory(path.parent)
 
 
-def update(instance, target, target_compose, *, backup=True):
+def update(instance, target, target_compose, *, backup=True, backup_images=False):
     if instance.project != LAUNCHER_DIR:
         raise BackupError("safe updates require the launcher pair in the project directory")
     if not backup:
@@ -718,7 +779,14 @@ def update(instance, target, target_compose, *, backup=True):
     with phase("launcher staging"):
         stage = stage_pair(instance, target, backup=backup)
         record = prepare_activation(stage, target)
-    metadata = snapshot(instance, "update") if backup else None
+    if backup and not backup_images:
+        print(
+            "Image contents omitted: rollback requires cached image IDs or registry access "
+            "to saved digests. Use --backup-images for self-contained offline recovery.",
+            file=sys.stderr,
+            flush=True,
+        )
+    metadata = snapshot(instance, "update", backup_images=backup_images) if backup else None
     try:
         if not backup:
             with phase("stopping writers"):
@@ -827,7 +895,9 @@ def restore(instance, metadata):
         record = prepare_activation(pair_stage, saved_pair["version"])
         if record != saved_pair:
             raise BackupError("saved launcher pair does not match snapshot metadata")
-        run(["docker", "image", "load", "--input", str(directory / "images.tar")])
+        if "images.tar" in metadata["sha256"]:
+            run(["docker", "image", "load", "--input", str(directory / "images.tar")])
+        ensure_images(metadata, acquire=False)
         for image, image_id in metadata["images"].items():
             if image != image_id and "@" not in image:
                 run(["docker", "image", "tag", image_id, image])
@@ -871,6 +941,9 @@ def rollback(instance, identifier):
     )
     if input().strip() != f"rollback {identifier}":
         raise BackupError("rollback not confirmed; current state unchanged")
+    if "images.tar" not in metadata["sha256"]:
+        with phase("rollback image availability (before stopping writers)"):
+            ensure_images(metadata, acquire=True)
     rescue = snapshot(instance, "rescue")
     try:
         restore(instance, metadata)
@@ -934,7 +1007,14 @@ def main():
         if action == "update":
             VERBOSE = "--verbose" in args or "-v" in args
             no_backup = "--no-backup" in args
-            args = [arg for arg in args if arg not in {"--verbose", "-v", "--no-backup"}]
+            backup_images = "--backup-images" in args
+            if backup_images and no_backup:
+                raise BackupError("--backup-images conflicts with --no-backup")
+            args = [
+                arg
+                for arg in args
+                if arg not in {"--verbose", "-v", "--no-backup", "--backup-images"}
+            ]
             if len(args) != 2 or any(arg.startswith("-") for arg in args):
                 raise BackupError(
                     "usage: update project compose version target target-compose [options]"
@@ -947,7 +1027,7 @@ def main():
             if action != "update":
                 secure_store(instance.store)
             if action == "update":
-                update(instance, *args, backup=not no_backup)
+                update(instance, *args, backup=not no_backup, backup_images=backup_images)
             elif action == "rollback":
                 rollback(instance, *args)
             elif action == "list":

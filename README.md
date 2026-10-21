@@ -172,12 +172,21 @@ before or after the version, for safe operation context and elapsed times:
 Verbose mode never prints raw subprocess output, configuration or environment values.
 
 By default, launcher updates stop the instance for a verified full backup of
-`DATA_ROOT`, configuration, external file secrets, and installed images **before**
+`DATA_ROOT`, configuration, external file secrets, and launcher files **before**
 changing the version. Backup failure blocks the update; update failure never
 automatically resets data. Local Compose changes belong in `compose.override.yaml`.
 Use private local storage outside `DATA_ROOT` (`KARPATHY_WIKI_BACKUP_DIR`, default
 `./backups`), preferably on an encrypted disk. Backups contain plaintext secrets.
 Direct Compose calls bypass this guarantee. Review release notes before upgrading.
+
+**Image contents are omitted by default** to avoid exporting and verifying large
+Docker archives. Exact local image IDs and available registry digests are recorded.
+Rollback needs those images still cached locally, or registry access to fetch the
+saved digests; unavailable images block rollback **before stopping writers**.
+Locally built/imported images without registry digests require the local cache or
+a separately retained image archive. Use `./karpathy-wiki.sh update [version]
+--backup-images` for a self-contained backup including installed image contents.
+This cannot be combined with `--no-backup`.
 
 To explicitly skip the update snapshot, use `./karpathy-wiki.sh update [version]
 --no-backup` (omit `[version]` to use the configured release channel). **This creates
@@ -190,7 +199,7 @@ require manual recovery or an existing backup. Rollback rescue backups cannot be
 ```
 
 Rollback requires explicit confirmation and a separate current-state rescue
-backup; it restores software, configuration and data together, even after later
+backup (always including current images); it restores software, configuration and data together, even after later
 updates. **All changes since the chosen snapshot are lost in the restored state.**
 Update backups stay at least 30 days and the latest three are always retained;
 failed-update and rescue backups are never automatically deleted. See

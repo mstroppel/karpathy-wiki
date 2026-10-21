@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Launcher update backups now omit Docker image contents by default, retaining
+  full data/configuration/secrets/launcher archives plus exact image IDs and
+  available registry digests. Use `update [version] --backup-images` for
+  self-contained offline recovery; it conflicts with `--no-backup`. Without image
+  contents, rollback requires cached images or registry access to saved immutable
+  digests and verifies availability before stopping writers. Locally built images
+  without digests need their cache or a separately retained archive. Rollback
+  rescue snapshots still always include current images. No data-layout changes.
 - Audio transcripts now mirror the redacted recording folders and full filename
   under `sources/audio/current/recordings`, appending `.md` (for example,
   `Meetings/Call.mp3.md`) instead of using opaque filenames. Source IDs and wiki

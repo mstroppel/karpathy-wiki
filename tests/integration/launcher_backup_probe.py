@@ -25,6 +25,7 @@ def main():
         name = f"kw-backup-{os.getpid()}-{int(time.time())}"
         source_image = image
         image = f"{name}:installed"
+        retained_image = f"{name}:cached"
         cache = project / ".cache"
         cache.mkdir()
         data = project / "data"
@@ -89,7 +90,17 @@ def main():
             (cache / f"compose-v{version}.yaml").write_text(json.dumps(config))
         launcher = project / "karpathy-wiki.sh"
         try:
-            run("docker", "image", "tag", source_image, image)
+            # A probe-private image ID can be removed without pruning shared images.
+            run(
+                "docker",
+                "build",
+                "-t",
+                image,
+                "-",
+                input=f"FROM {source_image}\nLABEL probe={name}\n",
+            )
+            # Docker permits removing a running container's tag only if another remains.
+            run("docker", "image", "tag", image, retained_image)
             run("sh", str(launcher), "up", "-d", "--wait", "--wait-timeout", "30")
             # Prove that the live writer and the archived data use the same bind.
             run(
@@ -132,6 +143,9 @@ def main():
             ]
             identifier = metadata[0]["id"]
             assert metadata[0]["images"][image] == installed_image
+            assert metadata[0]["image_digests"][installed_image] == []
+            assert "images.tar" not in metadata[0]["sha256"]
+            assert not (project / "backups" / identifier / "images.tar").exists()
             missing_tag = subprocess.run(["docker", "image", "inspect", image], capture_output=True)
             assert missing_tag.returncode != 0
             assert "localhost.invalid/kw-synthetic-never-installed:227" not in metadata[0]["images"]
@@ -175,6 +189,45 @@ def main():
                 json.loads(p.read_text()) for p in (project / "backups").glob("*/metadata.json")
             ]
             assert sum(m["kind"] == "rescue" for m in metadata) == 1
+            assert all("images.tar" in m["sha256"] for m in metadata if m["kind"] == "rescue")
+            # Opt-in archive restores even after the private installed image is gone.
+            run("sh", str(launcher), "update", "2.0.0", "--backup-images")
+            metadata = [
+                json.loads(p.read_text()) for p in (project / "backups").glob("*/metadata.json")
+            ]
+            archived = next(
+                m for m in metadata if m["kind"] == "update" and "images.tar" in m["sha256"]
+            )
+            run("docker", "image", "rm", image, retained_image)
+            missing_id = subprocess.run(
+                ["docker", "image", "inspect", installed_image], capture_output=True
+            )
+            assert missing_id.returncode != 0
+            before = {p.name for p in (project / "backups").iterdir()}
+            failed = subprocess.run(
+                ["sh", str(launcher), "rollback", identifier],
+                input=f"rollback {identifier}\n",
+                capture_output=True,
+                text=True,
+            )
+            assert failed.returncode != 0 and "rollback image unavailable" in failed.stderr
+            assert {p.name for p in (project / "backups").iterdir()} == before
+            container = run("sh", str(launcher), "ps", "-q", "writer").stdout.strip()
+            assert (
+                run("docker", "inspect", container, "--format", "{{.State.Running}}").stdout.strip()
+                == "true"
+            )
+            run(
+                "sh",
+                str(launcher),
+                "rollback",
+                archived["id"],
+                input=f"rollback {archived['id']}\n",
+            )
+            assert (
+                run("docker", "image", "inspect", image, "--format", "{{.Id}}").stdout.strip()
+                == installed_image
+            )
             config["services"]["writer"]["image"] = image
             config["services"]["writer"]["command"] = ["python", "-c", "raise SystemExit(2)"]
             (cache / "compose-v4.0.0.yaml").write_text(json.dumps(config))
@@ -201,7 +254,10 @@ def main():
             assert failed.returncode != 0 and "No update backup was created" in failed.stderr
             assert "./karpathy-wiki.sh rollback" not in failed.stderr
             assert {p.name for p in (project / "backups").iterdir()} == before
-            print("launcher-backup: container links, delayed rollback and no-backup verified")
+            print(
+                "launcher-backup: default cached restore, opt-in image recovery, "
+                "fail-before-stop and no-backup verified"
+            )
         finally:
             run(
                 "docker",
@@ -213,7 +269,7 @@ def main():
                 "down",
                 "--remove-orphans",
             )
-            subprocess.run(["docker", "image", "rm", image], capture_output=True)
+            subprocess.run(["docker", "image", "rm", image, retained_image], capture_output=True)
 
 
 if __name__ == "__main__":
