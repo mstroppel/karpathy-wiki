@@ -8,7 +8,8 @@ unredacted result, and delete the request. A worker crash never loses work:
 requests remain queued until their results exist in the cache.
 
 Failure reports are content-free: failures carry the error type only,
-never audio or transcript content.
+never audio or transcript content. Recording paths in service logs require
+explicit opt-in via ``SPEECH_LOG_LEVEL=DEBUG``.
 
 Provider-requested options (language, diarize) decide the cache key; worker
 configuration (backend, model, device, compute type) is stamped into every
@@ -165,9 +166,10 @@ def run_cycle(
             )
         except Exception as error:  # noqa: BLE001 - failure reports stay content-free
             LOG.error(
-                "Speech request %s failed with %s",
+                "Speech request %s failed with %s%s",
                 identifier_tail(identifier),
                 type(error).__name__,
+                audio_log_context(root, payload["audio"]),
                 exc_info=LOG.isEnabledFor(logging.DEBUG),
             )
             write_failure(root, identifier, f"processing:{type(error).__name__}")
@@ -213,6 +215,13 @@ def identifier_tail(identifier: str) -> str:
     return identifier[:20]
 
 
+def audio_log_context(root: Path, reference: str) -> str:
+    """Opt-in path diagnostics, escaped to prevent multiline log injection."""
+    if not LOG.isEnabledFor(logging.DEBUG):
+        return ""
+    return f" audio={str(root / reference)!r}"
+
+
 def process_request(
     root: Path,
     backend: SpeechBackend,
@@ -250,6 +259,11 @@ def process_request(
     if file_revision(str(audio_path)) != audio_sha256:
         raise ValueError("request audio hash does not match the recording")
     decoded = decode_for(audio_path, limits, decode)
+    LOG.info(
+        "Speech request %s transcribing%s",
+        identifier_tail(identifier_of_request(payload)),
+        audio_log_context(root, audio_reference),
+    )
     result = backend.transcribe(str(audio_path), decoded, requested)
     write_result(root, audio_sha256, requested, result, worker_tag)
     LOG.info("Speech request %s completed", identifier_tail(identifier_of_request(payload)))

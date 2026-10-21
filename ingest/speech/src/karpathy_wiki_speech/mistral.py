@@ -26,6 +26,7 @@ the request header and nowhere else.
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
 import time
@@ -49,6 +50,7 @@ DEFAULT_MODEL = "voxtral-mini-latest"
 TRANSCRIPTION_PATH = "/audio/transcriptions"
 TIMESTAMP_GRANULARITY = "segment"
 DIARIZATION_MODE = "service-speakers"
+LOG = logging.getLogger("karpathy-wiki-speech")
 
 # Hosted-service input limits: the documented formats plus conservative
 # size and duration defaults (Mistral documents prerecorded transcription
@@ -316,13 +318,22 @@ def parse_transcription(
     segments: list[Segment] = []
     labels: dict[str, int] = {}
     labeled = False
-    for raw in raw_segments:
+    for index, raw in enumerate(raw_segments):
         if not isinstance(raw, dict):
             raise HostedResponseError("the hosted service returned a malformed segment")
         start_ms = _seconds(raw.get("start"), "start")
         end_ms = _seconds(raw.get("end"), "end")
         if end_ms < start_ms:
-            raise HostedResponseError("the hosted service returned a reversed segment")
+            # Preserve text and speaker without inventing a duration or swapping
+            # the start into an earlier (possibly unrelated) speaker turn.
+            LOG.warning(
+                "Hosted transcription segment %s has reversed timestamps "
+                "(start_ms=%s end_ms=%s); clamping end to start",
+                index,
+                start_ms,
+                end_ms,
+            )
+            end_ms = start_ms
         segments.append(
             Segment(
                 start_ms=start_ms,
