@@ -375,8 +375,10 @@ ${DATA_ROOT}/
 ```
 
 `incoming/audio`, `speech/`, and `models/audio` are private: they are
-never mounted into OpenCode, never served as sources, and never appear in
-logs. Raw audio and unredacted transcripts stay there — with the opt-in
+never mounted into OpenCode or served as sources. Default request-failure logs
+omit their paths and contents; opt-in DEBUG tracebacks can expose private paths
+or text (see [diagnostics](#quarantine-and-dead-job-diagnostics)).
+Raw audio and unredacted transcripts stay there — with the opt-in
 hosted backend, staged recordings in `speech/recordings` are additionally
 uploaded to the configured transcription service before redaction (see
 above). Deleting
