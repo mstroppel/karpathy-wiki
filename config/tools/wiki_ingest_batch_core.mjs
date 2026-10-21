@@ -86,6 +86,22 @@ async function sourceBytes(source, { sourceRoot, wikiRoot }) {
   return bytes
 }
 
+async function verifyDigest(source, opts, expected) {
+  const bytes = await sourceBytes(source, opts)
+  if (!/^[a-f0-9]{64}$/.test(expected) || digest(bytes) !== expected)
+    throw new IngestFault('source_changed')
+  return bytes
+}
+
+function diagnosticsFor(status) {
+  return Object.fromEntries(
+    Object.entries(status.adapters).map(([adapter, value]) => [
+      adapter,
+      { invalid: value.invalid, conflict: value.conflict },
+    ]),
+  )
+}
+
 function reportText(state) {
   return [
     '# Einlesebericht',
@@ -165,7 +181,7 @@ async function snapshot(opts) {
   }
 }
 
-async function questionBinding(opts, state, index) {
+async function questionSnapshot(opts, state, index) {
   const current = await opts.scan()
   const source = index === null ? null : state.sources[index]
   const selected = source
@@ -175,10 +191,20 @@ async function questionBinding(opts, state, index) {
         ),
       )
     : current
+  const selection = source
+    ? (pending(current).find(
+        (item) =>
+          item.adapter === source.adapter &&
+          item.source_key === source.source_key &&
+          item.wiki_path === source.wiki_path,
+      ) ?? null)
+    : null
   let sourceHash = null
   if (source) {
     try {
-      sourceHash = digest(await fileBytes(source.source_path, opts.sourceRoot))
+      sourceHash = digest(
+        await fileBytes(selection?.source_path ?? source.source_path, opts.sourceRoot),
+      )
     } catch {
       sourceHash = 'unavailable'
     }
@@ -193,9 +219,10 @@ async function questionBinding(opts, state, index) {
       drafts.push('unavailable')
     }
   }
-  return digest(
+  const binding = digest(
     JSON.stringify({
       batch: state.batch_id,
+      cancelled: state.status === 'cancelled',
       index,
       source,
       selected,
@@ -209,19 +236,24 @@ async function questionBinding(opts, state, index) {
       wiki: await snapshot(opts),
     }),
   )
+  return { binding, selection, source_hash: sourceHash }
 }
 
 async function addQuestions(opts, state) {
-  const needs = state.sources.flatMap((source, index) =>
-    ['awaiting_user', 'awaiting_technical', 'ineligible'].includes(source.status) &&
-    source.phase !== 'publishing'
-      ? [index]
-      : [],
-  )
+  const needs =
+    state.status === 'cancelled'
+      ? []
+      : state.sources.flatMap((source, index) =>
+          ['awaiting_user', 'awaiting_technical', 'ineligible'].includes(source.status) &&
+          source.phase !== 'publishing'
+            ? [index]
+            : [],
+        )
   if (state.blocker) needs.unshift(null)
   const questions = []
   for (const index of needs) {
-    const binding = await questionBinding(opts, state, index)
+    const observation = await questionSnapshot(opts, state, index)
+    const { binding, selection } = observation
     const old = state.questions?.find(
       (item) => item.source_index === index && item.binding === binding,
     )
@@ -230,6 +262,8 @@ async function addQuestions(opts, state) {
         id: token(),
         source_index: index,
         binding,
+        selection,
+        source_hash: observation.source_hash,
         reason: index === null ? state.blocker : state.sources[index].blocker,
         target:
           index === null
@@ -237,21 +271,25 @@ async function addQuestions(opts, state) {
             : {
                 adapter: state.sources[index].adapter,
                 source_key: state.sources[index].source_key,
-                source_revision: state.sources[index].source_revision,
+                source_revision: selection?.source_revision ?? state.sources[index].source_revision,
                 wiki_path: state.sources[index].wiki_path,
               },
         proposal:
-          index === null
-            ? state.adoption
-              ? 'Genau diese unveränderte Quellenseite frisch verarbeiten; fremde Änderungen erhalten.'
-              : 'Blocker extern klären; denselben gebundenen Auftrag fortsetzen, nichts zurücksetzen.'
-            : 'Eigene Entwürfe prüfen und begrenzt weiterbearbeiten; alternativ ausdrücklich zurückstellen oder nach Klärung ungelöst beenden.',
+          state.status === 'cancelled'
+            ? 'Nur die bereits vorbereitete Veröffentlichung technisch abschließen; der übrige Auftrag bleibt abgebrochen. Keine Worker starten.'
+            : index === null
+              ? state.adoption
+                ? 'Genau diese unveränderte Quellenseite frisch verarbeiten; fremde Änderungen erhalten.'
+                : 'Blocker extern klären; denselben gebundenen Auftrag fortsetzen, nichts zurücksetzen.'
+              : 'Eigene Entwürfe prüfen und begrenzt weiterbearbeiten; alternativ ausdrücklich zurückstellen oder nach Klärung ungelöst beenden.',
         options:
-          index === null
-            ? state.adoption
-              ? ['reprocess', 'retry', 'cancel']
-              : ['retry', 'cancel']
-            : ['retry', 'defer', 'unresolved', 'cancel'],
+          state.status === 'cancelled'
+            ? ['retry']
+            : index === null
+              ? state.adoption
+                ? ['reprocess', 'retry', 'cancel']
+                : ['retry', 'cancel']
+              : ['retry', 'defer', 'unresolved', 'cancel'],
       },
     )
   }
@@ -302,6 +340,8 @@ function resultFor(state, report, reportError, offset = 0) {
     questions: (state.questions ?? []).slice(offset, offset + 10).map((question) => {
       const visible = { ...question }
       delete visible.binding
+      delete visible.selection
+      delete visible.source_hash
       return visible
     }),
     next_question_offset: offset + 10 < (state.questions?.length ?? 0) ? offset + 10 : null,
@@ -379,12 +419,7 @@ export async function runIngestBatch(input, worker) {
         })),
         summary: status.summary,
         questions: [],
-        diagnostics: Object.fromEntries(
-          Object.entries(status.adapters).map(([adapter, value]) => [
-            adapter,
-            { invalid: value.invalid, conflict: value.conflict },
-          ]),
-        ),
+        diagnostics: diagnosticsFor(status),
       }
     }
     opts.batchId = state.batch_id
@@ -398,14 +433,12 @@ export async function runIngestBatch(input, worker) {
     }
     let reportError = null
     const finish = async () => {
+      if (state.status === 'cancelled')
+        for (const source of state.sources)
+          if (unfinished.has(source.status)) source.status = 'cancelled'
       const fresh = await opts.scan()
       state.summary = fresh.summary
-      state.diagnostics = Object.fromEntries(
-        Object.entries(fresh.adapters).map(([adapter, value]) => [
-          adapter,
-          { invalid: value.invalid, conflict: value.conflict },
-        ]),
-      )
+      state.diagnostics = diagnosticsFor(fresh)
       if (state.status !== 'cancelled' && (state.summary.invalid || state.summary.conflict))
         state.blocker ??= 'provider_or_metadata_diagnostics'
       else if (state.blocker === 'provider_or_metadata_diagnostics') state.blocker = null
@@ -414,7 +447,11 @@ export async function runIngestBatch(input, worker) {
         state.sources.some((source) => source.status === 'pending')
       )
         state.blocker ??= 'continuation_available'
-      if (state.status === 'cancelled') state.questions = []
+      if (
+        state.status === 'cancelled' &&
+        !state.sources.some((source) => source.phase === 'publishing')
+      )
+        state.questions = []
       else await addQuestions(opts, state)
       if (state.status !== 'cancelled')
         state.status = state.questions.length
@@ -437,7 +474,7 @@ export async function runIngestBatch(input, worker) {
     // Only the pointer's absence/null denotes no active accepted work.
     await persist()
     await writeIngestFile(activePath, JSON.stringify({ batch_id: state.batch_id }))
-    if (state.status === 'cancelled') return finish()
+    if (state.status === 'cancelled' && !opts.decisionId) return finish()
     if (active && !opts.decisionId) {
       for (const source of state.sources) {
         if (['running', 'repairing'].includes(source.status)) {
@@ -455,19 +492,21 @@ export async function runIngestBatch(input, worker) {
       const question = state.questions.find((item) => item.id === opts.decisionId)
       if (!question || !question.options.includes(opts.answer))
         throw new IngestFault('decision_not_open')
-      if (question.binding !== (await questionBinding(opts, state, question.source_index)))
+      if (question.binding !== (await questionSnapshot(opts, state, question.source_index)).binding)
         return finish()
       if (typeof opts.authorize !== 'function') throw new IngestFault('decision_requires_approval')
       await opts.authorize(`${state.batch_id}/${question.id}/${opts.answer}`)
       opts.signal?.throwIfAborted()
-      if (question.binding !== (await questionBinding(opts, state, question.source_index)))
+      if (question.binding !== (await questionSnapshot(opts, state, question.source_index)).binding)
         return finish()
       if (opts.answer === 'cancel') {
         state.status = 'cancelled'
         state.questions = []
         for (const source of state.sources)
           if (unfinished.has(source.status)) source.status = 'cancelled'
-        state.blocker = null
+        state.blocker = state.sources.some((source) => source.phase === 'publishing')
+          ? 'publication_interrupted'
+          : null
         return finish()
       }
       if (question.source_index === null) {
@@ -482,6 +521,14 @@ export async function runIngestBatch(input, worker) {
         source.status =
           opts.answer === 'retry' ? 'pending' : opts.answer === 'defer' ? 'deferred' : 'unresolved'
         if (opts.answer === 'retry') source.blocker = null
+        if (opts.answer === 'retry' && question.selection) {
+          Object.assign(source, question.selection)
+          source.approval = {
+            revision: question.selection.source_revision,
+            frontmatter: question.selection.frontmatter,
+            digest: question.source_hash,
+          }
+        }
       }
       state.questions = state.questions.filter((item) => item.id !== question.id)
       await persist()
@@ -490,15 +537,18 @@ export async function runIngestBatch(input, worker) {
     try {
       const publishing = state.sources.find((source) => source.phase === 'publishing')
       if (publishing) {
-        await sourceBytes(publishing, opts)
+        await verifyDigest(publishing, opts, publishing.publication.source_hash)
         opts.attemptRoot = path.join(
           opts.root,
           'drafts',
           state.batch_id,
           publishing.publication.attempt,
         )
-        await publishPrepared(opts, publishing, persist, () => sourceBytes(publishing, opts))
+        await publishPrepared(opts, publishing, persist, () =>
+          verifyDigest(publishing, opts, publishing.publication.source_hash),
+        )
         await removeDraft(opts.root, state.batch_id, publishing.publication.attempt)
+        if (state.status === 'cancelled') return finish()
       }
       const admission = await snapshot(opts)
       if (
@@ -581,8 +631,18 @@ export async function runIngestBatch(input, worker) {
               )
             )
               if (!state.adoption?.approved) throw new IngestFault('invalid_source_metadata')
+            if (
+              source.approval &&
+              (selected.source_revision !== source.approval.revision ||
+                !isDeepStrictEqual(selected.frontmatter, source.approval.frontmatter))
+            )
+              throw new IngestFault('source_changed')
             Object.assign(source, selected)
             const sourceHash = digest(await sourceBytes(source, opts))
+            if (source.approval && sourceHash !== source.approval.digest)
+              throw new IngestFault('source_changed')
+            attempt.source_hash = sourceHash
+            await persist()
             const draft = await createDraft(
               opts,
               attemptRoot,
@@ -641,7 +701,11 @@ export async function runIngestBatch(input, worker) {
               dispatchPause = 'worker_configuration_paused'
               throw new IngestFault(dispatchPause)
             }
-            if (result?.errors?.length) throw new IngestFault(result.errors[0].code)
+            if (result?.errors?.length)
+              throw new IngestFault(
+                result.errors.find((item) => item.code === 'worker_permission_denied')?.code ??
+                  result.errors[0].code,
+              )
             if (source.content?.trimStart().startsWith('SKIP:'))
               throw new IngestFault('source_unusable')
             if (!source.source_written) throw new IngestFault('worker_no_source_write')
@@ -655,13 +719,16 @@ export async function runIngestBatch(input, worker) {
               { ...attempt, wiki: draft.wiki },
               baseline,
             )
+            source.publication.source_hash = sourceHash
             source.phase = 'publishing'
             await persist()
             await opts.onPhase?.('publication_prepared')
             // Source identity/digest are rechecked after durable preparation.
-            await sourceBytes(source, opts)
+            await verifyDigest(source, opts, sourceHash)
             opts.attemptRoot = attemptRoot
-            await publishPrepared(opts, source, persist, () => sourceBytes(source, opts))
+            await publishPrepared(opts, source, persist, () =>
+              verifyDigest(source, opts, sourceHash),
+            )
             source.blocker = null
             state.adoption = null
             state.admission = null
@@ -702,7 +769,7 @@ export async function runIngestBatch(input, worker) {
                   wiki,
                   files,
                   base: attempt.base,
-                  sourceHash: digest(await sourceBytes(source, opts)),
+                  sourceHash: digest(await verifyDigest(source, opts, attempt.source_hash)),
                 }
                 // If source identity changed, prior interpretation cannot be reused.
                 if (source.blocker === 'source_changed') repairDraft = null

@@ -31,6 +31,8 @@ Keine eigenen Änderungen, Shell oder manuelle Worker-Delegation.
 
 `done`: angenommene Auswahl abgeschlossen; `partial`: ausdrücklich zurückgestellte
 oder ungelöste Quellen; `cancelled`: vom Nutzer beendet, nicht automatisch wecken.
+Eine angebotene technische Abschlussfrage nach Abbruch nur erneut freigeben lassen:
+Sie beendet ausschließlich die vorbereitete Veröffentlichung, nicht den übrigen Auftrag.
 Speicher-/Integritätsprobleme als technische Pause melden. Während aktiver
 Publikation keine anderen Schreibaufträge oder manuellen Wiki-Änderungen.
 Bei null Quellen keine Auswertung erfinden.

@@ -571,6 +571,158 @@ test('foreign edits after interrupted publication are preserved and prevent comp
   assert.equal(paused.ingested, 0)
 })
 
+test('cancellation during publication offers only explicitly approved technical completion', async (t) => {
+  const f = await fixture(t, 2)
+  const controller = new AbortController()
+  const cancelled = await runIngestBatch(
+    {
+      ...f.opts,
+      signal: controller.signal,
+      onPhase: (phase) => {
+        if (phase === 'file_installed') controller.abort()
+      },
+    },
+    f.worker,
+  )
+  assert.equal(cancelled.status, 'cancelled')
+  assert.equal(cancelled.questions.length, 1)
+  assert.deepEqual(cancelled.questions[0].options, ['retry'])
+  const inspected = await runIngestBatch(f.opts, () => assert.fail('never wake cancelled work'))
+  assert.equal(inspected.status, 'cancelled')
+  assert.equal(inspected.questions[0].id, cancelled.questions[0].id)
+  const recovered = await answer(f, inspected, inspected.questions[0], 'retry', () =>
+    assert.fail('only finish prepared publication'),
+  )
+  assert.equal(recovered.status, 'cancelled')
+  assert.equal(recovered.ingested, 1)
+  assert.equal(recovered.questions.length, 0)
+  assert.equal(await f.git('status', '--porcelain'), '')
+  assert.equal(await f.git('rev-list', '--count', 'HEAD'), '2')
+  const next = await runIngestBatch(f.opts, f.worker)
+  assert.notEqual(next.batch_id, cancelled.batch_id)
+  assert.equal(next.status, 'done')
+  assert.equal(next.ingested, 1)
+})
+
+test('refreshed questions display and process the same freshly approved revision', async (t) => {
+  const f = await fixture(t, 1)
+  const paused = await runIngestBatch({ ...f.opts, maxAttempts: 1 }, async () => ({
+    source_written: false,
+  }))
+  const bytes = 'Approved new synthetic revision.\n'
+  await writeFile(path.join(f.opts.sourceRoot, 'webdav/note-0.md'), bytes)
+  f.manifest.items[0].source_revision = f.manifest.items[0].frontmatter.source_revision = sha(bytes)
+  await f.publish()
+  const refreshed = await answer(f, paused, paused.questions[0], 'retry', () =>
+    assert.fail('stale approval'),
+  )
+  assert.equal(refreshed.questions[0].target.source_revision, sha(bytes))
+  const done = await answer(f, refreshed, refreshed.questions[0], 'retry', async (batch) => {
+    assert.equal(batch.sources[0].source_revision, refreshed.questions[0].target.source_revision)
+    return f.worker(batch)
+  })
+  assert.equal(done.status, 'done')
+})
+
+test('a permission rejection anywhere in native errors prevents automatic retries', async (t) => {
+  const f = await fixture(t, 1)
+  let calls = 0
+  const result = await runIngestBatch(f.opts, async () => {
+    calls++
+    return {
+      source_written: false,
+      errors: [
+        { code: 'worker_tool_failed', tool: 'patch' },
+        { code: 'worker_permission_denied', tool: 'write' },
+      ],
+    }
+  })
+  assert.equal(calls, 1)
+  assert.equal(result.status, 'paused')
+  assert.equal(result.questions[0].reason, 'worker_permission_denied')
+})
+
+test('Paperless preparation and repair remain bound to the original processing digest', async (t) => {
+  for (const phase of ['preparation', 'installation', 'repair'])
+    await t.test(phase, async (t) => {
+      const f = await fixture(t, 1)
+      const key = '3246.md'
+      await mkdir(path.join(f.opts.sourceRoot, 'paperless'))
+      await mkdir(path.join(f.opts.wikiRoot, 'sources/paperless'))
+      const original = `---\npaperless_id: "3246"\npaperless_url: "https://paperless.invalid/documents/3246/"\nsource_revision: ${'a'.repeat(64)}\n---\nOriginal synthetic fact.\n`
+      const changed = original.replace('Original', 'Changed')
+      const manifest = {
+        ...f.manifest,
+        source: 'paperless',
+        wiki_root: 'paperless',
+        items: [
+          {
+            source_key: '3246',
+            source_path: key,
+            wiki_path: `paperless/${key}`,
+            source_revision: 'a'.repeat(64),
+            source_sha256: sha(original),
+            frontmatter: {
+              paperless_id: '3246',
+              paperless_url: 'https://paperless.invalid/documents/3246/',
+              source_revision: 'a'.repeat(64),
+            },
+            claim: { paperless_id: '3246' },
+          },
+        ],
+      }
+      const sourcePath = path.join(f.opts.sourceRoot, 'paperless', key)
+      await writeFile(sourcePath, original)
+      const publish = () =>
+        writeFile(path.join(f.opts.sourceRoot, 'paperless/manifest.json'), JSON.stringify(manifest))
+      await publish()
+      const change = async () => {
+        await writeFile(sourcePath, changed)
+        manifest.items[0].source_sha256 = sha(changed)
+        await publish()
+      }
+      let calls = 0
+      const result = await runIngestBatch(
+        {
+          ...f.opts,
+          sourcePath,
+          maxAttempts: 2,
+          onPhase: async (step) => {
+            if (
+              (phase === 'preparation' && step === 'publication_prepared') ||
+              (phase === 'installation' && step === 'file_installed')
+            )
+              await change()
+          },
+        },
+        async (batch) => {
+          calls++
+          if (phase === 'repair' && calls === 1) {
+            await f.worker(batch)
+            await change()
+            return { source_written: true, errors: [{ code: 'worker_tool_failed', tool: 'patch' }] }
+          }
+          if (calls > 1) {
+            assert.deepEqual(batch.repair_files, [])
+            await assert.rejects(readFile(batch.sources[0].wiki_path), { code: 'ENOENT' })
+          }
+          return f.worker(batch)
+        },
+      )
+      assert.equal(result.status, phase === 'repair' ? 'done' : 'paused')
+      assert.equal(result.ingested, phase === 'repair' ? 1 : 0)
+      assert.equal(await f.git('rev-list', '--count', 'HEAD'), phase === 'repair' ? '2' : '1')
+      if (phase !== 'repair') {
+        const still = await answer(f, result, result.questions[0], 'retry', () =>
+          assert.fail('digest mismatch must not reinterpret'),
+        )
+        assert.equal(still.status, 'paused')
+        assert.equal(still.ingested, 0)
+        assert.equal(await f.git('rev-list', '--count', 'HEAD'), '1')
+      }
+    })
+})
+
 test('single-source filter never imports unrelated sources', async (t) => {
   const f = await fixture(t)
   const sourcePath = path.join(f.opts.sourceRoot, 'webdav/note-1.md')

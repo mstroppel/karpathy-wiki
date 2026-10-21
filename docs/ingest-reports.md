@@ -54,6 +54,8 @@ Exhausted automatic repair means `paused`, not silent skipping or definitive
 failure. Questions contain opaque decision IDs, exact targets, reasons, proposals
 and allowed actions. Chat shows them and waits; subsequent calls may inspect more
 questions (`question_offset`) or answer only the supplied `batch_id`/`decision_id`.
+Display and binding use the same fresh selection; revision-specific approvals
+also pin subsequent worker dispatch to that revision, frontmatter and digest.
 Answers require a separate `ingest_decision` approval with no saved wildcard,
 in the initiating chat. Bindings cover identity/revision, proposal/drafts, source
 bytes, base/index and dirty-file hashes. Changed/stale answers produce new questions;
@@ -94,7 +96,12 @@ The lifetime kernel lock serializes cooperating ingest calls, **not arbitrary
 editors**. Keep other writers idle during publication. Readers can see intermediate
 file installations; this is not an atomic multi-file reader transaction or an OS
 barrier against foreign writers. Cancellation during publication leaves a visible
-technical recovery checkpoint, never an automatic reset or unattended restart.
+technical recovery question, never an automatic reset or unattended restart.
+Its separately approved `retry` only finishes the prepared publication; the
+remaining accepted work stays cancelled. After completion, a new explicit request
+can accept remaining sources. Original processing digests are persisted and
+required for both prepared publication and partial-draft reuse, including
+Paperless generations that retain a revision while changing their independent digest.
 Source hashes and canonical frontmatter are verified; Paperless requires
 `source_sha256` plus matching metadata. These checks and read coverage do not prove
 semantic correctness, understanding or faithful extraction by a real model.
