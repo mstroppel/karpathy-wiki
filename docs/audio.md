@@ -51,6 +51,7 @@ is reported content-free through the health record and retry backoff.
 | `AUDIO_MAX_BYTES` | `536870912` | Reject larger recordings content-free |
 | `AUDIO_MAX_DURATION_SECONDS` | `14400` | Reject longer recordings content-free |
 | `SPEECH_BACKEND` | `faster-whisper` | Speech backend: `faster-whisper`, `mistral` (opt-in hosted), or `fake` |
+| `SPEECH_LOG_LEVEL` | `INFO` | Worker log level: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`; `DEBUG` adds request exception messages and tracebacks |
 | `SPEECH_MODEL` | `small` | faster-whisper model preset (see below) |
 | `SPEECH_DEVICE` | `cpu` | Only `cpu` is currently supported by the shipped speech image |
 | `SPEECH_COMPUTE_TYPE` | `int8` | CTranslate2 compute type for CPU transcription |
@@ -300,10 +301,29 @@ counts or publication exception types, not a per-source root cause. Reports can
 be replaced by later publication attempts, so use generation IDs to avoid
 mistaking a newer report for the original failure.
 
+For detailed request failures, temporarily set `SPEECH_LOG_LEVEL=DEBUG` in `.env`
+and recreate the worker with the updated image and Compose configuration:
+
+```sh
+./karpathy-wiki.sh up -d --no-deps --force-recreate audio-speech
+./karpathy-wiki.sh logs --no-color --since 10m audio-speech
+```
+
+Subsequent request failures include the exception message and traceback, including
+the failing validation line. This cannot recover details from past failures and
+does not rearm dead jobs. Another hosted attempt may incur transcription charges.
+DEBUG applies only to the speech worker logger, not dependency loggers; it does
+not explicitly dump API responses. Exception details can nevertheless contain
+private text or paths and remain in Docker logs. Do not share them unreviewed.
+Restore `SPEECH_LOG_LEVEL=INFO` and recreate the worker after diagnosis; that does
+not erase existing logs. Durable failure reports remain exception-class-only at
+every level. Invalid levels fail startup rather than silently falling back.
+
 Retry limits, quarantine, and all-or-nothing publication remain unchanged. A dead
 job is not automatically rearmed; diagnose the failure before making an explicit
 operator recovery decision. No recording-specific paths or raw exception messages
-are added to these service logs.
+are added to the default request-failure logs; the opt-in DEBUG tracebacks are
+the exception described above.
 
 ## What is published
 
