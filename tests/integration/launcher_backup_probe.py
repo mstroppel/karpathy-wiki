@@ -25,6 +25,7 @@ def main():
         name = f"kw-backup-{os.getpid()}-{int(time.time())}"
         source_image = image
         image = f"{name}:installed"
+        retained_image = f"{name}:cached"
         cache = project / ".cache"
         cache.mkdir()
         data = project / "data"
@@ -98,6 +99,8 @@ def main():
                 "-",
                 input=f"FROM {source_image}\nLABEL probe={name}\n",
             )
+            # Docker permits removing a running container's tag only if another remains.
+            run("docker", "image", "tag", image, retained_image)
             run("sh", str(launcher), "up", "-d", "--wait", "--wait-timeout", "30")
             # Prove that the live writer and the archived data use the same bind.
             run(
@@ -195,7 +198,11 @@ def main():
             archived = next(
                 m for m in metadata if m["kind"] == "update" and "images.tar" in m["sha256"]
             )
-            run("docker", "image", "rm", image)
+            run("docker", "image", "rm", image, retained_image)
+            missing_id = subprocess.run(
+                ["docker", "image", "inspect", installed_image], capture_output=True
+            )
+            assert missing_id.returncode != 0
             before = {p.name for p in (project / "backups").iterdir()}
             failed = subprocess.run(
                 ["sh", str(launcher), "rollback", identifier],
@@ -262,7 +269,7 @@ def main():
                 "down",
                 "--remove-orphans",
             )
-            subprocess.run(["docker", "image", "rm", image], capture_output=True)
+            subprocess.run(["docker", "image", "rm", image, retained_image], capture_output=True)
 
 
 if __name__ == "__main__":
