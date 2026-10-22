@@ -336,7 +336,8 @@ export async function runIngestBatch(input, worker) {
             source.blocker = 'interrupted_batch'
           }
         // Bookkeeping completes first; cleanup failure only blocks later dispatch.
-        state.blocker ??= await cleanupDraft(opts, state, publishing.publication.attempt, true)
+        const cleanupError = await cleanupDraft(opts, state, publishing.publication.attempt, true)
+        state.blocker ??= cleanupError
         return finish()
       }
       if (active) {
@@ -344,8 +345,10 @@ export async function runIngestBatch(input, worker) {
         // Close private-only interrupted work; a later explicit call selects it afresh.
         for (const source of state.sources) {
           if (source.status === 'ingested') {
-            for (const attempt of source.attempts)
-              state.blocker ??= await cleanupDraft(opts, state, attempt.id, true)
+            for (const attempt of source.attempts) {
+              const cleanupError = await cleanupDraft(opts, state, attempt.id, true)
+              state.blocker ??= cleanupError
+            }
           } else if (['pending', 'running'].includes(source.status)) {
             source.status = 'failed'
             source.blocker = 'interrupted_batch'

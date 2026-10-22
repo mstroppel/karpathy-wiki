@@ -526,17 +526,24 @@ test('recovery and interrupted close finish bookkeeping when completed drafts ca
         const attempt = (await f.state(result)).sources[0].attempts[0].id
         const directory = path.join(f.opts.root, 'drafts', result.batch_id, attempt)
         await chmod(directory, 0o500)
-        const recovered = await runIngestBatch(
-          { ...f.opts, batchId: result.batch_id, authorize: async () => {} },
-          () => assert.fail('no worker'),
-        )
-        assert.equal(recovered.status, 'blocked')
-        assert.equal(recovered.blocker, 'draft_cleanup_failed')
-        assert.equal(recovered.ingested, 1)
-        const state = await f.state(recovered)
-        assert.equal(state.sources[0].status, 'ingested')
-        assert.equal(state.sources[1].blocker, 'interrupted_batch')
-        await chmod(directory, 0o700)
+        try {
+          const recovered = await runIngestBatch(
+            { ...f.opts, batchId: result.batch_id, authorize: async () => {} },
+            () => assert.fail('no worker'),
+          )
+          assert.equal(recovered.status, 'blocked')
+          assert.equal(recovered.blocker, 'draft_cleanup_failed')
+          assert.equal(recovered.ingested, 1)
+          const state = await f.state(recovered)
+          assert.equal(state.sources[0].status, 'ingested')
+          assert.equal(state.sources[1].blocker, 'interrupted_batch')
+          assert.match(
+            await readFile((await runIngestBatch(f.opts, f.worker)).report_path, 'utf8'),
+            /note-1\.md/,
+          )
+        } finally {
+          await chmod(directory, 0o700).catch(() => {})
+        }
       } else {
         const config = path.join(f.opts.root, '../opts.json')
         await writeFile(config, JSON.stringify(f.opts))
@@ -550,21 +557,28 @@ test('recovery and interrupted close finish bookkeeping when completed drafts ca
         ).sources[0].attempts[0].id
         const directory = path.join(f.opts.root, 'drafts', batchId, attempt)
         await chmod(directory, 0o500)
-        const closed = await runIngestBatch(f.opts, () => assert.fail('no worker'))
-        assert.equal(closed.status, 'blocked')
-        assert.equal(closed.blocker, 'draft_cleanup_failed')
-        assert.equal(closed.ingested, 1)
-        const state = await f.state(closed)
-        assert.equal(state.sources[0].status, 'ingested')
-        assert.equal(state.sources[1].blocker, 'interrupted_batch')
-        await chmod(directory, 0o700)
+        try {
+          const closed = await runIngestBatch(f.opts, () => assert.fail('no worker'))
+          assert.equal(closed.status, 'blocked')
+          assert.equal(closed.blocker, 'draft_cleanup_failed')
+          assert.equal(closed.ingested, 1)
+          const state = await f.state(closed)
+          assert.equal(state.sources[0].status, 'ingested')
+          assert.equal(state.sources[1].blocker, 'interrupted_batch')
+          assert.match(
+            await readFile(path.join(directory, 'wiki/sources/webdav/note-0.md'), 'utf8'),
+            /Recovered synthetic finding/,
+          )
+          assert.match(
+            await readFile((await runIngestBatch(f.opts, f.worker)).report_path, 'utf8'),
+            /note-1\.md/,
+          )
+        } finally {
+          await chmod(directory, 0o700).catch(() => {})
+        }
       }
       assert.equal(await f.git('status', '--porcelain'), '')
-      assert.equal(await f.git('rev-list', '--count', 'HEAD'), '2')
-      assert.match(
-        await readFile((await runIngestBatch(f.opts, f.worker)).report_path, 'utf8'),
-        /note-1\.md/,
-      )
+      assert.equal(await f.git('rev-list', '--count', 'HEAD'), '3')
     })
 })
 
