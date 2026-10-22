@@ -224,6 +224,14 @@ async function compactDraft(opts, state, attempt, baseline) {
   }
 }
 
+async function cleanupDraft(opts, state, attemptId) {
+  try {
+    await removeDraft(opts.root, state.batch_id, attemptId)
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw new IngestFault('draft_cleanup_failed')
+  }
+}
+
 // One attempt per source. Only an interrupted live publication needs a checkpoint;
 // failed private interpretations are reported, never repaired or approved in chat.
 export async function runIngestBatch(input, worker) {
@@ -317,11 +325,7 @@ export async function runIngestBatch(input, worker) {
         const validate = () => verifyDigest(publishing, opts, publishing.publication.source_hash)
         await validate()
         await publishPrepared(opts, publishing, persist, validate)
-        await removeDraft(opts.root, state.batch_id, publishing.publication.attempt).catch(
-          (error) => {
-            if (error.code !== 'ENOENT') throw error
-          },
-        )
+        await cleanupDraft(opts, state, publishing.publication.attempt)
         state.blocker = null
         // Explicit recovery only completes publication, never restarts interpretation.
         for (const source of state.sources)
@@ -336,10 +340,7 @@ export async function runIngestBatch(input, worker) {
         // Close private-only interrupted work; a later explicit call selects it afresh.
         for (const source of state.sources) {
           if (source.status === 'ingested') {
-            for (const attempt of source.attempts)
-              await removeDraft(opts.root, state.batch_id, attempt.id).catch((error) => {
-                if (error.code !== 'ENOENT') throw error
-              })
+            for (const attempt of source.attempts) await cleanupDraft(opts, state, attempt.id)
           } else if (['pending', 'running'].includes(source.status)) {
             source.status = 'failed'
             source.blocker = 'interrupted_batch'
@@ -440,9 +441,12 @@ export async function runIngestBatch(input, worker) {
           await verifyDigest(source, opts, sourceHash)
           opts.attemptRoot = attemptRoot
           await publishPrepared(opts, source, persist, () => verifyDigest(source, opts, sourceHash))
-          await removeDraft(opts.root, state.batch_id, attempt.id)
+          await cleanupDraft(opts, state, attempt.id)
         } catch (error) {
-          if (source.phase === 'complete' && source.commit) continue
+          if (source.phase === 'complete' && source.commit) {
+            state.blocker = reason(error)
+            break
+          }
           source.status = 'failed'
           source.blocker = reason(error)
           if (opts.signal?.aborted) state.status = 'cancelled'

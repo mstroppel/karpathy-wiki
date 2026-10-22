@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
@@ -451,6 +451,50 @@ test('real process death recovers only prepared publication without duplicate co
           .length,
         1,
       )
+    })
+})
+
+test('completed draft cleanup tolerates absence but reports unsafe leftovers without losing commits', async (t) => {
+  for (const kind of ['absent', 'unsafe'])
+    await t.test(kind, async (t) => {
+      const f = await fixture(t, 2)
+      let directory
+      let calls = 0
+      const result = await runIngestBatch(
+        {
+          ...f.opts,
+          onPhase: async (phase) => {
+            if (phase !== 'source_recorded' || calls !== 1) return
+            if (kind === 'absent') await rm(directory, { recursive: true })
+            else {
+              await rename(directory, `${directory}-retained`)
+              await symlink(`${directory}-retained`, directory)
+            }
+          },
+        },
+        async (batch) => {
+          calls++
+          directory = path.dirname(batch.wiki_root)
+          return f.worker(batch)
+        },
+      )
+      assert.equal(result.status, kind === 'absent' ? 'done' : 'blocked')
+      assert.equal(calls, kind === 'absent' ? 2 : 1)
+      assert.equal(result.ingested, calls)
+      assert.equal(result.blocker, kind === 'absent' ? null : 'draft_cleanup_failed')
+      assert.equal(await f.git('status', '--porcelain'), '')
+      assert.equal(await f.git('rev-list', '--count', 'HEAD'), String(calls + 1))
+      assert.equal((await f.state(result)).sources[0].status, 'ingested')
+      if (kind === 'unsafe') {
+        assert.match(await readFile(result.report_path, 'utf8'), /draft_cleanup_failed/)
+        assert.match(
+          await readFile(
+            path.join(`${directory}-retained`, 'wiki/sources/webdav/note-0.md'),
+            'utf8',
+          ),
+          /Supported finding/,
+        )
+      }
     })
 })
 

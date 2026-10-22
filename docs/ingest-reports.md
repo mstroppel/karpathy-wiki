@@ -51,7 +51,9 @@ added. OCR gaps and contradictions are reported, not automatic rejection reasons
 Defaults reserve 32 MiB per draft, limit files to 8 MiB and retained attempts to
 256 MiB/16,384 entries. Unchanged copies in failed attempts are reclaimed; changed
 or uncertain evidence is retained and never reused. Successful drafts are removed
-only after durable publication. Capacity exhaustion never silently deletes evidence.
+only after durable publication. A cleanup failure reports `draft_cleanup_failed`
+and stops new dispatch without downgrading the verified commit; already-absent
+completed drafts are harmless. Capacity exhaustion never silently deletes evidence.
 Back up the journal and wiki `.git`; existing retention policy applies.
 
 ## Results and interruption
