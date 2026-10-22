@@ -128,9 +128,12 @@ source provider. `WEBDAV_VENDOR` defaults to `nextcloud`; rclone also supports
 other WebDAV implementations.
 
 WebDAV files are synchronized into a private staging directory first. The
-`webdav-ingest` service processes files whose name ends in `.md`, `.html`, or
-`.htm` (case-insensitively), applies `REDACTIONS_FILE` locally, and publishes
-UTF-8 Markdown and HTML files to `sources/webdav`. Other formats are ignored.
+`webdav-ingest` service processes files whose name ends in `.md`, `.html`,
+`.htm`, or `.xlsx` (case-insensitively), applies `REDACTIONS_FILE` locally, and
+publishes UTF-8 Markdown and HTML files to `sources/webdav`. XLSX tables/formulas
+are extracted locally with bounded openpyxl parsing; see [Excel through WebDAV](webdav-xlsx.md)
+for visibility, formats, limits and formula-cache caveats. `.xls`, `.xlsb` and
+`.xlsm` fail explicitly; other formats are ignored.
 HTML stays HTML: original paths, tags, attributes, formatting, and line endings
 are preserved except for targeted replacements. Matching covers literal source,
 context-aware decoded HTML entities (including attribute values), and text split across inline
@@ -217,12 +220,14 @@ sources/webdav/
 ```
 
 Manifest items reference their sanitized file as
-`generations/<id>/<relative path>`, while `wiki_path` and the `source_path`
-frontmatter stay keyed by the stable relative upstream path, so wiki pages
+`generations/<id>/<source key>`, while `wiki_path` and the `source_path`
+frontmatter stay keyed by the stable source key: the relative upstream path
+for Markdown/HTML, or `xlsx/<path-hash>/workbook.md` for spreadsheets. Wiki pages
 never change their destination when a new generation is published. Each
 generation directory records a
 `.generation.json` metadata file with its creation time, the redaction
-configuration fingerprint, and the upstream inventory hashes; it never
+configuration fingerprint, upstream inventory hashes, and
+`xlsx_extraction_version`; it never
 contains upstream content.
 
 Retention keeps only the generation the manifest describes; staging
@@ -239,9 +244,10 @@ and `.generation.json` are reserved inside `sources/webdav`.
 The `webdav-ingest` service records every cycle in a durable, content-free
 SQLite state store at `INGEST_STATE_PATH` (mounted at
 `/data/state/ingest.sqlite3`). Each cycle becomes an accepted job keyed by the
-upstream inventory hashes and the redaction configuration fingerprint, so:
+upstream inventory hashes, redaction configuration fingerprint and XLSX extraction
+version, so:
 
-- unchanged upstream content with unchanged redactions keeps the active
+- unchanged upstream content, redactions and extraction version keep the active
   generation instead of republishing it every interval;
 - a restart neither loses accepted work nor executes an accepted cycle twice;
   leases of interrupted cycles expire and the cycle is recovered without a

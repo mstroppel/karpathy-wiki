@@ -1077,6 +1077,29 @@ class RunLoopTests(unittest.TestCase):
         # The failed cycle must not publish anything.
         self.assertFalse((self.root / "sanitized" / "manifest.json").exists())
 
+    def test_rclone_failure_diagnostics_omit_private_arguments_and_output(self):
+        error = subprocess.CalledProcessError(
+            5,
+            ["rclone", "sync", "webdav:SYNTHETIC-PRIVATE-FOLDER"],
+            output="SYNTHETIC-PRIVATE-OUTPUT",
+            stderr="SYNTHETIC-PRIVATE-ERROR",
+        )
+        with (
+            mock.patch.dict(os.environ, self.environment(self.root), clear=True),
+            mock.patch("karpathy_wiki_ingest_webdav.synchronize", side_effect=error),
+            self.assertLogs("karpathy-wiki-webdav", level="ERROR") as logs,
+            self.assertRaises(SystemExit) as raised,
+        ):
+            run(once=True)
+        self.assertEqual(raised.exception.code, 1)
+        self.assertEqual(len(logs.records), 1)
+        self.assertEqual(logs.records[0].getMessage(), "rclone synchronization failed")
+        self.assertIsNone(logs.records[0].exc_info)
+        self.assertNotIn("SYNTHETIC-PRIVATE", "\n".join(logs.output))
+        health = (self.root / "health.json").read_text()
+        self.assertEqual(json.loads(health)["failed"], 1)
+        self.assertNotIn("SYNTHETIC-PRIVATE", health)
+
     def test_daemon_retries_after_rclone_failure_and_writes_health(self):
         stop_event = threading.Event()
         attempts = []

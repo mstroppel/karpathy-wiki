@@ -62,8 +62,10 @@ RUN python -m pip install --no-deps --no-index --find-links=/wheels karpathy-wik
 
 FROM core AS webdav
 COPY --from=build /wheels/webdav /wheels
+COPY webdav/requirements.txt /src/webdav-requirements.txt
 RUN python -m pip install --no-deps --no-index --find-links=/wheels karpathy-wiki-ingest-webdav \
-    && rm -rf /wheels
+    && python -m pip install --require-hashes --only-binary=:all: -r /src/webdav-requirements.txt \
+    && rm -rf /wheels /src
 
 # The audio plugin image ships the audio provider only; transcription runs
 # in the speech image so no provider image needs the model stack.
@@ -75,8 +77,8 @@ RUN python -m pip install --no-deps --no-index --find-links=/wheels \
     && rm -rf /wheels
 
 # The speech image runs faster-whisper locally; PyAV carries the bundled
-# FFmpeg libraries so decoding needs no system ffmpeg. This is the only
-# stage that installs third-party runtime wheels from the index, pinned by
+# FFmpeg libraries so decoding needs no system ffmpeg. Like WebDAV, this
+# stage installs third-party runtime wheels from the index, pinned by
 # hash in speech/requirements.txt so dependabot keeps them current.
 FROM python:3.14-slim-bookworm@sha256:48b13b003dda20b16f9442b8475aa05fe21bf6579a8c881db92ffb4d8fd20f83 AS speech
 ENV PYTHONUNBUFFERED=1 \

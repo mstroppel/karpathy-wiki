@@ -211,6 +211,7 @@ proxy boundaries, recovery, and a separate-instance restore check.
 - Never commit `.env`, tokens, redaction lists, source material, wiki content, or sessions.
 - Paperless redaction is an explicit deny-list, not general anonymization. Review output before sending it to an external model provider.
 - WebDAV Markdown and HTML are locally redacted using the configured deny-list before publication to `sources/webdav`; unknown sensitive values may remain. HTML keeps its original format and active content: treat it as untrusted source text, not safe-to-render pages. Review redacted output before sending it to a model provider.
+- WebDAV also extracts `.xlsx` tables locally before redaction; originals stay private. Formula caches may be missing or stale: recalculate and save in Excel before upload. See [Excel through WebDAV](docs/webdav-xlsx.md) for visibility, formats and resource limits.
 - Put OpenChamber and `raw-files` behind a trusted HTTPS reverse proxy; keep OpenCode private and do not publish container ports.
 - The OpenCode configuration is not a substitute for host-level network isolation or least-privilege model credentials.
 
@@ -241,6 +242,7 @@ Run the same checks CI runs:
 
 ```bash
 python3 -m pip install -r requirements-dev.txt
+python3 -m pip install --require-hashes --only-binary=:all: -r ingest/webdav/requirements.txt
 python3 -m pip install -e ingest/core -e ingest/webdav -e ingest/paperless -e ingest/audio -e ingest/speech -e ingest/email
 npm ci
 scripts/install-shellcheck.sh  # add ~/.local/bin to PATH if needed; Linux x86_64

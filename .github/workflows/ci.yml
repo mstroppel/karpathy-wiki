@@ -35,6 +35,7 @@ jobs:
       - name: Run unit tests
         run: |
           python -m pip install -r requirements-dev.txt
+          python -m pip install --require-hashes --only-binary=:all: -r ingest/webdav/requirements.txt
           python -m pip install --no-deps -e ./ingest/core -e ./ingest/webdav -e ./ingest/paperless -e ./ingest/audio -e ./ingest/speech -e ./ingest/email
           scripts/test-python.sh
           npm test
