@@ -224,11 +224,14 @@ async function compactDraft(opts, state, attempt, baseline) {
   }
 }
 
-async function cleanupDraft(opts, state, attemptId) {
+async function cleanupDraft(opts, state, attemptId, soft = false) {
   try {
     await removeDraft(opts.root, state.batch_id, attemptId)
+    return null
   } catch (error) {
-    if (error.code !== 'ENOENT') throw new IngestFault('draft_cleanup_failed')
+    if (error.code === 'ENOENT') return null
+    if (soft) return 'draft_cleanup_failed'
+    throw new IngestFault('draft_cleanup_failed')
   }
 }
 
@@ -325,7 +328,6 @@ export async function runIngestBatch(input, worker) {
         const validate = () => verifyDigest(publishing, opts, publishing.publication.source_hash)
         await validate()
         await publishPrepared(opts, publishing, persist, validate)
-        await cleanupDraft(opts, state, publishing.publication.attempt)
         state.blocker = null
         // Explicit recovery only completes publication, never restarts interpretation.
         for (const source of state.sources)
@@ -333,6 +335,8 @@ export async function runIngestBatch(input, worker) {
             source.status = 'failed'
             source.blocker = 'interrupted_batch'
           }
+        // Bookkeeping completes first; cleanup failure only blocks later dispatch.
+        state.blocker ??= await cleanupDraft(opts, state, publishing.publication.attempt, true)
         return finish()
       }
       if (active) {
@@ -340,7 +344,8 @@ export async function runIngestBatch(input, worker) {
         // Close private-only interrupted work; a later explicit call selects it afresh.
         for (const source of state.sources) {
           if (source.status === 'ingested') {
-            for (const attempt of source.attempts) await cleanupDraft(opts, state, attempt.id)
+            for (const attempt of source.attempts)
+              state.blocker ??= await cleanupDraft(opts, state, attempt.id, true)
           } else if (['pending', 'running'].includes(source.status)) {
             source.status = 'failed'
             source.blocker = 'interrupted_batch'

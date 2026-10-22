@@ -1,7 +1,17 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, readFile, readdir, rename, rm, symlink, writeFile } from 'node:fs/promises'
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
@@ -495,6 +505,66 @@ test('completed draft cleanup tolerates absence but reports unsafe leftovers wit
           /Supported finding/,
         )
       }
+    })
+})
+
+test('recovery and interrupted close finish bookkeeping when completed drafts cannot be cleaned', async (t) => {
+  for (const kind of ['recovery', 'close'])
+    await t.test(kind, async (t) => {
+      const f = await fixture(t, 2)
+      if (kind === 'recovery') {
+        const result = await runIngestBatch(
+          {
+            ...f.opts,
+            onPhase: (phase) => {
+              if (phase === 'publication_prepared') throw new Error('Stop')
+            },
+          },
+          f.worker,
+        )
+        assert.equal(result.blocker, 'publication_interrupted')
+        const attempt = (await f.state(result)).sources[0].attempts[0].id
+        const directory = path.join(f.opts.root, 'drafts', result.batch_id, attempt)
+        await chmod(directory, 0o500)
+        const recovered = await runIngestBatch(
+          { ...f.opts, batchId: result.batch_id, authorize: async () => {} },
+          () => assert.fail('no worker'),
+        )
+        assert.equal(recovered.status, 'blocked')
+        assert.equal(recovered.blocker, 'draft_cleanup_failed')
+        assert.equal(recovered.ingested, 1)
+        const state = await f.state(recovered)
+        assert.equal(state.sources[0].status, 'ingested')
+        assert.equal(state.sources[1].blocker, 'interrupted_batch')
+        await chmod(directory, 0o700)
+      } else {
+        const config = path.join(f.opts.root, '../opts.json')
+        await writeFile(config, JSON.stringify(f.opts))
+        await assert.rejects(
+          exec(process.execPath, ['tests/fixtures/ingest-crash.mjs', config, 'source_recorded']),
+          (error) => error.signal === 'SIGKILL',
+        )
+        const [batchId] = await readdir(path.join(f.opts.root, 'batches'))
+        const attempt = JSON.parse(
+          await readFile(path.join(f.opts.root, 'batches', batchId, 'state.json'), 'utf8'),
+        ).sources[0].attempts[0].id
+        const directory = path.join(f.opts.root, 'drafts', batchId, attempt)
+        await chmod(directory, 0o500)
+        const closed = await runIngestBatch(f.opts, () => assert.fail('no worker'))
+        assert.equal(closed.status, 'blocked')
+        assert.equal(closed.blocker, 'draft_cleanup_failed')
+        assert.equal(closed.ingested, 1)
+        const state = await f.state(closed)
+        assert.equal(state.sources[0].status, 'ingested')
+        assert.equal(state.sources[1].blocker, 'interrupted_batch')
+        await chmod(directory, 0o700)
+      }
+      assert.equal(await f.git('status', '--porcelain'), '')
+      assert.equal(await f.git('rev-list', '--count', 'HEAD'), '2')
+      assert.match(
+        await readFile((await runIngestBatch(f.opts, f.worker)).report_path, 'utf8'),
+        /note-1\.md/,
+      )
     })
 })
 
