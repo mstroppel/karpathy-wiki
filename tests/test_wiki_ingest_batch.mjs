@@ -6,7 +6,7 @@ import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 import { promisify } from 'node:util'
-import { runIngestBatch } from '../config/tools/wiki_ingest_batch_core.mjs'
+import { inspectIngestBatch, runIngestBatch } from '../config/tools/wiki_ingest_batch_core.mjs'
 import { createBatchWorker, workerEvidence } from '../config/tools/wiki_ingest_batch_worker.mjs'
 import { withIngestLock } from '../config/tools/wiki_ingest_storage.mjs'
 
@@ -268,6 +268,253 @@ test('dirty Git prevents admission and preserves foreign work', async (t) => {
   assert.match(result.questions[0].reason, /dirty_wiki/)
   assert.deepEqual(result.admission.files, [{ path: 'overview.md', hash: sha('Foreign work\n') }])
   assert.equal(await readFile(file, 'utf8'), 'Foreign work\n')
+})
+
+test('unchanged dirty retries preserve decision IDs and a real change refreshes them', async (t) => {
+  const f = await fixture(t, 1)
+  const file = path.join(f.opts.wikiRoot, 'overview.md')
+  await writeFile(file, 'Unattributed work\n')
+  const paused = await runIngestBatch(f.opts, () => assert.fail())
+  const retried = await answer(f, paused, paused.questions[0], 'retry', () => assert.fail())
+  assert.equal(retried.questions[0].id, paused.questions[0].id)
+  const again = await answer(f, retried, retried.questions[0], 'retry', () => assert.fail())
+  assert.equal(again.questions[0].id, paused.questions[0].id)
+  await writeFile(file, 'Changed unattributed work\n')
+  const changed = await answer(f, again, again.questions[0], 'retry', () => assert.fail())
+  assert.notEqual(changed.questions[0].id, paused.questions[0].id)
+  assert.equal(await readFile(file, 'utf8'), 'Changed unattributed work\n')
+})
+
+test('unchanged metadata retries retain their IDs until the provider state changes', async (t) => {
+  const f = await fixture(t, 0)
+  await mkdir(path.join(f.opts.sourceRoot, 'broken'))
+  const manifest = path.join(f.opts.sourceRoot, 'broken/manifest.json')
+  await writeFile(manifest, '{}')
+  let paused = await runIngestBatch(f.opts, () => assert.fail())
+  const id = paused.questions[0].id
+  for (let retry = 0; retry < 3; retry++) {
+    paused = await answer(f, paused, paused.questions[0], 'retry', () => assert.fail())
+    assert.equal(paused.blocker, 'provider_or_metadata_diagnostics')
+    assert.equal(paused.questions[0].id, id)
+  }
+  await rm(manifest)
+  const completed = await answer(f, paused, paused.questions[0], 'retry', () => assert.fail())
+  assert.equal(completed.status, 'done')
+  assert.deepEqual(completed.questions, [])
+})
+
+test('changed proposals never reuse a question ID even with the same observed files', async (t) => {
+  const f = await fixture(t, 1)
+  await writeFile(path.join(f.opts.wikiRoot, 'overview.md'), 'Unattributed work\n')
+  const paused = await runIngestBatch(f.opts, () => assert.fail())
+  const file = path.join(f.opts.root, 'batches', paused.batch_id, 'state.json')
+  const state = JSON.parse(await readFile(file, 'utf8'))
+  state.questions[0].proposal = 'A different synthetic proposal'
+  state.questions[0].options = ['reprocess', 'retry', 'cancel']
+  await writeFile(file, JSON.stringify(state))
+  const observed = await runIngestBatch(f.opts, () => assert.fail())
+  assert.notEqual(observed.questions[0].id, paused.questions[0].id)
+  assert.ok(!observed.questions[0].options.includes('reprocess'))
+})
+
+test('retained dirty approval only dispatches its source before independent pending work', async (t) => {
+  for (const invalidIndependent of [false, true])
+    await t.test(String(invalidIndependent), async (t) => {
+      const f = await fixture(t, 2)
+      if (invalidIndependent) {
+        await writeFile(
+          path.join(f.opts.wikiRoot, 'sources/webdav/note-1.md'),
+          '# Invalid independent page\n',
+        )
+        await f.git('add', '.')
+        await f.git('commit', '-qm', 'synthetic invalid metadata')
+      }
+      const adopted = path.join(f.opts.wikiRoot, 'sources/webdav/note-0.md')
+      await writeFile(adopted, '# Historical uncommitted page\n')
+      const initial = await runIngestBatch(f.opts, () => assert.fail())
+      const paused = await answer(
+        f,
+        initial,
+        initial.questions[0],
+        'reprocess',
+        async () => ({
+          source_written: false,
+          errors: [{ code: 'worker_permission_denied', tool: 'patch' }],
+        }),
+        { maxAttempts: 1 },
+      )
+      const global = paused.questions.find((item) => item.source_index === null)
+      assert.ok(global)
+      assert.ok(!global.options.includes('reprocess'))
+      assert.doesNotMatch(global.proposal, /frisch verarbeiten/)
+      const observed = await answer(f, paused, global, 'retry', () =>
+        assert.fail('another source cannot use admission'),
+      )
+      assert.equal(observed.questions.find((item) => item.source_index === null).id, global.id)
+      const own = observed.questions.find((item) => item.source_index === 0)
+      const calls = []
+      const continued = await answer(f, observed, own, 'retry', async (batch) => {
+        calls.push(batch.sources[0].source_key)
+        return f.worker(batch)
+      })
+      assert.deepEqual(calls, invalidIndependent ? ['note-0.md'] : ['note-0.md', 'note-1.md'])
+      assert.equal(continued.ingested, invalidIndependent ? 1 : 2)
+      assert.equal(continued.status, invalidIndependent ? 'paused' : 'done')
+      assert.equal(await f.git('status', '--porcelain'), '')
+    })
+})
+
+test('failed dirty reprocessing retains exact approval for source retry, not after defer', async (t) => {
+  for (const choice of ['retry', 'defer'])
+    await t.test(choice, async (t) => {
+      const f = await fixture(t, 1)
+      const file = path.join(f.opts.wikiRoot, 'sources/webdav/note-0.md')
+      await writeFile(file, '# Historical uncommitted page\n')
+      const paused = await runIngestBatch(f.opts, () => assert.fail())
+      const failed = await answer(
+        f,
+        paused,
+        paused.questions[0],
+        'reprocess',
+        async (batch) => {
+          await f.worker(batch)
+          return {
+            source_written: true,
+            errors: [{ code: 'worker_permission_denied', tool: 'patch' }],
+          }
+        },
+        { maxAttempts: 1 },
+      )
+      assert.equal(failed.blocker, null)
+      assert.equal(failed.questions.length, 1)
+      assert.equal(failed.questions[0].reason, 'worker_permission_denied')
+      const continued = await answer(f, failed, failed.questions[0], choice)
+      if (choice === 'retry') {
+        assert.equal(continued.status, 'done', continued.blocker)
+        assert.equal(continued.ingested, 1)
+        assert.equal(await f.git('status', '--porcelain'), '')
+      } else {
+        assert.equal(continued.skipped, 1)
+        assert.match(continued.blocker, /dirty_wiki/)
+        assert.equal(await readFile(file, 'utf8'), '# Historical uncommitted page\n')
+      }
+    })
+})
+
+test('diagnostics find the owner and exact worker failure across chats without writes', async (t) => {
+  const f = await fixture(t, 12)
+  const paused = await runIngestBatch(
+    { ...f.opts, ownerSession: 'ses_original', maxAttempts: 1 },
+    async () => ({
+      session_id: 'ses_worker',
+      source_written: false,
+      content: 'PRIVATE_TRANSCRIPT',
+      errors: [{ code: 'worker_permission_denied', tool: 'patch' }],
+    }),
+  )
+  await writeFile(path.join(f.opts.wikiRoot, 'overview.md'), 'Unattributed work\n')
+  const statePath = path.join(f.opts.root, 'batches', paused.batch_id, 'state.json')
+  const before = await readFile(statePath, 'utf8')
+  const pointer = await readFile(path.join(f.opts.root, 'active.json'), 'utf8')
+  const objects = await f.git('count-objects', '-v')
+  const result = await inspectIngestBatch({ ...f.opts, ownerSession: 'ses_new' })
+  assert.equal(result.owner_session, 'ses_original')
+  assert.equal(result.continuation, 'original_session_only')
+  assert.equal(result.sources.length, 10)
+  assert.equal(result.sources[0].worker_session, 'ses_worker')
+  assert.equal(result.next_offset, 10)
+  assert.deepEqual(result.dirty_paths, ['overview.md'])
+  assert.deepEqual(result.sources[0].worker_errors, [
+    { code: 'worker_permission_denied', tool: 'patch' },
+  ])
+  assert.doesNotMatch(JSON.stringify(result), /PRIVATE_TRANSCRIPT|decision_id/)
+  const next = await inspectIngestBatch({ ...f.opts, offset: result.next_offset })
+  assert.equal(next.sources.length, 2)
+  assert.equal(next.next_offset, null)
+  assert.equal(await readFile(statePath, 'utf8'), before)
+  assert.equal(await readFile(path.join(f.opts.root, 'active.json'), 'utf8'), pointer)
+  assert.equal(await f.git('count-objects', '-v'), objects)
+  await writeFile(paused.report_path, Buffer.alloc(8 * 1024 * 1024 + 1, 'x'))
+  assert.equal((await inspectIngestBatch(f.opts)).report_path, paused.report_path)
+  await rm(paused.report_path)
+  assert.equal((await inspectIngestBatch(f.opts)).report_path, null)
+  await assert.rejects(
+    answer(f, paused, paused.questions[0], 'defer', () => assert.fail(), {
+      ownerSession: 'ses_new',
+    }),
+    /decision_wrong_session/,
+  )
+})
+
+test('retained dirty approval cannot mask changed live bytes or unrelated provider errors', async (t) => {
+  for (const kind of ['changed', 'provider'])
+    await t.test(kind, async (t) => {
+      const f = await fixture(t, 1)
+      const file = path.join(f.opts.wikiRoot, 'sources/webdav/note-0.md')
+      await writeFile(file, '# Historical page\n')
+      const paused = await runIngestBatch(f.opts, () => assert.fail())
+      const failed = await answer(
+        f,
+        paused,
+        paused.questions[0],
+        'reprocess',
+        async () => ({
+          source_written: false,
+          errors: [{ code: 'worker_permission_denied', tool: 'patch' }],
+        }),
+        { maxAttempts: 1 },
+      )
+      if (kind === 'changed') await writeFile(file, '# Externally changed page\n')
+      else {
+        await mkdir(path.join(f.opts.sourceRoot, 'broken'))
+        await writeFile(path.join(f.opts.sourceRoot, 'broken/manifest.json'), '{}')
+      }
+      const observed = await runIngestBatch(f.opts, () => assert.fail())
+      assert.match(
+        observed.blocker,
+        kind === 'changed' ? /dirty_wiki/ : /provider_or_metadata_diagnostics/,
+      )
+      if (kind === 'changed') {
+        await assert.rejects(
+          answer(f, failed, failed.questions[0], 'retry', () => assert.fail('stale approval')),
+          /decision_not_open/,
+        )
+        assert.equal(await readFile(file, 'utf8'), '# Externally changed page\n')
+      }
+    })
+})
+
+test('diagnostics never create work and reject unsafe pointers or state', async (t) => {
+  const f = await fixture(t, 1)
+  assert.deepEqual(await inspectIngestBatch(f.opts), { status: 'idle', batch_id: null })
+  await assert.rejects(readFile(path.join(f.opts.root, 'active.json')), { code: 'ENOENT' })
+  await assert.rejects(inspectIngestBatch({ ...f.opts, offset: -1 }), /invalid_diagnostic_offset/)
+  await mkdir(f.opts.root)
+  await writeFile(
+    path.join(f.opts.root, 'active.json'),
+    JSON.stringify({ batch_id: '../../private' }),
+  )
+  await assert.rejects(inspectIngestBatch(f.opts), /invalid_active_batch/)
+  await rm(path.join(f.opts.root, 'active.json'))
+  const paused = await runIngestBatch({ ...f.opts, maxAttempts: 1 }, async () => ({
+    source_written: false,
+  }))
+  const file = path.join(f.opts.root, 'batches', paused.batch_id, 'state.json')
+  const original = JSON.parse(await readFile(file, 'utf8'))
+  await writeFile(file, JSON.stringify({ ...original, batch_id: 'batch-1-aaaaaaaaaaaa' }))
+  await assert.rejects(inspectIngestBatch(f.opts), /invalid_batch_state/)
+  await assert.rejects(
+    runIngestBatch(f.opts, () => assert.fail()),
+    /invalid_batch_state/,
+  )
+  await rm(file)
+  const privateFile = path.join(f.opts.root, 'private.json')
+  await writeFile(privateFile, 'PRIVATE_ERROR_BODY')
+  await symlink(privateFile, file)
+  await assert.rejects(inspectIngestBatch(f.opts), /unsafe_file/)
+  await rm(file)
+  await writeFile(file, 'PRIVATE_INVALID_JSON')
+  await assert.rejects(inspectIngestBatch(f.opts), (error) => !error.message.includes('PRIVATE'))
 })
 
 test('incomplete decision/pagination inputs cannot create or process a batch', async (t) => {

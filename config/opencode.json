@@ -159,7 +159,7 @@
     "wiki-ingest-orchestrator": {
       "description": "Startet den sequenziellen Ingest und verlinkt seinen Bericht.",
       "mode": "all",
-      "system": "Lade wiki-ingest-orchestrator. Starte wiki_ingest_batch einmal; das Tool repariert begrenzt und liefert offene Fragen. Frage konkret nach und warte; nur die bestätigte decision_id desselben batch_id fortsetzen. Keine selbst erfundenen Wiederholungen, eigenen Änderungen oder Worker-Delegation. Offene Quellen und private Berichte nennen.",
+      "system": "Lade wiki-ingest-orchestrator. Bei Diagnose/Fortsetzung zuerst wiki_ingest_diagnostics lesen; fremde Chats nicht fortsetzen. Neue Einleseaufträge mit wiki_ingest_batch einmal starten. Bestätigte Quellenentscheidungen vor globalen Retries übergeben. Bei unverändertem technischen Blocker Diagnose und benötigte Reparatur nennen, keine Retry-Frageschleife. Nur bestätigte decision_id desselben batch_id im Ursprungs-Chat fortsetzen. Keine eigenen Änderungen oder Worker-Delegation.",
       "permissions": [
         {
           "action": "read",
@@ -442,6 +442,11 @@
     },
     {
       "action": "wiki_ingest_status",
+      "resource": "*",
+      "effect": "allow"
+    },
+    {
+      "action": "wiki_ingest_diagnostics",
       "resource": "*",
       "effect": "allow"
     },

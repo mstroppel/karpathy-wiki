@@ -152,6 +152,12 @@ class Model(BaseHTTPRequestHandler):
         content = RESULT
         if not tools:
             pass
+        elif MODE == "diagnose":
+            assert not batch
+            assert "wiki_ingest_batch" not in tools
+            assert "wiki_ingest_diagnostics" in tools
+            if not history:
+                call = ("wiki_ingest_diagnostics", {})
         elif not batch and not history:
             call = ("wiki_ingest_batch", ACTION)
         elif not batch and len(history) == 1:
@@ -399,6 +405,32 @@ def main():
             sid, state = run()
             assert state["status"] == "paused", state
             before = (WIKI / "sources/webdav/notes.md").read_bytes()
+            # A fresh build chat can inspect an existing batch, but cannot
+            # resume it or mutate its state by loading an orchestrator skill.
+            state_file = JOURNAL / "batches" / state["batch_id"] / "state.json"
+            state_before = state_file.read_bytes()
+            MODE = "diagnose"
+            diagnostic_sid = request(
+                "/api/session",
+                {
+                    "agent": "build",
+                    "model": {"providerID": "fake", "id": "synthetic"},
+                    "location": {"directory": str(WIKI)},
+                },
+            )["data"]["id"]
+            run(diagnostic_sid)
+            assert state_file.read_bytes() == state_before
+            native = request(f"/api/experimental/session/{diagnostic_sid}/export")["data"]
+            observations = [
+                json.loads(part["state"]["content"][0]["text"])
+                for msg in native["messages"]
+                if msg["type"] == "assistant"
+                for part in msg["content"]
+                if part["type"] == "tool" and part["name"] == "wiki_ingest_diagnostics"
+            ]
+            assert len(observations) == 1, observations
+            assert observations[0]["owner_session"] == sid, observations
+            assert observations[0]["sources"][0]["worker_errors"], observations
             question = next(item for item in state["questions"] if item["source_index"] == 0)
             ACTION = {
                 "batch_id": state["batch_id"],

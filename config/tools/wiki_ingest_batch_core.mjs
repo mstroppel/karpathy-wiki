@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { rm } from 'node:fs/promises'
+import { lstat, realpath, rm } from 'node:fs/promises'
 import path from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import {
@@ -172,6 +172,20 @@ function checkState(state, opts) {
   }
 }
 
+async function loadActiveState(opts) {
+  const bytes = await fileBytes(path.join(opts.root, 'active.json'), opts.root, { absent: true })
+  const active = bytes === null ? null : JSON.parse(bytes)
+  if (active === null || active.batch_id === null) return null
+  if (!batchPattern.test(active.batch_id)) throw new IngestFault('invalid_active_batch')
+  const state = await jsonFile(
+    path.join(opts.root, 'batches', active.batch_id, 'state.json'),
+    opts.root,
+  )
+  checkState(state, opts)
+  if (state.batch_id !== active.batch_id) throw new IngestFault('invalid_batch_state')
+  return state
+}
+
 async function snapshot(opts) {
   const paths = await dirtyPaths(opts.wikiRoot)
   const files = []
@@ -267,8 +281,30 @@ async function addQuestions(opts, state) {
     const observation = await questionSnapshot(opts, state, index)
     const { binding, selection } = observation
     const source = state.sources[index ?? state.adoption?.source_index]
+    const canReprocess =
+      state.adoption && !state.adoption.approved && dispatchable.has(source?.status)
+    const proposal =
+      state.status === 'cancelled'
+        ? 'Nur die bereits vorbereitete Veröffentlichung technisch abschließen; der übrige Auftrag bleibt abgebrochen. Keine Worker starten.'
+        : index === null
+          ? canReprocess
+            ? 'Genau diese unveränderte Quellenseite frisch verarbeiten; fremde Änderungen erhalten.'
+            : 'Blocker extern klären; denselben gebundenen Auftrag fortsetzen, nichts zurücksetzen.'
+          : 'Eigene Entwürfe prüfen und begrenzt weiterbearbeiten; alternativ ausdrücklich zurückstellen oder nach Klärung ungelöst beenden.'
+    const options =
+      state.status === 'cancelled'
+        ? ['retry']
+        : index === null
+          ? canReprocess
+            ? ['reprocess', 'retry', 'cancel']
+            : ['retry', 'cancel']
+          : ['retry', 'defer', 'unresolved', 'cancel']
     const old = state.questions?.find(
-      (item) => item.source_index === index && item.binding === binding,
+      (item) =>
+        item.source_index === index &&
+        item.binding === binding &&
+        item.proposal === proposal &&
+        isDeepStrictEqual(item.options, options),
     )
     questions.push(
       old ?? {
@@ -286,22 +322,8 @@ async function addQuestions(opts, state) {
               source_revision: selection?.source_revision ?? source.source_revision,
               wiki_path: source.wiki_path,
             },
-        proposal:
-          state.status === 'cancelled'
-            ? 'Nur die bereits vorbereitete Veröffentlichung technisch abschließen; der übrige Auftrag bleibt abgebrochen. Keine Worker starten.'
-            : index === null
-              ? state.adoption
-                ? 'Genau diese unveränderte Quellenseite frisch verarbeiten; fremde Änderungen erhalten.'
-                : 'Blocker extern klären; denselben gebundenen Auftrag fortsetzen, nichts zurücksetzen.'
-              : 'Eigene Entwürfe prüfen und begrenzt weiterbearbeiten; alternativ ausdrücklich zurückstellen oder nach Klärung ungelöst beenden.',
-        options:
-          state.status === 'cancelled'
-            ? ['retry']
-            : index === null
-              ? state.adoption
-                ? ['reprocess', 'retry', 'cancel']
-                : ['retry', 'cancel']
-              : ['retry', 'defer', 'unresolved', 'cancel'],
+        proposal,
+        options,
       },
     )
   }
@@ -319,8 +341,11 @@ async function refreshAdmission(opts, state) {
   if (dirty) {
     const selected = pending(await opts.scan())
     const sourceIndex = state.sources.findIndex(
-      (source) =>
-        dispatchable.has(source.status) &&
+      (source, index) =>
+        (dispatchable.has(source.status) ||
+          (state.adoption?.approved &&
+            state.adoption.source_index === index &&
+            ['awaiting_user', 'awaiting_technical'].includes(source.status))) &&
         admission.count === 1 &&
         source.wiki_path === path.join(opts.wikiRoot, admission.files[0].path) &&
         selected.some(
@@ -387,6 +412,7 @@ function resultFor(state, report, reportError, offset = 0) {
   return {
     status: state.status,
     batch_id: state.batch_id,
+    owner_session: state.owner_session,
     commit: state.sources.findLast((source) => source.commit)?.commit ?? null,
     ingested: state.sources.filter((source) => source.status === 'ingested').length,
     repaired: state.sources.filter(
@@ -411,6 +437,51 @@ function resultFor(state, report, reportError, offset = 0) {
     }),
     next_question_offset: offset + 10 < (state.questions?.length ?? 0) ? offset + 10 : null,
     admission: state.admission ?? null,
+  }
+}
+
+// Read-only, bounded diagnosis is available outside the owning chat. It never
+// creates a batch, refreshes decisions, authorizes writes or starts a worker.
+export async function inspectIngestBatch(input = {}) {
+  const opts = { ...defaults, ...input }
+  const offset = opts.offset ?? 0
+  if (!Number.isInteger(offset) || offset < 0) throw new IngestFault('invalid_diagnostic_offset')
+  try {
+    const state = await loadActiveState(opts)
+    if (!state) return { status: 'idle', batch_id: null }
+    const paths = await dirtyPaths(opts.wikiRoot)
+    const report = path.join(opts.root, 'batches', state.batch_id, 'report.md')
+    let reportExists = false
+    try {
+      const info = await lstat(report)
+      reportExists = info.isFile() && info.nlink === 1 && (await realpath(report)) === report
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error
+    }
+    return {
+      status: state.status,
+      batch_id: state.batch_id,
+      owner_session: state.owner_session,
+      blocker: state.blocker ?? null,
+      report_path: reportExists ? report : null,
+      observation: 'non_atomic_read_only',
+      dirty_paths: paths.slice(0, 100),
+      dirty_count: paths.length,
+      sources: state.sources.slice(offset, offset + 10).map((source) => ({
+        wiki_path: source.wiki_path,
+        status: source.status,
+        blocker: source.blocker ?? null,
+        worker_session: source.worker_session ?? null,
+        worker_errors: (source.worker_errors ?? [])
+          .slice(0, 20)
+          .map(({ code, tool }) => ({ code, tool })),
+        attempts: source.attempts.length,
+      })),
+      next_offset: offset + 10 < state.sources.length ? offset + 10 : null,
+      continuation: 'original_session_only',
+    }
+  } catch (error) {
+    throw new IngestFault(error instanceof IngestFault ? error.code : 'diagnostic_failed')
   }
 }
 
@@ -452,20 +523,13 @@ export async function runIngestBatch(input, worker) {
   return withIngestLock(path.join(opts.wikiRoot, '.git/wiki-ingest-publication.lock'), async () => {
     await safeDirectory(opts.root)
     const activePath = path.join(opts.root, 'active.json')
-    const activeBytes = await fileBytes(activePath, opts.root, { absent: true })
-    const pointer = activeBytes === null ? null : JSON.parse(activeBytes)
-    const active = pointer?.batch_id === null ? null : pointer
-    if (active && !batchPattern.test(active.batch_id)) throw new IngestFault('invalid_active_batch')
+    const active = await loadActiveState(opts)
     if (opts.batchId && (!batchPattern.test(opts.batchId) || active?.batch_id !== opts.batchId))
       throw new IngestFault('batch_not_active')
     const status = await opts.scan()
     let state
     if (active) {
-      state = await jsonFile(
-        path.join(opts.root, 'batches', active.batch_id, 'state.json'),
-        opts.root,
-      )
-      checkState(state, opts)
+      state = active
     } else {
       if (opts.batchId) throw new IngestFault('batch_not_active')
       const selection = pending(status).filter(
@@ -541,7 +605,18 @@ export async function runIngestBatch(input, worker) {
       state.summary = fresh.summary
       state.diagnostics = diagnosticsFor(fresh)
       if (state.status !== 'cancelled') await refreshAdmission(opts, state)
-      if (state.status !== 'cancelled' && (state.summary.invalid || state.summary.conflict))
+      // A specifically approved historical page may itself lack frontmatter.
+      // Its source question owns that repair; unrelated diagnostics still block.
+      const unresolvedDiagnostics =
+        state.summary.conflict ||
+        Object.values(fresh.adapters).some((adapter) =>
+          adapter.invalid.some(
+            (item) =>
+              !state.adoption?.approved ||
+              item.path !== state.sources[state.adoption.source_index]?.wiki_path,
+          ),
+        )
+      if (state.status !== 'cancelled' && unresolvedDiagnostics)
         state.blocker ??= 'provider_or_metadata_diagnostics'
       else if (state.blocker === 'provider_or_metadata_diagnostics') state.blocker = null
       if (
@@ -612,6 +687,12 @@ export async function runIngestBatch(input, worker) {
         return finish()
       }
       if (question.source_index === null) {
+        // An unchanged dirty retry is an observation, not a new proposal. Do not
+        // clear the blocker only to restore it and invalidate all question IDs.
+        if (opts.answer === 'retry' && state.blocker === dirtyAdmission) {
+          await refreshAdmission(opts, state)
+          if (state.blocker === dirtyAdmission) return finish()
+        }
         if (opts.answer === 'reprocess') {
           if (
             !state.adoption ||
@@ -629,9 +710,17 @@ export async function runIngestBatch(input, worker) {
         source.status =
           opts.answer === 'retry' ? 'pending' : opts.answer === 'defer' ? 'deferred' : 'unresolved'
         if (opts.answer === 'retry') source.blocker = null
+        if (
+          opts.answer === 'retry' &&
+          ['continuation_available', 'provider_or_metadata_diagnostics'].includes(state.blocker)
+        )
+          state.blocker = null
         if (opts.answer === 'retry' && question.selection) applyApprovedSelection(source, question)
       }
-      state.questions = state.questions.filter((item) => item.id !== question.id)
+      // A global retry may observe the same technical blocker again. Keep its
+      // old binding available to finish(); only a real change earns a new ID.
+      if (question.source_index !== null || opts.answer !== 'retry')
+        state.questions = state.questions.filter((item) => item.id !== question.id)
       await persist()
       if (state.blocker || ['defer', 'unresolved'].includes(opts.answer)) return finish()
     }
@@ -665,6 +754,7 @@ export async function runIngestBatch(input, worker) {
       )
       let dispatchPause = null
       for (const source of ordered) {
+        if (state.adoption && source !== state.sources[state.adoption.source_index]) continue
         if (!dispatchable.has(source.status)) continue
         if (opts.signal?.aborted) {
           state.status = 'cancelled'
@@ -713,7 +803,11 @@ export async function runIngestBatch(input, worker) {
                 (item) => item.path === source.wiki_path || item.source_key === source.source_key,
               )
             )
-              if (!state.adoption?.approved) throw new IngestFault('invalid_source_metadata')
+              if (
+                !state.adoption?.approved ||
+                source !== state.sources[state.adoption.source_index]
+              )
+                throw new IngestFault('invalid_source_metadata')
             if (
               source.approval &&
               (selected.source_revision !== source.approval.revision ||
