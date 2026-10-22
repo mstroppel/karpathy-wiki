@@ -34,7 +34,7 @@ from karpathy_wiki_ingest.manifest import (
     build_manifest,
     write_manifest,
 )
-from karpathy_wiki_ingest.rclone import suffix_filter_args
+from karpathy_wiki_ingest.rclone import has_supported_suffix, suffix_filter_args
 from karpathy_wiki_ingest.shared import (
     TargetedAnonymizer,
     atomic_write,
@@ -109,7 +109,7 @@ def source_files(incoming: Path) -> set[Path]:
     return {
         path.relative_to(incoming)
         for path in incoming.rglob("*")
-        if path.is_file() and path.suffix.lower() in SYNCED_SUFFIXES | SPREADSHEET_SUFFIXES
+        if path.is_file() and has_supported_suffix(path, SYNCED_SUFFIXES | SPREADSHEET_SUFFIXES)
     }
 
 

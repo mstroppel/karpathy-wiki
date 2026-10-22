@@ -13,7 +13,7 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
-from karpathy_wiki_ingest.rclone import suffix_filter_args
+from karpathy_wiki_ingest.rclone import has_supported_suffix, suffix_filter_args
 from karpathy_wiki_speech.types import DEFAULT_LIMITS, TranscriptionLimits, file_revision
 
 
@@ -72,7 +72,7 @@ def audio_inventory(
     """
     inventory: dict[str, str] = {}
     for path in sorted(snapshot.rglob("*")):
-        if not path.is_file() or path.suffix.lower() not in limits.allowed_extensions:
+        if not path.is_file() or not has_supported_suffix(path, limits.allowed_extensions):
             continue
         relative = path.relative_to(snapshot).as_posix()
         if progress is not None:
