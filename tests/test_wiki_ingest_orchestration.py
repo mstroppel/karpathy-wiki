@@ -54,6 +54,30 @@ class BatchWorkflowTests(unittest.TestCase):
             {"action": "edit", "resource": "/knowledge/sources/**", "effect": "allow"}, rules
         )
 
+    def test_diagnosis_is_available_in_build_without_granting_continuation(self):
+        rules = self.config["permissions"]
+        self.assertIn(
+            {"action": "wiki_ingest_diagnostics", "resource": "*", "effect": "allow"}, rules
+        )
+        self.assertIn({"action": "wiki_ingest_batch", "resource": "*", "effect": "deny"}, rules)
+        routing = (ROOT / "config/routing.md").read_text()
+        for phrase in (
+            "wiki_ingest_diagnostics",
+            "owner_session",
+            "Ursprungs-Chat",
+            "Deploymentlücke",
+        ):
+            self.assertIn(phrase, routing)
+        for phrase in (
+            "keine erneute Retry-Frage",
+            "Quellenentscheidungen",
+            "vor globalem `retry`",
+        ):
+            self.assertIn(phrase, self.orchestrator)
+        plugin = (ROOT / "config/plugins/wiki-ingest-batch.js").read_text()
+        self.assertIn("name: 'wiki_ingest_diagnostics'", plugin)
+        self.assertIn("inspectIngestBatch(args)", plugin)
+
     def test_orchestrator_can_read_only_batch_reports_within_the_private_journal(self):
         rules = self.config["agents"]["wiki-ingest-orchestrator"]["permissions"]
 
