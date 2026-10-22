@@ -28,12 +28,15 @@ source). This does not schedule wiki ingest or introduce another service.
   conditional/locale-specific formats and Excel's visual layout are not rendered.
   Dates/times are semantic ISO values, not a reproduction of their Excel display.
 - Default-hidden sheet row/column layouts are rejected rather than guessing
-  visibility: copy the visible data to a fresh worksheet before uploading.
+  visibility. Malformed or overlapping column definitions are also rejected:
+  copy the visible data to a fresh worksheet before uploading.
 - Formula cells include their expressions as calculation context and cached
   results with the same type labels. **No formulas are calculated or verified.**
   A missing cache is marked `MISSING cached result`, never replaced by zero;
   Excel errors such as `#DIV/0!` are explicit. Simple formula strings are supported;
   array/data-table formula objects are rejected rather than silently omitted.
+  Visible expressions may still name hidden sheets/ranges, and cached results
+  may derive from hidden cells: hidden content is not extracted directly.
 
 **Before uploading: open the workbook in Excel, recalculate, then save it.**
 Other writers (including openpyxl) may omit formula caches. A cache can still be

@@ -19,7 +19,7 @@ from typing import Any
 
 from karpathy_wiki_ingest.shared import TargetedAnonymizer
 
-EXTRACTION_VERSION = 1  # Bump for extraction, rendering, dependency or limit changes.
+EXTRACTION_VERSION = 2  # Bump for extraction, rendering, dependency or limit changes.
 SPREADSHEET_SUFFIXES = {".xlsx", ".xls", ".xlsb", ".xlsm"}
 MAX_COMPRESSED = 20 * 1024 * 1024
 MAX_UNCOMPRESSED = 100 * 1024 * 1024
@@ -38,7 +38,8 @@ DIAGNOSTICS = {
     "limits": "Workbook exceeds extraction limits; split it into smaller workbooks before upload.",
     "resources": "Workbook exceeded parser resources; simplify or split it before upload.",
     "formula": "Unsupported array/data-table formula; use simple formulas or static values.",
-    "visibility": "Default-hidden layout unsupported; copy visible data to a new worksheet.",
+    "visibility": "Ambiguous/unsupported visibility layout; copy visible data to a new worksheet.",
+    "collision": "Output path collision; rename the conflicting upstream source.",
 }
 EXIT_CODES = {
     "invalid": 2,

@@ -51,6 +51,7 @@ from karpathy_wiki_ingest.state import (
 from karpathy_wiki_ingest_webdav.html import redact_html
 from karpathy_wiki_ingest_webdav.xlsx import (
     EXTRACTION_VERSION,
+    MAX_COMPRESSED,
     SPREADSHEET_SUFFIXES,
     WorkbookError,
     extract,
@@ -129,8 +130,6 @@ def upstream_revision(path: Path) -> str:
     # Reject oversized spreadsheets without hashing arbitrarily large private
     # inputs in the unbounded provider process. This sentinel only keys rejected
     # work, never a published source revision.
-    from karpathy_wiki_ingest_webdav.xlsx import MAX_COMPRESSED
-
     if path.suffix.lower() in SPREADSHEET_SUFFIXES:
         stat = path.stat()
         if stat.st_size > MAX_COMPRESSED:
@@ -198,7 +197,7 @@ def sanitize_into_generation(
                 published == prior or published in prior.parents or prior in published.parents
                 for prior in targets
             ):
-                raise ValueError("Output path collision; rename the conflicting upstream source")
+                raise WorkbookError("collision")
             targets.add(published)
             if spreadsheet:
                 output = extract(source, relative, anonymizer)

@@ -202,6 +202,65 @@ class WorkbookTests(WorkbookFixture):
         with self.assertRaisesRegex(xlsx.WorkbookError, "copy visible data"):
             xlsx.extract(self.source, self.relative, self.anonymizer)
 
+    def test_malformed_or_overlapping_column_definitions_fail_closed(self):
+        definitions = (
+            '<col min="4" hidden="1"/>',
+            '<col max="4" hidden="1"/>',
+            '<col min="4" max="3" hidden="1"/>',
+            '<col min="0" max="4" hidden="1"/>',
+            '<col min="bad" max="4" hidden="1"/>',
+            '<col min="4" max="5" hidden="1"/><col min="4" max="4" hidden="0"/>',
+            '<col min="3" max="5" hidden="1"/><col min="4" max="6" hidden="0"/>',
+        )
+        for definition in definitions:
+            with self.subTest(definition=definition):
+                book = self.workbook()
+                book.active["A1"] = "visible"
+                book.active["D1"] = "SYNTHETIC-HIDDEN-SECRET"
+                book.save(self.source)
+
+                def replace_columns(members, definition=definition):
+                    members["xl/worksheets/sheet1.xml"] = members[
+                        "xl/worksheets/sheet1.xml"
+                    ].replace(b"<sheetData>", f"<cols>{definition}</cols><sheetData>".encode())
+
+                rewrite(self.source, replace_columns)
+                with self.assertRaisesRegex(xlsx.WorkbookError, "copy visible data"):
+                    self.render()
+                with self.assertRaisesRegex(xlsx.WorkbookError, "copy visible data"):
+                    xlsx.extract(self.source, self.relative, self.anonymizer)
+
+    def test_ranges_merged_anchors_and_table_coordinates_cross_redaction(self):
+        book = self.workbook()
+        book.active["A1"] = "visible"
+        book.active.merge_cells("A1:B1")
+        book.active["C3"] = "last"
+        book.save(self.source)
+        redactor = TargetedAnonymizer.from_config(
+            {
+                "people": [
+                    {"values": ["A1:C3", "A1:B1", "A1", "A", "1"], "replacement": "[REDACTED]"}
+                ]
+            }
+        )
+        output = xlsx.render(xlsx_worker.segments(self.source), self.relative, redactor)
+        self.assertIn("Range: \\[REDACTED\\]", output)
+        self.assertIn("Merged range: \\[REDACTED\\]; value only at anchor \\[REDACTED\\].", output)
+        self.assertIn("| Row | \\[REDACTED\\] | B | C |", output)
+        self.assertIn("| \\[REDACTED\\] | visible |", output)
+
+    def test_visible_formula_hidden_references_have_explicit_context_warning(self):
+        book = self.workbook()
+        hidden = book.create_sheet("Hidden evaluation")
+        hidden.sheet_state = "veryHidden"
+        hidden["A1"] = "SYNTHETIC-HIDDEN-SECRET"
+        book.active["A1"] = "='Hidden evaluation'!A1"
+        book.save(self.source)
+        output = self.render()
+        self.assertIn("formula: ='Hidden evaluation'\\!A1", output)
+        self.assertIn("cached results may derive from hidden cells", output)
+        self.assertNotIn("SYNTHETIC-HIDDEN-SECRET", output)
+
     def test_no_external_fetch_and_unsupported_array_formula_fails(self):
         book = self.workbook()
         book.active["A1"] = "='[https://example.invalid/private.xlsx]Sheet1'!A1"
@@ -343,7 +402,7 @@ class GenerationTests(WorkbookFixture):
         book = self.workbook()
         book.save(self.source)
         with (
-            mock.patch.object(xlsx, "MAX_COMPRESSED", 1),
+            mock.patch.object(webdav, "MAX_COMPRESSED", 1),
             mock.patch.object(
                 webdav, "file_revision", side_effect=AssertionError("unbounded read")
             ),
@@ -437,6 +496,12 @@ class GenerationTests(WorkbookFixture):
         collision.parent.mkdir(parents=True)
         collision.write_text("do not overwrite")
         self.assertEqual(publish(), (0, 1))
+        self.assertTrue(
+            any(
+                "Output path collision; rename" in report.read_text()
+                for report in quarantine.rglob("*.error")
+            )
+        )
         self.assertEqual(webdav.active_generation(sanitized), previous)
         collision.unlink()
         self.assertEqual(publish(), (1, 0))

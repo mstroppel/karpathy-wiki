@@ -66,6 +66,7 @@ def preflight(source: Path) -> None:
                 raise WorkbookError("limits")
             if not entry.filename.endswith((".xml", ".rels")):
                 continue
+            column_ranges: list[tuple[int, int]] = []
             for _, element in iterparse(io.BytesIO(data), events=("end",), forbid_dtd=True):
                 elements += 1
                 if elements > 1_000_000:
@@ -86,7 +87,18 @@ def preflight(source: Path) -> None:
                     if sheets > MAX_SHEETS:
                         raise WorkbookError("limits")
                 if spreadsheet_tag:
-                    if tag == "row":
+                    if tag == "col":
+                        # Validate the original XML: openpyxl can discard earlier
+                        # overlapping definitions or tolerate incomplete bounds.
+                        try:
+                            first = int(element.attrib["min"])
+                            last = int(element.attrib["max"])
+                        except (KeyError, ValueError):
+                            raise WorkbookError("visibility") from None
+                        if not 1 <= first <= last <= 16_384:
+                            raise WorkbookError("visibility")
+                        column_ranges.append((first, last))
+                    elif tag == "row":
                         rows += 1
                         if rows > MAX_EXAMINED_ROWS or int(element.get("r", "0")) > MAX_ROWS:
                             raise WorkbookError("limits")
@@ -113,6 +125,11 @@ def preflight(source: Path) -> None:
                         ):
                             raise WorkbookError("limits")
                 element.clear()
+            previous_end = 0
+            for first, last in sorted(column_ranges):
+                if first <= previous_end:
+                    raise WorkbookError("visibility")
+                previous_end = last
         if not workbook_type:
             raise WorkbookError("unsupported")
 
@@ -177,6 +194,8 @@ def segments(source: Path) -> list[list[Any]]:
         "Formulas are calculation context, not executed or verified. Cached results may be stale; "
         "recalculate and save in Excel before upload. "
         "Missing caches and Excel errors are explicit.\n"
+        "Visible formulas may name hidden sheets/ranges, and cached results may derive from "
+        "hidden cells. Hidden content is not extracted directly.\n"
     )
     try:
         if len(formulas.worksheets) > MAX_SHEETS:
@@ -198,9 +217,9 @@ def segments(source: Path) -> list[list[Any]]:
             hidden_columns: set[int] = set()
             for dimension in sheet.column_dimensions.values():
                 if dimension.hidden or dimension.width == 0:
-                    hidden_columns.update(
-                        range(dimension.min or 1, min(dimension.max or 1, MAX_COLUMNS) + 1)
-                    )
+                    if dimension.min is None or dimension.max is None:
+                        raise WorkbookError("visibility")
+                    hidden_columns.update(range(dimension.min, min(dimension.max, MAX_COLUMNS) + 1))
 
             def visible(row: int, column: int, hidden_columns=hidden_columns, sheet=sheet) -> bool:
                 dimension = sheet.row_dimensions[row]
@@ -229,26 +248,35 @@ def segments(source: Path) -> list[list[Any]]:
             examined += (max_row - min_row + 1) * (max_col - min_col + 1)
             if max_row > MAX_ROWS or max_col > MAX_COLUMNS or examined > MAX_CELLS:
                 raise WorkbookError("limits")
+            add("Range: ")
             add(
-                f"Range: {get_column_letter(min_col)}{min_row}:"
-                f"{get_column_letter(max_col)}{max_row}\n\n"
+                f"{get_column_letter(min_col)}{min_row}:{get_column_letter(max_col)}{max_row}",
+                user=True,
             )
+            add("\n\n")
             for area in sorted(sheet.merged_cells.ranges, key=str):
                 if any(
                     min_row <= row <= max_row and min_col <= col <= max_col and visible(row, col)
                     for row, col in ((area.min_row, area.min_col), (area.max_row, area.max_col))
                 ):
-                    add(
-                        f"Merged range: {area}; value only at anchor "
-                        f"{area.start_cell.coordinate}.\n"
-                    )
+                    add("Merged range: ")
+                    add(str(area), user=True)
+                    add("; value only at anchor ")
+                    add(area.start_cell.coordinate, user=True)
+                    add(".\n")
             columns = [col for col in range(min_col, max_col + 1) if col not in hidden_columns]
-            add("\n| Row | " + " | ".join(get_column_letter(col) for col in columns) + " |\n")
+            add("\n| Row | ")
+            for col in columns:
+                add(get_column_letter(col), user=True)
+                add(" | ")
+            add("\n")
             add("| --- | " + " | ".join("---" for _ in columns) + " |\n")
             for row in range(min_row, max_row + 1):
                 if not visible(row, columns[0]):
                     continue
-                add(f"| {row} | ")
+                add("| ")
+                add(str(row), user=True)
+                add(" | ")
                 for col in columns:
                     cell = sheet.cell(row, col)
                     if isinstance(cell, MergedCell):

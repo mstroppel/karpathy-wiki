@@ -261,7 +261,7 @@ class IngestBuildIsolationTests(unittest.TestCase):
                 )
             ):
                 # The hash-pinned build backend preinstall and the hash-pinned
-                # speech runtime are the only index accesses; both install
+                # Speech/WebDAV runtimes are the only index accesses; all install
                 # with --require-hashes so nothing is resolved unpinned.
                 self.assertIn("--require-hashes", line)
                 self.assertTrue(
