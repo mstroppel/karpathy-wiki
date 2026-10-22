@@ -403,10 +403,10 @@ def publish_generation(
 
 
 def cycle_idempotency_key(fingerprint: str, inventory: dict[str, str]) -> str:
-    """Stable identity of an ingest cycle: upstream revisions plus redactions.
+    """Stable cycle identity: upstream revisions, redactions and extraction version.
 
-    The identical upstream state with the identical redaction configuration is
-    the same accepted work, so re-submission cannot execute a second cycle.
+    Identical upstream state, redaction configuration and extraction version
+    are the same accepted work, so re-submission cannot execute a second cycle.
     """
     encoded = json.dumps(
         {
@@ -427,9 +427,9 @@ def published_matches(
 
     Three conditions must hold, so a completed job whose publication is
     missing or inconsistent is detected instead of skipped: the active
-    generation's metadata must match the cycle's upstream inventory and
-    redaction fingerprint, and the published provider manifest must exist and
-    reference the active generation. The manifest check is what makes the
+    generation's metadata must match the cycle's upstream inventory,
+    redaction fingerprint and extraction version, and the provider manifest
+    must exist and reference the active generation. The manifest check makes the
     crash window between the pointer switch and the manifest write safe: a
     matching generation with a stale or missing manifest forces a
     republication.
@@ -581,8 +581,8 @@ def process_cycle(
     Returns ``(changed, failed, degraded)`` where ``degraded`` marks a cycle
     that ran without durable state. Without a state store the cycle behaves
     exactly as before. With one, the cycle is an accepted job keyed by the
-    upstream inventory and redaction fingerprint: identical accepted work is
-    never executed twice, unchanged upstream content keeps the active
+    upstream inventory, redaction fingerprint and extraction version: identical
+    work is never executed twice, unchanged cycle inputs keep the active
     generation, failures back off instead of hammering every interval, and
     expired leases from interrupted cycles are recovered. A failing state
     store degrades to the stateless publication instead of losing ingest

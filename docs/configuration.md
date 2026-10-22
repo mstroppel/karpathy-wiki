@@ -244,9 +244,10 @@ and `.generation.json` are reserved inside `sources/webdav`.
 The `webdav-ingest` service records every cycle in a durable, content-free
 SQLite state store at `INGEST_STATE_PATH` (mounted at
 `/data/state/ingest.sqlite3`). Each cycle becomes an accepted job keyed by the
-upstream inventory hashes and the redaction configuration fingerprint, so:
+upstream inventory hashes, redaction configuration fingerprint and XLSX extraction
+version, so:
 
-- unchanged upstream content with unchanged redactions keeps the active
+- unchanged upstream content, redactions and extraction version keep the active
   generation instead of republishing it every interval;
 - a restart neither loses accepted work nor executes an accepted cycle twice;
   leases of interrupted cycles expire and the cycle is recovered without a
