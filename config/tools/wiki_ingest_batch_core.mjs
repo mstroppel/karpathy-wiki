@@ -319,8 +319,11 @@ async function refreshAdmission(opts, state) {
   if (dirty) {
     const selected = pending(await opts.scan())
     const sourceIndex = state.sources.findIndex(
-      (source) =>
-        dispatchable.has(source.status) &&
+      (source, index) =>
+        (dispatchable.has(source.status) ||
+          (state.adoption?.approved &&
+            state.adoption.source_index === index &&
+            ['awaiting_user', 'awaiting_technical'].includes(source.status))) &&
         admission.count === 1 &&
         source.wiki_path === path.join(opts.wikiRoot, admission.files[0].path) &&
         selected.some(
@@ -387,6 +390,7 @@ function resultFor(state, report, reportError, offset = 0) {
   return {
     status: state.status,
     batch_id: state.batch_id,
+    owner_session: state.owner_session,
     commit: state.sources.findLast((source) => source.commit)?.commit ?? null,
     ingested: state.sources.filter((source) => source.status === 'ingested').length,
     repaired: state.sources.filter(
@@ -411,6 +415,55 @@ function resultFor(state, report, reportError, offset = 0) {
     }),
     next_question_offset: offset + 10 < (state.questions?.length ?? 0) ? offset + 10 : null,
     admission: state.admission ?? null,
+  }
+}
+
+// Read-only, bounded diagnosis is available outside the owning chat. It never
+// creates a batch, refreshes decisions, authorizes writes or starts a worker.
+export async function inspectIngestBatch(input = {}) {
+  const opts = { ...defaults, ...input }
+  const offset = opts.offset ?? 0
+  if (!Number.isInteger(offset) || offset < 0) throw new IngestFault('invalid_diagnostic_offset')
+  try {
+    const pointer = await fileBytes(path.join(opts.root, 'active.json'), opts.root, {
+      absent: true,
+    })
+    const active = pointer === null ? null : JSON.parse(pointer)
+    if (!active?.batch_id) return { status: 'idle', batch_id: null }
+    if (!batchPattern.test(active.batch_id)) throw new IngestFault('invalid_active_batch')
+    const state = await jsonFile(
+      path.join(opts.root, 'batches', active.batch_id, 'state.json'),
+      opts.root,
+    )
+    checkState(state, opts)
+    if (state.batch_id !== active.batch_id) throw new IngestFault('invalid_batch_state')
+    const paths = await dirtyPaths(opts.wikiRoot)
+    const report = path.join(opts.root, 'batches', state.batch_id, 'report.md')
+    const reportExists = await fileBytes(report, opts.root, { absent: true })
+    return {
+      status: state.status,
+      batch_id: state.batch_id,
+      owner_session: state.owner_session,
+      blocker: state.blocker ?? null,
+      report_path: reportExists === null ? null : report,
+      observation: 'non_atomic_read_only',
+      dirty_paths: paths.slice(0, 100),
+      dirty_count: paths.length,
+      sources: state.sources.slice(offset, offset + 10).map((source) => ({
+        wiki_path: source.wiki_path,
+        status: source.status,
+        blocker: source.blocker ?? null,
+        worker_session: source.worker_session ?? null,
+        worker_errors: (source.worker_errors ?? [])
+          .slice(0, 20)
+          .map(({ code, tool }) => ({ code, tool })),
+        attempts: source.attempts.length,
+      })),
+      next_offset: offset + 10 < state.sources.length ? offset + 10 : null,
+      continuation: 'original_session_only',
+    }
+  } catch (error) {
+    throw new IngestFault(reason(error))
   }
 }
 
@@ -541,7 +594,18 @@ export async function runIngestBatch(input, worker) {
       state.summary = fresh.summary
       state.diagnostics = diagnosticsFor(fresh)
       if (state.status !== 'cancelled') await refreshAdmission(opts, state)
-      if (state.status !== 'cancelled' && (state.summary.invalid || state.summary.conflict))
+      // A specifically approved historical page may itself lack frontmatter.
+      // Its source question owns that repair; unrelated diagnostics still block.
+      const unresolvedDiagnostics =
+        state.summary.conflict ||
+        Object.values(fresh.adapters).some((adapter) =>
+          adapter.invalid.some(
+            (item) =>
+              !state.adoption?.approved ||
+              item.path !== state.sources[state.adoption.source_index]?.wiki_path,
+          ),
+        )
+      if (state.status !== 'cancelled' && unresolvedDiagnostics)
         state.blocker ??= 'provider_or_metadata_diagnostics'
       else if (state.blocker === 'provider_or_metadata_diagnostics') state.blocker = null
       if (
@@ -612,6 +676,12 @@ export async function runIngestBatch(input, worker) {
         return finish()
       }
       if (question.source_index === null) {
+        // An unchanged dirty retry is an observation, not a new proposal. Do not
+        // clear the blocker only to restore it and invalidate all question IDs.
+        if (opts.answer === 'retry' && state.blocker === dirtyAdmission) {
+          await refreshAdmission(opts, state)
+          if (state.blocker === dirtyAdmission) return finish()
+        }
         if (opts.answer === 'reprocess') {
           if (
             !state.adoption ||

@@ -1,4 +1,4 @@
-import { runIngestBatch } from '/etc/opencode/tools/wiki_ingest_batch_core.mjs'
+import { inspectIngestBatch, runIngestBatch } from '/etc/opencode/tools/wiki_ingest_batch_core.mjs'
 import { createBatchWorker } from '/etc/opencode/tools/wiki_ingest_batch_worker.mjs'
 
 export default {
@@ -6,6 +6,24 @@ export default {
   setup: async (ctx) => {
     const worker = await createBatchWorker(ctx)
     await ctx.tool.transform((tools) => {
+      tools.add({
+        name: 'wiki_ingest_diagnostics',
+        description:
+          'Aktiven Ingest nur lesend diagnostizieren: Ursprungs-Chat, Dirty-Git-Pfade und konkrete Worker-Fehler. Keine Fortsetzung, keine Änderungen, keine Worker.',
+        input: {
+          type: 'object',
+          properties: {
+            offset: {
+              type: 'integer',
+              minimum: 0,
+              description: 'Nächste Quellenseite aus next_offset.',
+            },
+          },
+          additionalProperties: false,
+        },
+        options: { codemode: false },
+        execute: async (args) => ({ content: JSON.stringify(await inspectIngestBatch(args)) }),
+      })
       tools.add({
         name: 'wiki_ingest_batch',
         description:

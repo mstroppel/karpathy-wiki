@@ -115,3 +115,32 @@ Runtime acceptance uses the pinned OpenCode and a deterministic local model.
 Process-kill tests exercise publication checkpoints. Production deployment, old
 live leftovers and synthetic real-model acceptance (new/outdated source,
 correction, question/answer/resumption and cancellation) require separate approval.
+
+## Technical pause diagnosis
+
+`wiki_ingest_diagnostics` is read-only and available to the primary agent as
+well as the orchestrator. It discovers the active batch without a batch ID and
+returns its `owner_session`, current dirty paths (at most 100), and ten source
+statuses with bounded worker error codes/tool names and worker session IDs.
+Use `next_offset` for further sources. It does not return transcripts, source
+contents, draft contents or decision tokens. The observation is non-atomic;
+missing worker evidence is not proof that no action occurred. A missing report
+has a null `report_path`.
+
+A new chat can diagnose but cannot approve or continue another chat's batch.
+Return to `owner_session` and use `/ingest-new` there to load current open
+questions, without starting replacement work. Loading a skill does not grant
+the batch tool to `build`. No automatic reconciliation or permission expansion
+is performed; denied worker actions still require a configuration fix or an
+explicitly authorized continuation.
+
+An unchanged dirty retry preserves the same decision ID. Do not recommend
+another retry until the technical state changes. Deliver already confirmed
+source decisions such as defer before a global retry; re-read questions after
+each answer and obtain fresh confirmation for changed IDs or proposals.
+Approval of an exact historical dirty page survives a failed private worker,
+so its source can be retried without losing admission. Changing the dirty
+snapshot, deferring the source or marking it unresolved revokes that admission;
+the live page is never reset or silently adopted. Metadata errors on this exact
+approved page belong to its source repair, not a second global blocker;
+unrelated provider/metadata diagnostics remain blocking.
