@@ -220,12 +220,14 @@ sources/webdav/
 ```
 
 Manifest items reference their sanitized file as
-`generations/<id>/<relative path>`, while `wiki_path` and the `source_path`
-frontmatter stay keyed by the stable relative upstream path, so wiki pages
+`generations/<id>/<source key>`, while `wiki_path` and the `source_path`
+frontmatter stay keyed by the stable source key: the relative upstream path
+for Markdown/HTML, or `xlsx/<path-hash>/workbook.md` for spreadsheets. Wiki pages
 never change their destination when a new generation is published. Each
 generation directory records a
 `.generation.json` metadata file with its creation time, the redaction
-configuration fingerprint, and the upstream inventory hashes; it never
+configuration fingerprint, upstream inventory hashes, and
+`xlsx_extraction_version`; it never
 contains upstream content.
 
 Retention keeps only the generation the manifest describes; staging

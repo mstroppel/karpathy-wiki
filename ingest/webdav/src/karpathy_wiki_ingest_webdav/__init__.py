@@ -776,9 +776,10 @@ def run(once: bool) -> None:
                 LOG.exception("WebDAV configuration is incomplete: %s is missing", error)
             except subprocess.CalledProcessError:
                 # rclone already retried internally; keep the daemon alive and
-                # retry on the next synchronization interval.
+                # retry on the next synchronization interval. The exception
+                # contains command arguments, including private upstream paths.
                 failed = 1
-                LOG.exception("rclone synchronization failed")
+                LOG.error("rclone synchronization failed")
             except (OSError, UnicodeError, ValueError):
                 failed = 1
                 LOG.exception("WebDAV synchronization failed")
