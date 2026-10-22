@@ -105,6 +105,15 @@ function diagnosticsFor(status) {
   )
 }
 
+function applyApprovedSelection(source, question) {
+  Object.assign(source, question.selection)
+  source.approval = {
+    revision: question.selection.source_revision,
+    frontmatter: question.selection.frontmatter,
+    digest: question.source_hash,
+  }
+}
+
 function reportText(state) {
   return [
     '# Einlesebericht',
@@ -515,6 +524,16 @@ export async function runIngestBatch(input, worker) {
     }
     let reportError = null
     const finish = async () => {
+      // source_recorded is durable before cleanup. Reopening must reclaim only
+      // completed work even when no publication continuation remains to run.
+      for (const source of state.sources)
+        if (source.status === 'ingested' && source.phase === 'complete' && source.commit) {
+          try {
+            await reclaimDrafts(source)
+          } catch {
+            state.blocker = 'draft_cleanup_failed'
+          }
+        }
       if (state.status === 'cancelled')
         for (const source of state.sources)
           if (unfinished.has(source.status)) source.status = 'cancelled'
@@ -602,12 +621,7 @@ export async function runIngestBatch(input, worker) {
             return finish()
           state.adoption.approved = true
           const source = state.sources[state.adoption.source_index]
-          Object.assign(source, question.selection)
-          source.approval = {
-            revision: question.selection.source_revision,
-            frontmatter: question.selection.frontmatter,
-            digest: question.source_hash,
-          }
+          applyApprovedSelection(source, question)
         }
         state.blocker = null
       } else {
@@ -615,14 +629,7 @@ export async function runIngestBatch(input, worker) {
         source.status =
           opts.answer === 'retry' ? 'pending' : opts.answer === 'defer' ? 'deferred' : 'unresolved'
         if (opts.answer === 'retry') source.blocker = null
-        if (opts.answer === 'retry' && question.selection) {
-          Object.assign(source, question.selection)
-          source.approval = {
-            revision: question.selection.source_revision,
-            frontmatter: question.selection.frontmatter,
-            digest: question.source_hash,
-          }
-        }
+        if (opts.answer === 'retry' && question.selection) applyApprovedSelection(source, question)
       }
       state.questions = state.questions.filter((item) => item.id !== question.id)
       await persist()
@@ -782,6 +789,7 @@ export async function runIngestBatch(input, worker) {
             if (result?.errors?.length)
               throw new IngestFault(
                 result.errors.find((item) => item.code === 'worker_permission_denied')?.code ??
+                  result.errors.find((item) => item.code === 'worker_source_truncated')?.code ??
                   result.errors[0].code,
               )
             if (source.content?.trimStart().startsWith('SKIP:'))

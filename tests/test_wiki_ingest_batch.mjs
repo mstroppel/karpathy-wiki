@@ -608,6 +608,7 @@ test('real process termination resumes verified publication without duplicate co
       assert.equal(result.ingested, 1)
       assert.equal(await f.git('rev-list', '--count', 'HEAD'), '2')
       assert.equal(await f.git('status', '--porcelain'), '')
+      assert.deepEqual(await readdir(path.join(f.opts.root, 'drafts', result.batch_id)), [])
       assert.equal(
         (await readFile(path.join(f.opts.wikiRoot, 'log.md'), 'utf8')).match(/Ingest batch-/g)
           ?.length,
@@ -1335,39 +1336,50 @@ test('fully installed recovery tolerates a manually removed draft', async (t) =>
 })
 
 test('native long-line truncation pauses as an extraction limit, never certifies a full read', async (t) => {
-  const f = await fixture(t, 1)
-  let calls = 0
-  const result = await runIngestBatch(f.opts, async (batch) => {
-    calls++
-    await f.worker(batch)
-    const source = batch.sources[0]
-    const read = nativeTool('read', { path: source.source_path })
-    // OpenCode 2.1.2 native output for a minified single-line HTML source.
-    read.content[0].state.content = [
-      {
-        type: 'text',
-        text: `1: <html>${'x'.repeat(1994)} (line truncated to 2000 chars)\n\n(End of file - total 1 lines)`,
-      },
-    ]
-    const evidence = workerEvidence(
-      [
-        nativeTool('skill', { id: 'wiki-ingest' }),
-        read,
-        nativeTool('write', { path: source.wiki_path }),
-      ],
-      source.wiki_path,
-      'succeeded',
-      { sourcePath: source.source_path, sourceLines: 1 },
-    )
-    assert.equal(evidence.source_read, false)
-    return evidence
-  })
-  assert.equal(calls, 1)
-  assert.equal(result.status, 'paused')
-  assert.equal(result.questions[0].reason, 'worker_source_truncated')
-  assert.equal(result.ingested, 0)
-  assert.equal(await f.git('status', '--porcelain'), '')
-  assert.equal(await f.git('rev-list', '--count', 'HEAD'), '1')
+  for (const mixed of [false, true])
+    await t.test(mixed ? 'earlier tool failure' : 'read only', async (t) => {
+      const f = await fixture(t, 1)
+      let calls = 0
+      const result = await runIngestBatch(f.opts, async (batch) => {
+        calls++
+        await f.worker(batch)
+        const source = batch.sources[0]
+        const read = nativeTool('read', { path: source.source_path })
+        // OpenCode 2.1.2 native output for a minified single-line HTML source.
+        read.content[0].state.content = [
+          {
+            type: 'text',
+            text: `1: <html>${'x'.repeat(1994)} (line truncated to 2000 chars)\n\n(End of file - total 1 lines)`,
+          },
+        ]
+        const evidence = workerEvidence(
+          [
+            ...(mixed
+              ? [
+                  nativeTool('read', { path: source.source_path }, 'error', {
+                    type: 'tool.execution',
+                    message: 'Synthetic failed read',
+                  }),
+                ]
+              : []),
+            nativeTool('skill', { id: 'wiki-ingest' }),
+            read,
+            nativeTool('write', { path: source.wiki_path }),
+          ],
+          source.wiki_path,
+          'succeeded',
+          { sourcePath: source.source_path, sourceLines: 1 },
+        )
+        assert.equal(evidence.source_read, false)
+        return evidence
+      })
+      assert.equal(calls, 1)
+      assert.equal(result.status, 'paused')
+      assert.equal(result.questions[0].reason, 'worker_source_truncated')
+      assert.equal(result.ingested, 0)
+      assert.equal(await f.git('status', '--porcelain'), '')
+      assert.equal(await f.git('rev-list', '--count', 'HEAD'), '1')
+    })
 })
 
 test('revocation during file installation blocks the commit and retains the recovery checkpoint', async (t) => {
