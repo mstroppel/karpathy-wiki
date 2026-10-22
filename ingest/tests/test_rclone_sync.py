@@ -13,7 +13,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from karpathy_wiki_ingest_audio.connector import audio_inventory
 from karpathy_wiki_ingest_audio.connector import synchronize as sync_audio
+from karpathy_wiki_ingest_webdav import source_files
 from karpathy_wiki_ingest_webdav import synchronize as sync_webdav
 from karpathy_wiki_speech.types import DEFAULT_LIMITS, TranscriptionLimits
 
@@ -47,16 +49,21 @@ class RcloneSyncTests(unittest.TestCase):
             if path.is_file()
         }
 
-    def exercise(self, synchronize, suffixes):
+    def exercise(self, synchronize, suffixes, discover):
         expected = set()
         for suffix in suffixes:
             for relative in (
                 f"root{suffix}",
                 f"deep/Folder/source{suffix.upper()}",
                 f"deep/mixed{suffix.title()}",
+                f"deep/.hidden{suffix}",
+                f"deep/...name..{suffix}",
             ):
                 self.write(self.upstream, relative)
                 expected.add(relative)
+            for stem in ("", ".", "..", "..."):
+                for prefix in ("", "deep/", "dot./"):
+                    self.write(self.upstream, f"{prefix}{stem}{suffix.upper()}")
         for relative in (
             "large.bin",
             "deep/notes.pdf",
@@ -72,21 +79,31 @@ class RcloneSyncTests(unittest.TestCase):
         self.write(self.incoming, f"deleted{suffixes[0]}")
         synchronize(self.incoming, str(self.upstream))
         self.assertEqual(self.files(), expected | {"keep-local.bin"})
+        self.assertEqual(set(discover(self.incoming)), expected)
         changed = sorted(expected)[0]
         self.write(self.upstream, changed, "longer updated synthetic fixture")
         removed = sorted(expected)[-1]
         (self.upstream / removed).unlink()
         synchronize(self.incoming, str(self.upstream))
         self.assertEqual(self.files(), (expected - {removed}) | {"keep-local.bin"})
+        self.assertEqual(set(discover(self.incoming)), expected - {removed})
         self.assertEqual((self.incoming / changed).read_text(), "longer updated synthetic fixture")
 
     def test_webdav_supported_formats(self):
-        self.exercise(sync_webdav, (".md", ".html", ".htm", ".xlsx"))
+        self.exercise(
+            sync_webdav,
+            (".md", ".html", ".htm", ".xlsx"),
+            lambda root: {path.as_posix() for path in source_files(root)},
+        )
 
     def test_audio_supported_formats(self):
         self.write(self.upstream, "deep/notes.md")
         self.write(self.upstream, "deep/workbook.xlsx")
-        self.exercise(sync_audio, DEFAULT_LIMITS.allowed_extensions)
+        self.exercise(
+            sync_audio,
+            DEFAULT_LIMITS.allowed_extensions,
+            lambda root: audio_inventory(root, DEFAULT_LIMITS),
+        )
 
     def test_audio_uses_discovery_limits(self):
         self.write(self.upstream, "allowed.WaV")

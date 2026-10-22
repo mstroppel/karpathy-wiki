@@ -188,6 +188,8 @@ per-minute costs, and data-handling terms.
 See [audio ingest](audio.md) for all options, the source identity model,
 and retention.
 
+Both syncs require a non-dot character before the final extension, matching
+discovery: `.md`, `..md`, and `.mp3` are excluded, while `.notes.md` is eligible.
 Both syncs preserve excluded files already present in their private incoming
 directories: neither uses `--delete-excluded`. They still synchronize upstream
 deletions of supported files. No automatic cleanup or data-layout change occurs.

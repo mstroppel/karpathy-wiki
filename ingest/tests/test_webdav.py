@@ -1014,7 +1014,10 @@ class SynchronizeTests(unittest.TestCase):
             synchronize(Path("/incoming"), "Wiki Sources")
         command = run_mock.call_args.args[0]
         filters = [command[index + 1] for index, flag in enumerate(command) if flag == "--filter"]
-        self.assertEqual(set(filters[:-1]), {"+ *.md", "+ *.html", "+ *.htm", "+ *.xlsx"})
+        self.assertEqual(
+            set(filters[:-1]),
+            {"+ {{[^/]*[^/.][^/]*}}" + suffix for suffix in (".md", ".html", ".htm", ".xlsx")},
+        )
         self.assertEqual(filters[-1], "- *")
         self.assertIn("--ignore-case", command)
         self.assertNotIn("--delete-excluded", command)

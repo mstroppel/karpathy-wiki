@@ -13,6 +13,7 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
+from karpathy_wiki_ingest.rclone import suffix_filter_args
 from karpathy_wiki_speech.types import DEFAULT_LIMITS, TranscriptionLimits, file_revision
 
 
@@ -42,14 +43,7 @@ def synchronize(
             "sync",
             f"webdav:{path}",
             str(incoming),
-            "--ignore-case",
-            *[
-                flag
-                for suffix in sorted(limits.allowed_extensions)
-                for flag in ("--filter", f"+ *{suffix}")
-            ],
-            "--filter",
-            "- *",
+            *suffix_filter_args(limits.allowed_extensions),
             "--create-empty-src-dirs",
             "--retries",
             "3",

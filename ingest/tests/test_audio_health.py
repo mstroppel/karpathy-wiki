@@ -283,7 +283,8 @@ class LivenessTests(unittest.TestCase):
         command = run.call_args.args[0]
         filters = [command[index + 1] for index, flag in enumerate(command) if flag == "--filter"]
         self.assertEqual(
-            set(filters[:-1]), {f"+ *{suffix}" for suffix in DEFAULT_LIMITS.allowed_extensions}
+            set(filters[:-1]),
+            {"+ {{[^/]*[^/.][^/]*}}" + suffix for suffix in DEFAULT_LIMITS.allowed_extensions},
         )
         self.assertEqual(filters[-1], "- *")
         self.assertIn("--ignore-case", command)
