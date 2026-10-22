@@ -281,8 +281,30 @@ async function addQuestions(opts, state) {
     const observation = await questionSnapshot(opts, state, index)
     const { binding, selection } = observation
     const source = state.sources[index ?? state.adoption?.source_index]
+    const canReprocess =
+      state.adoption && !state.adoption.approved && dispatchable.has(source?.status)
+    const proposal =
+      state.status === 'cancelled'
+        ? 'Nur die bereits vorbereitete Veröffentlichung technisch abschließen; der übrige Auftrag bleibt abgebrochen. Keine Worker starten.'
+        : index === null
+          ? canReprocess
+            ? 'Genau diese unveränderte Quellenseite frisch verarbeiten; fremde Änderungen erhalten.'
+            : 'Blocker extern klären; denselben gebundenen Auftrag fortsetzen, nichts zurücksetzen.'
+          : 'Eigene Entwürfe prüfen und begrenzt weiterbearbeiten; alternativ ausdrücklich zurückstellen oder nach Klärung ungelöst beenden.'
+    const options =
+      state.status === 'cancelled'
+        ? ['retry']
+        : index === null
+          ? canReprocess
+            ? ['reprocess', 'retry', 'cancel']
+            : ['retry', 'cancel']
+          : ['retry', 'defer', 'unresolved', 'cancel']
     const old = state.questions?.find(
-      (item) => item.source_index === index && item.binding === binding,
+      (item) =>
+        item.source_index === index &&
+        item.binding === binding &&
+        item.proposal === proposal &&
+        isDeepStrictEqual(item.options, options),
     )
     questions.push(
       old ?? {
@@ -300,22 +322,8 @@ async function addQuestions(opts, state) {
               source_revision: selection?.source_revision ?? source.source_revision,
               wiki_path: source.wiki_path,
             },
-        proposal:
-          state.status === 'cancelled'
-            ? 'Nur die bereits vorbereitete Veröffentlichung technisch abschließen; der übrige Auftrag bleibt abgebrochen. Keine Worker starten.'
-            : index === null
-              ? state.adoption
-                ? 'Genau diese unveränderte Quellenseite frisch verarbeiten; fremde Änderungen erhalten.'
-                : 'Blocker extern klären; denselben gebundenen Auftrag fortsetzen, nichts zurücksetzen.'
-              : 'Eigene Entwürfe prüfen und begrenzt weiterbearbeiten; alternativ ausdrücklich zurückstellen oder nach Klärung ungelöst beenden.',
-        options:
-          state.status === 'cancelled'
-            ? ['retry']
-            : index === null
-              ? state.adoption
-                ? ['reprocess', 'retry', 'cancel']
-                : ['retry', 'cancel']
-              : ['retry', 'defer', 'unresolved', 'cancel'],
+        proposal,
+        options,
       },
     )
   }

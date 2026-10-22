@@ -303,6 +303,20 @@ test('unchanged metadata retries retain their IDs until the provider state chang
   assert.deepEqual(completed.questions, [])
 })
 
+test('changed proposals never reuse a question ID even with the same observed files', async (t) => {
+  const f = await fixture(t, 1)
+  await writeFile(path.join(f.opts.wikiRoot, 'overview.md'), 'Unattributed work\n')
+  const paused = await runIngestBatch(f.opts, () => assert.fail())
+  const file = path.join(f.opts.root, 'batches', paused.batch_id, 'state.json')
+  const state = JSON.parse(await readFile(file, 'utf8'))
+  state.questions[0].proposal = 'A different synthetic proposal'
+  state.questions[0].options = ['reprocess', 'retry', 'cancel']
+  await writeFile(file, JSON.stringify(state))
+  const observed = await runIngestBatch(f.opts, () => assert.fail())
+  assert.notEqual(observed.questions[0].id, paused.questions[0].id)
+  assert.ok(!observed.questions[0].options.includes('reprocess'))
+})
+
 test('retained dirty approval only dispatches its source before independent pending work', async (t) => {
   for (const invalidIndependent of [false, true])
     await t.test(String(invalidIndependent), async (t) => {
@@ -331,6 +345,8 @@ test('retained dirty approval only dispatches its source before independent pend
       )
       const global = paused.questions.find((item) => item.source_index === null)
       assert.ok(global)
+      assert.ok(!global.options.includes('reprocess'))
+      assert.doesNotMatch(global.proposal, /frisch verarbeiten/)
       const observed = await answer(f, paused, global, 'retry', () =>
         assert.fail('another source cannot use admission'),
       )
