@@ -167,6 +167,23 @@ class IngestPackageTests(unittest.TestCase):
                 self.assertIn(name, pins)
                 self.assertGreaterEqual(len(pins[name]), 1, "missing wheel hashes")
 
+    def test_webdav_runtime_requirements_match_hash_pinned_wheels(self):
+        requirements = read(ROOT / "ingest" / "webdav" / "requirements.txt")
+        pinned = set()
+        for line in requirements.replace("\\\n", " ").splitlines():
+            if not line.strip() or line.startswith("#"):
+                continue
+            self.assertRegex(line, r"^[\w-]+==\d[\w.]*(?:\s+--hash=sha256:[0-9a-f]{64})+$")
+            pinned.add(line.split()[0])
+        self.assertEqual(
+            pinned,
+            set(read_ingest_project("webdav")["dependencies"]) - {"karpathy-wiki-ingest==0.1.0"},
+        )
+        workflow = read(ROOT / ".github" / "workflows" / "ci.yml")
+        self.assertIn(
+            "--require-hashes --only-binary=:all: -r ingest/webdav/requirements.txt", workflow
+        )
+
     def test_speech_optional_dependencies_are_hash_pinned(self):
         """Every speech extra installs from the hash-pinned runtime lockfile."""
         requirements = read(ROOT / "ingest" / "speech" / "requirements.txt")
@@ -235,7 +252,14 @@ class IngestBuildIsolationTests(unittest.TestCase):
         install_lines = [line for line in content.splitlines() if "pip install" in line]
         self.assertTrue(install_lines, "no pip install step")
         for line in install_lines:
-            if "build-requirements.txt" in line or "speech-requirements.txt" in line:
+            if any(
+                name in line
+                for name in (
+                    "build-requirements.txt",
+                    "speech-requirements.txt",
+                    "webdav-requirements.txt",
+                )
+            ):
                 # The hash-pinned build backend preinstall and the hash-pinned
                 # speech runtime are the only index accesses; both install
                 # with --require-hashes so nothing is resolved unpinned.

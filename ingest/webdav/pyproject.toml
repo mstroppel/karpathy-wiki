@@ -9,7 +9,12 @@ description = "WebDAV ingest plugin for Karpathy Wiki: rclone synchronization an
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"
-dependencies = ["karpathy-wiki-ingest==0.1.0"]
+dependencies = [
+  "karpathy-wiki-ingest==0.1.0",
+  "openpyxl==3.1.5",
+  "et-xmlfile==2.0.0",
+  "defusedxml==0.7.1",
+]
 classifiers = ["Programming Language :: Python :: 3", "Typing :: Typed"]
 
 [project.urls]

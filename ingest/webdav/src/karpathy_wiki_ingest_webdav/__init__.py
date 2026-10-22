@@ -49,6 +49,14 @@ from karpathy_wiki_ingest.state import (
     StateStore,
 )
 from karpathy_wiki_ingest_webdav.html import redact_html
+from karpathy_wiki_ingest_webdav.xlsx import (
+    EXTRACTION_VERSION,
+    SPREADSHEET_SUFFIXES,
+    WorkbookError,
+    extract,
+    identity,
+    output_path,
+)
 
 LOG = logging.getLogger("karpathy-wiki-webdav")
 
@@ -93,11 +101,11 @@ class GenerationItem:
 
 
 def source_files(incoming: Path) -> set[Path]:
-    """Return relative paths for supported Markdown and HTML source files."""
+    """Select text sources and spreadsheets (unsupported Excel formats fail explicitly)."""
     return {
         path.relative_to(incoming)
         for path in incoming.rglob("*")
-        if path.is_file() and path.suffix.lower() in {".md", ".html", ".htm"}
+        if path.is_file() and path.suffix.lower() in {".md", ".html", ".htm"} | SPREADSHEET_SUFFIXES
     }
 
 
@@ -108,9 +116,28 @@ def upstream_inventory(incoming: Path) -> dict[str, str]:
     generation metadata so every generation documents what it published.
     """
     return {
-        relative.as_posix(): file_revision(incoming / relative)
+        (
+            f"spreadsheet:{identity(relative)}"
+            if relative.suffix.lower() in SPREADSHEET_SUFFIXES
+            else relative.as_posix()
+        ): upstream_revision(incoming / relative)
         for relative in sorted(source_files(incoming))
     }
+
+
+def upstream_revision(path: Path) -> str:
+    # Reject oversized spreadsheets without hashing arbitrarily large private
+    # inputs in the unbounded provider process. This sentinel only keys rejected
+    # work, never a published source revision.
+    from karpathy_wiki_ingest_webdav.xlsx import MAX_COMPRESSED
+
+    if path.suffix.lower() in SPREADSHEET_SUFFIXES:
+        stat = path.stat()
+        if stat.st_size > MAX_COMPRESSED:
+            return hashlib.sha256(
+                f"oversized:{stat.st_size}:{stat.st_mtime_ns}".encode()
+            ).hexdigest()
+    return file_revision(path)
 
 
 def file_revision(path: Path) -> str:
@@ -133,6 +160,7 @@ def write_generation_metadata(
         "generation": generation_name,
         "created_at": int(time.time()),
         "redaction_fingerprint": fingerprint,
+        "xlsx_extraction_version": EXTRACTION_VERSION,
         "upstream_inventory": inventory,
     }
     atomic_write(
@@ -157,11 +185,24 @@ def sanitize_into_generation(
     items: list[GenerationItem] = []
     errors: list[dict[str, str]] = []
     failed = 0
+    targets: set[Path] = set()
     for relative in sorted(incoming_files):
+        spreadsheet = relative.suffix.lower() in SPREADSHEET_SUFFIXES
+        published = output_path(relative) if spreadsheet else relative
         source = incoming / relative
-        target = staging / relative
+        target = staging / published
         try:
-            if relative.suffix.lower() in {".html", ".htm"}:
+            # Output namespaces may never overwrite each other, including a
+            # deliberately supplied Markdown file at a hashed workbook path.
+            if any(
+                published == prior or published in prior.parents or prior in published.parents
+                for prior in targets
+            ):
+                raise ValueError("Output path collision; rename the conflicting upstream source")
+            targets.add(published)
+            if spreadsheet:
+                output = extract(source, relative, anonymizer)
+            elif relative.suffix.lower() in {".html", ".htm"}:
                 with source.open(encoding="utf-8", newline="") as handle:
                     output = redact_html(handle.read(), anonymizer)
             else:
@@ -170,21 +211,22 @@ def sanitize_into_generation(
             atomic_write(target, output)
             items.append(
                 GenerationItem(
-                    source_key=relative.as_posix(),
+                    source_key=published.as_posix(),
                     revision=revision,
                 )
             )
-            (quarantine / f"{relative}.error").unlink(missing_ok=True)
+            (quarantine / f"{published}.error").unlink(missing_ok=True)
         except (OSError, UnicodeError, ValueError) as error:
             failed += 1
-            report_quarantine(quarantine, relative, type(error).__name__, generation_name)
+            diagnostic = str(error) if isinstance(error, WorkbookError) else type(error).__name__
+            report_quarantine(quarantine, published, diagnostic, generation_name)
             errors.append(
                 {
-                    "path": f"{GENERATIONS_DIRECTORY}/{generation_name}/{relative.as_posix()}",
-                    "error": type(error).__name__,
+                    "path": f"{GENERATIONS_DIRECTORY}/{generation_name}/{published.as_posix()}",
+                    "error": diagnostic,
                 }
             )
-            LOG.error("WebDAV file %s was quarantined", relative)
+            LOG.error("WebDAV file %s was quarantined", published)
     return items, errors, failed
 
 
@@ -368,7 +410,11 @@ def cycle_idempotency_key(fingerprint: str, inventory: dict[str, str]) -> str:
     the same accepted work, so re-submission cannot execute a second cycle.
     """
     encoded = json.dumps(
-        {"fingerprint": fingerprint, "inventory": inventory},
+        {
+            "fingerprint": fingerprint,
+            "inventory": inventory,
+            "xlsx_extraction_version": EXTRACTION_VERSION,
+        },
         ensure_ascii=False,
         sort_keys=True,
     ).encode("utf-8")
@@ -401,6 +447,7 @@ def published_matches(
     if (
         metadata.get("redaction_fingerprint") != anonymizer.fingerprint
         or metadata.get("upstream_inventory") != inventory
+        or metadata.get("xlsx_extraction_version") != EXTRACTION_VERSION
     ):
         return False
     try:
@@ -668,6 +715,10 @@ def synchronize(incoming: Path, path: str) -> None:
             "INFO",
         ],
         check=True,
+        # rclone diagnostics can contain private workbook names. The caller
+        # reports a content-free synchronization failure instead.
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
 
 

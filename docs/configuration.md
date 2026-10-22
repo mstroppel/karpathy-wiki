@@ -128,9 +128,12 @@ source provider. `WEBDAV_VENDOR` defaults to `nextcloud`; rclone also supports
 other WebDAV implementations.
 
 WebDAV files are synchronized into a private staging directory first. The
-`webdav-ingest` service processes files whose name ends in `.md`, `.html`, or
-`.htm` (case-insensitively), applies `REDACTIONS_FILE` locally, and publishes
-UTF-8 Markdown and HTML files to `sources/webdav`. Other formats are ignored.
+`webdav-ingest` service processes files whose name ends in `.md`, `.html`,
+`.htm`, or `.xlsx` (case-insensitively), applies `REDACTIONS_FILE` locally, and
+publishes UTF-8 Markdown and HTML files to `sources/webdav`. XLSX tables/formulas
+are extracted locally with bounded openpyxl parsing; see [Excel through WebDAV](webdav-xlsx.md)
+for visibility, formats, limits and formula-cache caveats. `.xls`, `.xlsb` and
+`.xlsm` fail explicitly; other formats are ignored.
 HTML stays HTML: original paths, tags, attributes, formatting, and line endings
 are preserved except for targeted replacements. Matching covers literal source,
 context-aware decoded HTML entities (including attribute values), and text split across inline

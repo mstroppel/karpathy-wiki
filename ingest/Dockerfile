@@ -62,8 +62,10 @@ RUN python -m pip install --no-deps --no-index --find-links=/wheels karpathy-wik
 
 FROM core AS webdav
 COPY --from=build /wheels/webdav /wheels
+COPY webdav/requirements.txt /src/webdav-requirements.txt
 RUN python -m pip install --no-deps --no-index --find-links=/wheels karpathy-wiki-ingest-webdav \
-    && rm -rf /wheels
+    && python -m pip install --require-hashes --only-binary=:all: -r /src/webdav-requirements.txt \
+    && rm -rf /wheels /src
 
 # The audio plugin image ships the audio provider only; transcription runs
 # in the speech image so no provider image needs the model stack.
