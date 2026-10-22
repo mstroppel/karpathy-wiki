@@ -121,6 +121,15 @@ obscured_password=$(docker run --rm --entrypoint rclone kw-ingest-webdav:integra
   || fail "cannot obscure the WebDAV test password"
 printf 'WEBDAV_PASSWORD_OBSCURED=%s\n' "$obscured_password" >>"$env_file"
 
+# Verify both providers' include filters with the pinned rclone binary, including
+# case-insensitive nested paths, updates, deletions and excluded local files.
+compose run --rm --no-deps \
+  -v "$repository_root/ingest:/src/ingest:ro" \
+  -e PYTHONPATH=/src/ingest/webdav/src:/src/ingest/audio/src:/src/ingest/speech/src \
+  --entrypoint python webdav-ingest \
+  -m unittest discover -s /src/ingest/tests -p test_rclone_sync.py -v \
+  || fail "rclone supported-format filters failed"
+
 # ---------------------------------------------------------------- startup
 printf 'compose-integration: starting the stack\n'
 compose up -d --wait --wait-timeout 240 opencode silverbullet answers-ingest \

@@ -1,9 +1,9 @@
 """Private snapshot connector: rclone discovery of WebDAV audio files.
 
 The audio provider keeps its own raw-audio directory; it never publishes raw
-files under ``sources/``. A cycle first mirrors the complete upstream
-inventory into the snapshot directory, then classifies files: supported
-audio extensions become pending work, everything else is ignored
+files under ``sources/``. A cycle mirrors only supported audio extensions
+into the snapshot directory, then inventories them as pending work.
+Everything else is excluded from synchronization
 (Markdown-only files belong to the Markdown WebDAV provider).
 """
 
@@ -13,7 +13,8 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
-from karpathy_wiki_speech.types import TranscriptionLimits, file_revision
+from karpathy_wiki_ingest.rclone import has_supported_suffix, suffix_filter_args
+from karpathy_wiki_speech.types import DEFAULT_LIMITS, TranscriptionLimits, file_revision
 
 
 def probe(path: str, rclone_binary: str = "rclone") -> None:
@@ -33,14 +34,16 @@ def synchronize(
     rclone_binary: str = "rclone",
     *,
     timeout_seconds: int = 3600,
+    limits: TranscriptionLimits = DEFAULT_LIMITS,
 ) -> None:
-    """Mirror the upstream WebDAV folder into the private snapshot."""
+    """Mirror supported audio files into the private snapshot."""
     subprocess.run(
         [
             rclone_binary,
             "sync",
             f"webdav:{path}",
             str(incoming),
+            *suffix_filter_args(limits.allowed_extensions),
             "--create-empty-src-dirs",
             "--retries",
             "3",
@@ -69,7 +72,7 @@ def audio_inventory(
     """
     inventory: dict[str, str] = {}
     for path in sorted(snapshot.rglob("*")):
-        if not path.is_file() or path.suffix.lower() not in limits.allowed_extensions:
+        if not path.is_file() or not has_supported_suffix(path, limits.allowed_extensions):
             continue
         relative = path.relative_to(snapshot).as_posix()
         if progress is not None:

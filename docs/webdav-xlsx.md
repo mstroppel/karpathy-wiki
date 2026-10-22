@@ -50,9 +50,11 @@ deny-list redactor **before** Markdown/HTML escaping. Unknown sensitive values m
 remain: inspect the sanitized extract before sending it to a model.
 
 No macros execute and no external links, entities or data connections are fetched.
-Legacy `.xls`, `.xlsb` and macro-enabled `.xlsm` are rejected with instructions to
-export an unencrypted `.xlsx`. Encrypted, corrupt or unsupported packages produce
-fixed actionable diagnostics, without workbook text or raw parser errors.
+Legacy `.xls`, `.xlsb` and macro-enabled `.xlsm` are excluded from synchronization;
+use an unencrypted `.xlsx` instead. If already present locally, these unsupported
+formats are still rejected with export instructions. Encrypted, corrupt or
+unsupported packages produce fixed actionable diagnostics, without workbook text
+or raw parser errors.
 Other non-source formats remain ignored. rclone output is suppressed because its
 diagnostics can contain private filenames; sync failures remain visible in health.
 

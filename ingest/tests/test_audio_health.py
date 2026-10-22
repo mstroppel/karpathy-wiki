@@ -277,6 +277,22 @@ class LivenessTests(unittest.TestCase):
         ):
             synchronize(self.root, "Recordings", timeout_seconds=123)
 
+    def test_sync_includes_only_discoverable_audio(self):
+        with patch("karpathy_wiki_ingest_audio.connector.subprocess.run") as run:
+            synchronize(self.root, "Recordings")
+        command = run.call_args.args[0]
+        filters = [command[index + 1] for index, flag in enumerate(command) if flag == "--filter"]
+        self.assertEqual(
+            set(filters[:-1]),
+            {"+ {{[^/]*[^/.][^/]*}}" + suffix for suffix in DEFAULT_LIMITS.allowed_extensions},
+        )
+        self.assertEqual(filters[-1], "- *")
+        self.assertIn("--ignore-case", command)
+        self.assertNotIn("--delete-excluded", command)
+        self.assertEqual(command[command.index("--retries") + 1], "3")
+        self.assertEqual(command[command.index("--low-level-retries") + 1], "10")
+        self.assertTrue(run.call_args.kwargs["check"])
+
     def test_startup_grace_covers_bounded_dependency_and_probe_checks(self):
         compose = Path(__file__).resolve().parents[2] / "compose.yaml"
         audio = (

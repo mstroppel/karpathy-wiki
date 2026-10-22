@@ -127,13 +127,14 @@ Set `WEBDAV_URL`, `WEBDAV_VENDOR`, `WEBDAV_USERNAME`,
 source provider. `WEBDAV_VENDOR` defaults to `nextcloud`; rclone also supports
 other WebDAV implementations.
 
-WebDAV files are synchronized into a private staging directory first. The
-`webdav-ingest` service processes files whose name ends in `.md`, `.html`,
+Only `.md`, `.html`, `.htm`, and `.xlsx` files are synchronized to the private
+`incoming/webdav` snapshot, recursively and case-insensitively. Other formats
+are not downloaded. The `webdav-ingest` service processes files whose name ends in `.md`, `.html`,
 `.htm`, or `.xlsx` (case-insensitively), applies `REDACTIONS_FILE` locally, and
 publishes UTF-8 Markdown and HTML files to `sources/webdav`. XLSX tables/formulas
 are extracted locally with bounded openpyxl parsing; see [Excel through WebDAV](webdav-xlsx.md)
-for visibility, formats, limits and formula-cache caveats. `.xls`, `.xlsb` and
-`.xlsm` fail explicitly; other formats are ignored.
+for visibility, formats, limits and formula-cache caveats. Locally present
+`.xls`, `.xlsb` and `.xlsm` still fail explicitly.
 HTML stays HTML: original paths, tags, attributes, formatting, and line endings
 are preserved except for targeted replacements. Matching covers literal source,
 context-aware decoded HTML entities (including attribute values), and text split across inline
@@ -170,9 +171,11 @@ is refreshed; the name is reserved there.
 
 ### Audio recordings
 
-With the `audio` profile enabled, a second connector synchronizes a
-WebDAV folder of recordings (`AUDIO_WEBDAV_PATH`, default `Recordings`) into
-its own private snapshot, transcribes through the
+With the `audio` profile enabled, a second connector synchronizes only supported
+recordings from a WebDAV folder (`AUDIO_WEBDAV_PATH`, default `Recordings`) into
+`incoming/audio`, recursively and case-insensitively. Its filter uses the same
+`allowed_extensions` as audio discovery (`.flac`, `.m4a`, `.mp3`, `.mp4`, `.ogg`,
+`.opus`, `.wav`, `.webm` by default). It transcribes through the
 [`audio-speech` worker](audio.md), applies the shared redactions (including
 matches that span transcript segments), and publishes sanitized Markdown to
 `sources/audio` as coherent generations. Raw audio, unredacted transcripts,
@@ -185,10 +188,16 @@ per-minute costs, and data-handling terms.
 See [audio ingest](audio.md) for all options, the source identity model,
 and retention.
 
+Both syncs require a non-dot character before the final extension, matching
+discovery: `.md`, `..md`, and `.mp3` are excluded, while `.notes.md` is eligible.
+Both syncs preserve excluded files already present in their private incoming
+directories: neither uses `--delete-excluded`. They still synchronize upstream
+deletions of supported files. No automatic cleanup or data-layout change occurs.
+
 ## Source Generations
 
 WebDAV sources are published as coherent generations instead of file-by-file.
-Every cycle synchronizes the upstream tree into a private staging directory,
+Every cycle synchronizes supported upstream files into a private staging directory,
 anonymizes and validates every file with a freshly loaded redaction
 configuration, and only then exposes the complete generation: the `current`
 symlink inside `sources/webdav` is switched atomically and the provider
