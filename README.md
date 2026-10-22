@@ -252,7 +252,7 @@ npm test
 docker build --target opencode -t kw-opencode:integration -f opencode/Dockerfile .
 docker build --target openchamber -t kw-openchamber:integration -f opencode/Dockerfile .
 sh tests/integration/chat.sh  # authentication, discovery, native SSE and restart persistence
-sh tests/integration/batch-ingest.sh  # synthetic model, private drafts, repair, bound decisions and commits
+sh tests/integration/batch-ingest.sh  # synthetic model, private drafts, context stops, permissions and commits
 sh tests/integration/runtime-write-isolation.sh  # pinned-runtime proof of the reader boundary
 tests/integration/run.sh  # requires Docker; disposable Compose stack test
 sh tests/integration/email.sh  # synthetic TLS IMAP, archive-before-delete, restart, replay

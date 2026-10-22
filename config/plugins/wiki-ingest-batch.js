@@ -27,7 +27,7 @@ export default {
       tools.add({
         name: 'wiki_ingest_batch',
         description:
-          'Manueller Ingest mit privaten Entwürfen, begrenzter Reparatur und dauerhaft gebundenen Rückfragen. Kein Rücksetzen. Offenen Auftrag mit batch_id/decision_id fortsetzen.',
+          'Alle ausgewählten neuen/geänderten Quellen sequenziell einlesen: je eine frische Session und ein privater Entwurf. Isolierte Fehler berichten und fortfahren. batch_id nur zum ausdrücklich gewünschten Abschluss einer unterbrochenen Veröffentlichung.',
         input: {
           type: 'object',
           properties: {
@@ -35,19 +35,10 @@ export default {
               type: 'string',
               description: 'Optional: genau diese neue/geänderte Quelle statt Sammelbatch.',
             },
-            batch_id: { type: 'string', description: 'Vom Tool gelieferte offene Batch-ID.' },
-            decision_id: {
+            batch_id: {
               type: 'string',
-              description: 'Exakte offene Entscheidungs-ID; niemals aus Prosa rekonstruieren.',
-            },
-            answer: {
-              type: 'string',
-              enum: ['retry', 'reprocess', 'defer', 'unresolved', 'cancel'],
-            },
-            question_offset: {
-              type: 'integer',
-              minimum: 0,
-              description: 'Weitere offene Fragen anzeigen, ohne Worker zu starten.',
+              description:
+                'Nur nach ausdrücklichem Auftrag: vorbereitete Veröffentlichung dieses Batches prüfen und abschließen. Startet keine Worker.',
             },
           },
           additionalProperties: false,
@@ -58,18 +49,15 @@ export default {
             {
               sourcePath: args.source_path,
               batchId: args.batch_id,
-              decisionId: args.decision_id,
-              answer: args.answer,
-              questionOffset: args.question_offset,
               ownerSession: context.sessionID,
               signal: context.signal,
-              authorize: async (resource) =>
+              authorize: (batchId) =>
                 ctx.permission.assert({
                   sessionID: context.sessionID,
                   agent: context.agent,
                   source: { type: 'tool', messageID: context.messageID, id: context.id },
-                  action: 'ingest_decision',
-                  resources: [resource],
+                  action: 'ingest_recovery',
+                  resources: [batchId],
                   save: [],
                 }),
             },

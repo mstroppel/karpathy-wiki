@@ -141,7 +141,7 @@ export async function storageBytes(root, limit) {
   return bytes
 }
 
-export async function createDraft(opts, directory, adoption, base) {
+export async function createDraft(opts, directory, base, source) {
   const wiki = path.join(directory, 'wiki')
   await safeDirectory(wiki)
   const names = (await git(opts.wikiRoot, ['ls-tree', '-r', '--name-only', '-z', base]))
@@ -150,23 +150,17 @@ export async function createDraft(opts, directory, adoption, base) {
   const baseline = {}
   let size = 0
   for (const name of names) {
-    if (!name.endsWith('.md') || name.split('/').some((part) => part.startsWith('.'))) continue
+    // Other source pages stay read-only in the live wiki. Copy only the selected
+    // page and shared editing context; never copy Git history or configuration.
+    if (!['index.md', 'log.md', 'AGENTS.md'].includes(name) && !editablePage(name, source)) continue
     relativePage(name)
     const bytes = await git(opts.wikiRoot, ['cat-file', 'blob', `${base}:${name}`], {}, null)
-    if (name !== adoption?.path) {
-      const live = await fileBytes(path.join(opts.wikiRoot, name), opts.wikiRoot)
-      if (digest(live) !== digest(bytes)) throw new IngestFault('foreign_wiki_changes')
-    }
+    const live = await fileBytes(path.join(opts.wikiRoot, name), opts.wikiRoot)
+    if (digest(live) !== digest(bytes)) throw new IngestFault('foreign_wiki_changes')
     size += bytes.length
     if (size > opts.maxDraftBytes) throw new IngestFault('draft_capacity')
     baseline[name] = digest(bytes)
     await putFile(wiki, name, bytes)
-  }
-  if (adoption) {
-    const bytes = await fileBytes(path.join(opts.wikiRoot, adoption.path), opts.wikiRoot)
-    if (digest(bytes) !== adoption.hash) throw new IngestFault('adoption_changed')
-    baseline[adoption.path] = adoption.hash
-    await putFile(wiki, adoption.path, bytes)
   }
   for (const folder of ['sources', 'entities', 'concepts', 'analyses'])
     await safeDirectory(path.join(wiki, folder))

@@ -202,8 +202,9 @@ schreibt ihre Quellenseite und ergänzt fachlich nötige Wiki-Seiten; er ruft
 weder Git/Shell noch Statuswerkzeuge auf und ändert Index/Log nicht selbst.
 Der Code liefert den Auftrag als User-Nachricht einer frischen Kindsession.
 Ihr Arbeitsort ist ausschließlich der gelieferte private Entwurf; absolute
-Live-Schreibziele sind verboten. Bei offenen Fragen nur bestätigte, codegebundene
-Entscheidungen fortsetzen. Bestehende lokale Sicherheitsregeln bleiben verbindlich.
+Live-Schreibziele sind verboten. Isolierte Fehler bleiben unveröffentlicht;
+erneute Verarbeitung braucht einen neuen ausdrücklichen Auftrag.
+Bestehende lokale Sicherheitsregeln bleiben verbindlich.
 EOF
 
 install_if_absent "$wiki/index.md" <<EOF

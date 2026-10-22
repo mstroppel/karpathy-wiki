@@ -64,19 +64,23 @@ class BatchWorkflowTests(unittest.TestCase):
         for phrase in (
             "wiki_ingest_diagnostics",
             "owner_session",
-            "Ursprungs-Chat",
+            "batch_id",
             "Deploymentlücke",
         ):
             self.assertIn(phrase, routing)
         for phrase in (
-            "keine erneute Retry-Frage",
-            "Quellenentscheidungen",
-            "vor globalem `retry`",
+            "höchstens ein Versuch je Quelle",
+            "Keine routinemäßigen",
+            "source_context_limit",
+            "keine Worker starten",
         ):
             self.assertIn(phrase, self.orchestrator)
         plugin = (ROOT / "config/plugins/wiki-ingest-batch.js").read_text()
         self.assertIn("name: 'wiki_ingest_diagnostics'", plugin)
         self.assertIn("inspectIngestBatch(args)", plugin)
+        for obsolete in ("decision_id", "question_offset", "ingest_decision"):
+            self.assertNotIn(obsolete, plugin)
+        self.assertIn("ingest_recovery", plugin)
 
     def test_orchestrator_can_read_only_batch_reports_within_the_private_journal(self):
         rules = self.config["agents"]["wiki-ingest-orchestrator"]["permissions"]

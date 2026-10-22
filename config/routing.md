@@ -21,16 +21,16 @@ Tool-Aufruf der Elternsession. Eine `batch_id` im Nachrichtentext allein erteilt
 keine Schreibzulassung. Diese Aufgabenverteilung gilt auch dann, wenn ältere
 Wiki-Anweisungen diese code-eigenen Aufgaben noch allgemein dem Bearbeiter zuweisen.
 Worker schreiben nur im gelieferten privaten Entwurf, nie ins Live-Wiki.
-Offene Ingest-Fragen gehören weiterhin zum selben Orchestrator-Auftrag: nach
-Nutzerentscheidung ausschließlich die gelieferte Batch-/Entscheidungs-ID
-fortsetzen; keine Quelle aus Gesprächsprosa neu auswählen.
-Bei Fragen zu `dirty_wiki`, verweigerten Worker-Aktionen oder einem pausierten
+Isolierte Quellenfehler werden berichtet, nicht durch routinemäßige Freigabe-
+oder Retry-Fragen behandelt. Ein neuer ausdrücklicher Auftrag wählt pending Quellen frisch.
+Bei Fragen zu `dirty_wiki`, verweigerten Worker-Aktionen oder einem blockierten
 Einleselauf zuerst `wiki_ingest_diagnostics` verwenden, nicht im Wiki nach
 Job-Logs suchen. Das Werkzeug ist auch im Abfragemodus nur lesend verfügbar.
 Es nennt Dirty-Pfade, Worker-Fehler und `owner_session`; bei Bedarf mit
-`next_offset` blättern. Ein neuer Chat diagnostiziert nur und verweist zum
-Fortsetzen auf diesen Ursprungs-Chat mit `/ingest-new`; er übernimmt weder
-alte Entscheidungsfreigaben noch startet er Ersatzarbeit. Fehlt das Werkzeug,
+`next_offset` blättern. Nur eine unterbrochene Veröffentlichung bleibt aktiv:
+nach ausdrücklichem Auftrag darf der Orchestrator sie mit `batch_id` prüfen und
+abschließen, ohne Worker zu starten. Andere Blocker zuerst extern klären.
+Fehlt das Werkzeug,
 Konfigurations-/Deploymentlücke melden, nicht durch Laden eines Skills umgehen.
 
 Ordne jede Anfrage genau einem Vorgang zu. Die Delegationsregeln gelten nur für
