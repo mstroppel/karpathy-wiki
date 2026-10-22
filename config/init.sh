@@ -160,7 +160,9 @@ Jede andere Anfrage bleibt eine Wiki-Abfrage.
   sie niemals.$paperless_security
 - Schreibe Antwortentwürfe nur nach ausdrücklicher Bestätigung in
   \`/knowledge/incoming/answers\`, nie direkt nach \`/knowledge/sources\`.
-- Schreibe erzeugtes Wissen ausschließlich nach \`/knowledge/wiki\`.
+- Schreibe erzeugtes Wissen ausschließlich nach \`/knowledge/wiki\`; Ausnahme:
+  code-zugelassene Ingest-Worker schreiben ausschließlich im gelieferten privaten
+  Entwurf. Nur der Batch-Code veröffentlicht deren geprüftes Ergebnis im Wiki.
 - Erfinde keine Fakten. Kennzeichne Unsicherheiten, Extraktionslücken,
   Interpretationen und Widersprüche klar.
 
@@ -199,6 +201,9 @@ Quellenstatus/Widerruf, Manifest-/Revisionsprüfung, Git-Prüfungen, Frontmatter
 schreibt ihre Quellenseite und ergänzt fachlich nötige Wiki-Seiten; er ruft
 weder Git/Shell noch Statuswerkzeuge auf und ändert Index/Log nicht selbst.
 Der Code liefert den Auftrag als User-Nachricht einer frischen Kindsession.
+Ihr Arbeitsort ist ausschließlich der gelieferte private Entwurf; absolute
+Live-Schreibziele sind verboten. Bei offenen Fragen nur bestätigte, codegebundene
+Entscheidungen fortsetzen. Bestehende lokale Sicherheitsregeln bleiben verbindlich.
 EOF
 
 install_if_absent "$wiki/index.md" <<EOF

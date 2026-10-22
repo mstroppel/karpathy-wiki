@@ -9,13 +9,27 @@ export default {
       tools.add({
         name: 'wiki_ingest_batch',
         description:
-          'Verarbeitet alle ausgewählten neuen/geänderten Quellen sequenziell, mit frischem Worker und Commit je Quelle. Isolierte Quellenfehler überspringen; kein Rücksetzen.',
+          'Manueller Ingest mit privaten Entwürfen, begrenzter Reparatur und dauerhaft gebundenen Rückfragen. Kein Rücksetzen. Offenen Auftrag mit batch_id/decision_id fortsetzen.',
         input: {
           type: 'object',
           properties: {
             source_path: {
               type: 'string',
               description: 'Optional: genau diese neue/geänderte Quelle statt Sammelbatch.',
+            },
+            batch_id: { type: 'string', description: 'Vom Tool gelieferte offene Batch-ID.' },
+            decision_id: {
+              type: 'string',
+              description: 'Exakte offene Entscheidungs-ID; niemals aus Prosa rekonstruieren.',
+            },
+            answer: {
+              type: 'string',
+              enum: ['retry', 'reprocess', 'defer', 'unresolved', 'cancel'],
+            },
+            question_offset: {
+              type: 'integer',
+              minimum: 0,
+              description: 'Weitere offene Fragen anzeigen, ohne Worker zu starten.',
             },
           },
           additionalProperties: false,
@@ -25,7 +39,21 @@ export default {
           const result = await runIngestBatch(
             {
               sourcePath: args.source_path,
+              batchId: args.batch_id,
+              decisionId: args.decision_id,
+              answer: args.answer,
+              questionOffset: args.question_offset,
+              ownerSession: context.sessionID,
               signal: context.signal,
+              authorize: async (resource) =>
+                ctx.permission.assert({
+                  sessionID: context.sessionID,
+                  agent: context.agent,
+                  source: { type: 'tool', messageID: context.messageID, id: context.id },
+                  action: 'ingest_decision',
+                  resources: [resource],
+                  save: [],
+                }),
             },
             (batch) => worker(context, batch),
           )

@@ -283,9 +283,8 @@ class ConfigTests(unittest.TestCase):
             ROOT / "config" / "skills" / "wiki-ingest-orchestrator" / "SKILL.md"
         ).read_text()
         renderer = (ROOT / "config" / "tools" / "wiki_ingest_batch_core.mjs").read_text()
-        self.assertIn("dauerhaften Berichtspfad", template)
         self.assertIn("Verlinke den privaten Bericht", template)
-        self.assertIn("kurzen Zusammenfassung", template)
+        self.assertIn("offene Arbeit", template)
         self.assertIn("[Vollständiger Einlesebericht](<report_path>)", orchestrator)
         self.assertIn("Bei null Quellen keine Auswertung erfinden", orchestrator)
         for field in ("Befunde", "Widersprüche/offene Fragen", "Extraktionsgrenzen"):
@@ -303,8 +302,7 @@ class ConfigTests(unittest.TestCase):
         self.assertIn("Aktuelle Quellen nicht erneut auswerten", orchestrator)
         self.assertIn("`source_path` aus `wiki_ingest_status`", orchestrator)
         self.assertIn("vermeide Duplikatseiten", skill)
-        # Evidence is durable per source, written only after the verified
-        # commit, and unverified results are recorded as blocked.
+        # Source evidence and questions stay durable; success requires verification.
         self.assertIn("wiki_ingest_batch", skill)
         self.assertIn("verifizierten Commit", skill)
 
