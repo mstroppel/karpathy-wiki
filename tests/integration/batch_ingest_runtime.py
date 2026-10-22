@@ -312,8 +312,9 @@ def main():
         "errors": [],
     }
 
-    def change_source():
-        text = f"Synthetic source line 1, generation {time.monotonic_ns()}.\n"
+    def change_source(text=None):
+        if text is None:
+            text = f"Synthetic source line 1, generation {time.monotonic_ns()}.\n"
         (SOURCE / "notes.md").write_text(text)
         revision = hashlib.sha256(text.encode()).hexdigest()
         manifest["items"] = [
@@ -408,6 +409,39 @@ def main():
             _, state = run(sid, approval=True)
             assert state["status"] == "done", state
             assert (WIKI / "sources/webdav/notes.md").read_bytes() != before
+            # The pinned native read tool shortens long lines, even at EOF.
+            # Successful writes/model prose must not turn that into full coverage.
+            change_source("<html>" + "x" * 5000 + "UNREAD_SUFFIX</html>\n")
+            ACTION = {"source_path": str(SOURCE / "notes.md")}
+            before = (WIKI / "sources/webdav/notes.md").read_bytes()
+            sid, state = run()
+            source = state["sources"][0]
+            assert state["status"] == "paused" and source["blocker"] == "worker_source_truncated", (
+                state
+            )
+            assert len(source["attempts"]) == 1 and not source["commit"], source
+            native = request(f"/api/experimental/session/{source['worker_session']}/export")["data"]
+            reads = [
+                part
+                for msg in native["messages"]
+                if msg["type"] == "assistant"
+                for part in msg["content"]
+                if part["type"] == "tool"
+                and part["name"] == "read"
+                and part["state"]["input"].get("path") == str(SOURCE / "notes.md")
+            ]
+            output = json.dumps(reads)
+            assert "(line truncated to 2000 chars)" in output and "UNREAD_SUFFIX" not in output, (
+                reads
+            )
+            assert (WIKI / "sources/webdav/notes.md").read_bytes() == before
+            ACTION = {
+                "batch_id": state["batch_id"],
+                "decision_id": state["questions"][0]["id"],
+                "answer": "cancel",
+            }
+            _, state = run(sid, approval=True)
+            assert state["status"] == "cancelled", state
             forbidden = [
                 "AGENTS.md",
                 "log.md",

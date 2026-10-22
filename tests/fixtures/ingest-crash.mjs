@@ -7,6 +7,7 @@ let files = 0
 await runIngestBatch(
   {
     ...opts,
+    authorize: async () => {},
     onPhase: (phase) => {
       if (phase === 'file_installed') files++
       if (

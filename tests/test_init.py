@@ -284,7 +284,6 @@ class ConfigTests(unittest.TestCase):
         ).read_text()
         renderer = (ROOT / "config" / "tools" / "wiki_ingest_batch_core.mjs").read_text()
         self.assertIn("Verlinke den privaten Bericht", template)
-        self.assertIn("Verlinke den privaten Bericht", template)
         self.assertIn("offene Arbeit", template)
         self.assertIn("[Vollständiger Einlesebericht](<report_path>)", orchestrator)
         self.assertIn("Bei null Quellen keine Auswertung erfinden", orchestrator)

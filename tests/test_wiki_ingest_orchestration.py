@@ -138,11 +138,10 @@ class BatchWorkflowTests(unittest.TestCase):
             "Readers can see",
             "No automatic reconciliation",
             "semantic correctness",
-            "requires",
-            "`source_sha256`",
             "Independent sources",
         ):
             self.assertIn(phrase, text)
+        self.assertRegex(text, r"requires\s+`source_sha256`")
 
     def test_only_one_ingest_implementation_is_shipped(self):
         plugins = {path.name for path in (ROOT / "config/plugins").glob("*.js")}

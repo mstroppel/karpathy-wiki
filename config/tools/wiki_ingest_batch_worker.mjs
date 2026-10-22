@@ -43,12 +43,17 @@ export function workerEvidence(
   const creation = tools.findIndex((part) => created(part, source, wikiRoot))
   const successful = (part) => part.state?.status === 'completed'
   const covered = new Set()
+  const truncated = new Set()
   for (const part of tools) {
     if (part.name !== 'read' || !successful(part) || !targets(part, wikiRoot).includes(sourcePath))
       continue
     for (const content of part.state.content ?? []) {
       if (content.type !== 'text') continue
-      for (const match of content.text.matchAll(/^(\d+):/gm)) covered.add(Number(match[1]))
+      for (const match of content.text.matchAll(/^(\d+):([^\n]*)/gm)) {
+        const line = Number(match[1])
+        if (/\(line truncated to \d+ chars\)/.test(match[2])) truncated.add(line)
+        else covered.add(line)
+      }
     }
   }
   const sourceRead =
@@ -142,7 +147,13 @@ export function workerEvidence(
     )
       errors.push(item)
   })
-  if (sourcePath && !sourceRead) errors.push({ code: 'worker_source_not_read', tool: 'read' })
+  if (sourcePath && !sourceRead)
+    errors.push({
+      code: [...truncated].some((line) => !covered.has(line))
+        ? 'worker_source_truncated'
+        : 'worker_source_not_read',
+      tool: 'read',
+    })
   if (sourcePath && !skillLoaded) errors.push({ code: 'worker_skill_not_loaded', tool: 'skill' })
   if (outcome !== 'succeeded') errors.push({ code: 'worker_session_failed', tool: 'session' })
   const last = messages.filter((message) => message.type === 'assistant').at(-1)

@@ -30,6 +30,9 @@ a corrected exact missing-target read, mandatory read/skill or patch no longer
 poisons a verified result. Explicit permission rejections are never forgiven.
 Catalog-containing patches are rejected before permission admission with a
 code-owned correction; the worker must recreate only permitted changes.
+Native long-line truncation does not count as a fully read line. If the source
+cannot be fully read, ingestion pauses with an extraction limitation rather than
+publishing unseen content or repeatedly retrying the same shortened read.
 
 At most three worker attempts and 300 seconds per source per accepted continuation
 are allowed. Each child has at most 120 seconds; 96 model requests and a shared

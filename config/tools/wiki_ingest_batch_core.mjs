@@ -39,6 +39,9 @@ const batchPattern = /^batch-[1-9][0-9]{0,15}-[a-f0-9]{12}$/
 const attemptPattern = /^attempt-[a-f0-9]{24}$/
 const token = () => randomBytes(12).toString('hex')
 const reason = (error) => (error instanceof IngestFault ? error.code : 'source_processing_failed')
+const dispatchable = new Set(['pending', 'running', 'repairing'])
+const dirtyAdmission =
+  'dirty_wiki: Änderungen erhalten; gezielt prüfen, niemals pauschal zurücksetzen'
 const unfinished = new Set([
   'pending',
   'running',
@@ -183,7 +186,7 @@ async function snapshot(opts) {
 
 async function questionSnapshot(opts, state, index) {
   const current = await opts.scan()
-  const source = index === null ? null : state.sources[index]
+  const source = state.sources[index ?? state.adoption?.source_index] ?? null
   const selected = source
     ? ['new', 'outdated', 'current', 'revoked', 'conflict'].flatMap((name) =>
         (current.adapters[source.adapter]?.[name] ?? []).filter(
@@ -254,6 +257,7 @@ async function addQuestions(opts, state) {
   for (const index of needs) {
     const observation = await questionSnapshot(opts, state, index)
     const { binding, selection } = observation
+    const source = state.sources[index ?? state.adoption?.source_index]
     const old = state.questions?.find(
       (item) => item.source_index === index && item.binding === binding,
     )
@@ -265,15 +269,14 @@ async function addQuestions(opts, state) {
         selection,
         source_hash: observation.source_hash,
         reason: index === null ? state.blocker : state.sources[index].blocker,
-        target:
-          index === null
-            ? null
-            : {
-                adapter: state.sources[index].adapter,
-                source_key: state.sources[index].source_key,
-                source_revision: selection?.source_revision ?? state.sources[index].source_revision,
-                wiki_path: state.sources[index].wiki_path,
-              },
+        target: !source
+          ? null
+          : {
+              adapter: source.adapter,
+              source_key: source.source_key,
+              source_revision: selection?.source_revision ?? source.source_revision,
+              wiki_path: source.wiki_path,
+            },
         proposal:
           state.status === 'cancelled'
             ? 'Nur die bereits vorbereitete Veröffentlichung technisch abschließen; der übrige Auftrag bleibt abgebrochen. Keine Worker starten.'
@@ -294,6 +297,48 @@ async function addQuestions(opts, state) {
     )
   }
   state.questions = questions
+}
+
+async function refreshAdmission(opts, state) {
+  // Installed publication files are checkpoint-owned, not new dirty admission.
+  if (state.sources.some((source) => source.phase === 'publishing')) return
+  const admission = await snapshot(opts)
+  const dirty =
+    admission.count ||
+    admission.index !== (await git(opts.wikiRoot, ['rev-parse', 'HEAD^{tree}'])).trim()
+  let adoption = null
+  if (dirty) {
+    const selected = pending(await opts.scan())
+    const sourceIndex = state.sources.findIndex(
+      (source) =>
+        dispatchable.has(source.status) &&
+        admission.count === 1 &&
+        source.wiki_path === path.join(opts.wikiRoot, admission.files[0].path) &&
+        selected.some(
+          (item) =>
+            item.adapter === source.adapter &&
+            item.source_key === source.source_key &&
+            item.wiki_path === source.wiki_path,
+        ),
+    )
+    if (sourceIndex !== -1 && /^[a-f0-9]{64}$/.test(admission.files[0].hash))
+      adoption = {
+        path: admission.files[0].path,
+        hash: admission.files[0].hash,
+        source_index: sourceIndex,
+        approved: false,
+      }
+    if (
+      adoption &&
+      isDeepStrictEqual(state.admission, admission) &&
+      isDeepStrictEqual({ ...state.adoption, approved: false }, adoption)
+    )
+      adoption.approved = state.adoption.approved
+  }
+  state.admission = dirty ? admission : null
+  state.adoption = adoption
+  if (dirty && !adoption?.approved) state.blocker = dirtyAdmission
+  else if (state.blocker === dirtyAdmission) state.blocker = null
 }
 
 async function compactDraft(opts, state, attempt, baseline) {
@@ -378,6 +423,16 @@ export async function runIngestBatch(input, worker) {
     (!Number.isInteger(opts.questionOffset) || opts.questionOffset < 0)
   )
     throw new IngestFault('invalid_question_offset')
+  if (
+    opts.questionOffset !== undefined &&
+    (!opts.batchId || opts.decisionId !== undefined || opts.answer !== undefined)
+  )
+    throw new IngestFault('invalid_question_request')
+  if (
+    (opts.decisionId !== undefined || opts.answer !== undefined) &&
+    (!opts.batchId || !opts.decisionId || !opts.answer)
+  )
+    throw new IngestFault('incomplete_decision')
   opts.scan = () =>
     scanIngestStatus({
       sourceRoot: opts.sourceRoot,
@@ -442,6 +497,22 @@ export async function runIngestBatch(input, worker) {
       if (Buffer.byteLength(bytes) > 64 * 1024 * 1024) throw new IngestFault('control_capacity')
       return writeIngestFile(path.join(directory, 'state.json'), bytes)
     }
+    const recordPublication = (source) => {
+      if (source.phase === 'complete') {
+        source.blocker = null
+        state.adoption = null
+        state.admission = null
+      }
+      // Clear consumed admission in the same durable record as source success,
+      // before source_recorded can be interrupted.
+      return persist()
+    }
+    const reclaimDrafts = async (source) => {
+      for (const attempt of source.attempts)
+        await removeDraft(opts.root, state.batch_id, attempt.id).catch((error) => {
+          if (error.code !== 'ENOENT') throw error
+        })
+    }
     let reportError = null
     const finish = async () => {
       if (state.status === 'cancelled')
@@ -450,6 +521,7 @@ export async function runIngestBatch(input, worker) {
       const fresh = await opts.scan()
       state.summary = fresh.summary
       state.diagnostics = diagnosticsFor(fresh)
+      if (state.status !== 'cancelled') await refreshAdmission(opts, state)
       if (state.status !== 'cancelled' && (state.summary.invalid || state.summary.conflict))
         state.blocker ??= 'provider_or_metadata_diagnostics'
       else if (state.blocker === 'provider_or_metadata_diagnostics') state.blocker = null
@@ -522,9 +594,20 @@ export async function runIngestBatch(input, worker) {
       }
       if (question.source_index === null) {
         if (opts.answer === 'reprocess') {
-          if (!state.adoption || !isDeepStrictEqual(state.admission, await snapshot(opts)))
+          if (
+            !state.adoption ||
+            !question.selection ||
+            !isDeepStrictEqual(state.admission, await snapshot(opts))
+          )
             return finish()
           state.adoption.approved = true
+          const source = state.sources[state.adoption.source_index]
+          Object.assign(source, question.selection)
+          source.approval = {
+            revision: question.selection.source_revision,
+            frontmatter: question.selection.frontmatter,
+            digest: question.source_hash,
+          }
         }
         state.blocker = null
       } else {
@@ -555,39 +638,17 @@ export async function runIngestBatch(input, worker) {
           state.batch_id,
           publishing.publication.attempt,
         )
-        await publishPrepared(opts, publishing, persist, () =>
-          verifyDigest(publishing, opts, publishing.publication.source_hash),
+        await publishPrepared(
+          opts,
+          publishing,
+          () => recordPublication(publishing),
+          () => verifyDigest(publishing, opts, publishing.publication.source_hash),
         )
-        await removeDraft(opts.root, state.batch_id, publishing.publication.attempt)
+        await reclaimDrafts(publishing)
         if (state.status === 'cancelled') return finish()
       }
-      const admission = await snapshot(opts)
-      if (
-        admission.count ||
-        admission.index !== (await git(opts.wikiRoot, ['rev-parse', 'HEAD^{tree}'])).trim()
-      ) {
-        const target = state.sources.find(
-          (source) =>
-            admission.count === 1 &&
-            source.wiki_path === path.join(opts.wikiRoot, admission.files[0].path),
-        )
-        if (!state.adoption?.approved || !isDeepStrictEqual(state.admission, admission)) {
-          state.admission = admission
-          if (
-            target &&
-            admission.files[0].hash &&
-            admission.files[0].hash !== 'unsafe_or_unavailable'
-          )
-            state.adoption = {
-              path: admission.files[0].path,
-              hash: admission.files[0].hash,
-              approved: false,
-            }
-          state.blocker =
-            'dirty_wiki: Änderungen erhalten; gezielt prüfen, niemals pauschal zurücksetzen'
-          return finish()
-        }
-      }
+      await refreshAdmission(opts, state)
+      if (state.admission && !state.adoption?.approved) return finish()
       // A confirmed historical dirty source is freshly processed first, not
       // stamped as success or treated as owned because its path looks familiar.
       const ordered = [...state.sources].sort(
@@ -597,7 +658,7 @@ export async function runIngestBatch(input, worker) {
       )
       let dispatchPause = null
       for (const source of ordered) {
-        if (!['pending', 'running', 'repairing'].includes(source.status)) continue
+        if (!dispatchable.has(source.status)) continue
         if (opts.signal?.aborted) {
           state.status = 'cancelled'
           source.status = 'cancelled'
@@ -743,17 +804,13 @@ export async function runIngestBatch(input, worker) {
             // Source identity/digest are rechecked after durable preparation.
             await verifyDigest(source, opts, sourceHash)
             opts.attemptRoot = attemptRoot
-            await publishPrepared(opts, source, persist, () =>
-              verifyDigest(source, opts, sourceHash),
+            await publishPrepared(
+              opts,
+              source,
+              () => recordPublication(source),
+              () => verifyDigest(source, opts, sourceHash),
             )
-            source.blocker = null
-            state.adoption = null
-            state.admission = null
-            await persist()
-            for (const previous of source.attempts)
-              await removeDraft(opts.root, state.batch_id, previous.id).catch((error) => {
-                if (error.code !== 'ENOENT') throw error
-              })
+            await reclaimDrafts(source)
             break
           } catch (error) {
             if (source.phase === 'complete' && source.commit) {
@@ -801,6 +858,7 @@ export async function runIngestBatch(input, worker) {
               if (
                 [
                   'worker_permission_denied',
+                  'worker_source_truncated',
                   'source_unusable',
                   'source_removed_or_revoked',
                   'source_removed_or_conflicted',

@@ -270,6 +270,84 @@ test('dirty Git prevents admission and preserves foreign work', async (t) => {
   assert.equal(await readFile(file, 'utf8'), 'Foreign work\n')
 })
 
+test('incomplete decision/pagination inputs cannot create or process a batch', async (t) => {
+  const f = await fixture(t, 1)
+  for (const input of [
+    { questionOffset: 0 },
+    { answer: 'retry' },
+    { decisionId: 'missing' },
+    { decisionId: 'missing', answer: 'retry' },
+    { batchId: 'batch-1-aaaaaaaaaaaa', questionOffset: 0, decisionId: 'missing', answer: 'retry' },
+  ])
+    await assert.rejects(
+      runIngestBatch({ ...f.opts, ...input }, () => assert.fail('invalid input started worker')),
+      /incomplete_decision|invalid_question_request/,
+    )
+  await assert.rejects(readFile(path.join(f.opts.root, 'active.json')), { code: 'ENOENT' })
+  assert.equal(await f.git('rev-list', '--count', 'HEAD'), '1')
+})
+
+test('dirty admission never offers adoption of a nondispatchable source', async (t) => {
+  for (const choice of ['defer', 'unresolved', 'awaiting_user', 'ingested'])
+    await t.test(choice, async (t) => {
+      const f = await fixture(t, 2)
+      const paused = await runIngestBatch({ ...f.opts, maxAttempts: 1 }, async (batch) =>
+        choice === 'ingested' && batch.sources[0].source_key === 'note-0.md'
+          ? f.worker(batch)
+          : { source_written: false },
+      )
+      if (['defer', 'unresolved'].includes(choice))
+        await answer(f, paused, paused.questions[0], choice, () => assert.fail())
+      const file = path.join(f.opts.wikiRoot, 'sources/webdav/note-0.md')
+      await writeFile(file, '# Foreign historical change\n')
+      const inspected = await runIngestBatch(f.opts, () => assert.fail())
+      const result = await answer(
+        f,
+        inspected,
+        inspected.questions.find((question) => question.source_index === null),
+        'retry',
+        () => assert.fail('dirty admission must precede workers'),
+      )
+      const global = result.questions.find((question) => question.source_index === null)
+      assert.ok(global)
+      assert.ok(!global.options.includes('reprocess'))
+      assert.equal(await readFile(file, 'utf8'), '# Foreign historical change\n')
+    })
+})
+
+test('dirty questions refresh their adoption when the dirty page is removed or replaced', async (t) => {
+  for (const kind of ['removed', 'replaced'])
+    await t.test(kind, async (t) => {
+      const f = await fixture(t, 2)
+      const first = path.join(f.opts.wikiRoot, 'sources/webdav/note-0.md')
+      await writeFile(first, '# Historical draft\n')
+      const paused = await runIngestBatch(f.opts, () => assert.fail())
+      await rm(first)
+      const second = path.join(f.opts.wikiRoot, 'sources/webdav/note-1.md')
+      if (kind === 'replaced') await writeFile(second, '# Replacement draft\n')
+      const refreshed = await answer(f, paused, paused.questions[0], 'reprocess', () =>
+        assert.fail('stale decision must not dispatch'),
+      )
+      assert.notEqual(refreshed.questions[0].id, paused.questions[0].id)
+      assert.equal(refreshed.questions[0].options.includes('reprocess'), kind === 'replaced')
+      if (kind === 'replaced') assert.equal(refreshed.questions[0].target.wiki_path, second)
+      const calls = []
+      const done = await answer(
+        f,
+        refreshed,
+        refreshed.questions[0],
+        kind === 'replaced' ? 'reprocess' : 'retry',
+        async (batch) => {
+          calls.push(batch.sources[0].source_key)
+          return f.worker(batch)
+        },
+      )
+      assert.equal(done.status, 'done', done.blocker)
+      assert.equal(done.ingested, 2)
+      assert.equal(calls[0], kind === 'replaced' ? 'note-1.md' : 'note-0.md')
+    })
+})
+
 test('invalid drafts remain private; foreign live changes stop publication without overwrite', async (t) => {
   for (const kind of [
     'worker',
@@ -1146,6 +1224,150 @@ test('historical dirty source needs a bound approval and fresh processing, not r
   assert.equal(result.status, 'done', result.blocker)
   assert.equal(result.ingested, 2)
   assert.match(await readFile(page, 'utf8'), /source_revision/)
+})
+
+test('dirty Paperless adoption displays and binds exact source bytes across approval', async (t) => {
+  const f = await fixture(t, 0)
+  const directory = path.join(f.opts.sourceRoot, 'paperless')
+  await mkdir(directory)
+  await mkdir(path.join(f.opts.wikiRoot, 'sources/paperless'))
+  const fields = {
+    paperless_id: '1',
+    paperless_url: 'https://paperless.invalid/documents/1/',
+    source_revision: 'b'.repeat(64),
+  }
+  const original = `---\n${Object.entries(fields)
+    .map(([k, v]) => `${k}: ${JSON.stringify(v)}`)
+    .join('\n')}\n---\nOriginal fact.\n`
+  const item = {
+    source_key: '1',
+    source_path: '1.md',
+    wiki_path: 'paperless/1.md',
+    source_revision: fields.source_revision,
+    source_sha256: sha(original),
+    frontmatter: fields,
+    claim: { paperless_id: '1' },
+  }
+  const manifest = { ...f.manifest, source: 'paperless', wiki_root: 'paperless', items: [item] }
+  const publish = () => writeFile(path.join(directory, 'manifest.json'), JSON.stringify(manifest))
+  await writeFile(path.join(directory, '1.md'), original)
+  await publish()
+  const page = path.join(f.opts.wikiRoot, 'sources/paperless/1.md')
+  await writeFile(page, '# Historical draft\n')
+  const paused = await runIngestBatch(f.opts, () => assert.fail())
+  const fresh = await answer(
+    f,
+    paused,
+    paused.questions[0],
+    'reprocess',
+    () => assert.fail('changed bytes'),
+    {
+      authorize: async () => {
+        const changed = original.replace('Original', 'Changed')
+        await writeFile(path.join(directory, '1.md'), changed)
+        item.source_sha256 = sha(changed)
+        await publish()
+      },
+    },
+  )
+  assert.equal(fresh.status, 'paused')
+  assert.notEqual(fresh.questions[0].id, paused.questions[0].id)
+  assert.equal(fresh.questions[0].target.wiki_path, page)
+  assert.equal(fresh.questions[0].target.source_revision, fields.source_revision)
+  const done = await answer(f, fresh, fresh.questions[0], 'reprocess')
+  assert.equal(done.status, 'done', done.blocker)
+  assert.equal(done.ingested, 1)
+})
+
+test('recovered adoption is consumed durably and later sources continue', async (t) => {
+  for (const phase of ['file_installed', 'source_recorded'])
+    await t.test(phase, async (t) => {
+      const f = await fixture(t, 2)
+      await writeFile(
+        path.join(f.opts.wikiRoot, 'sources/webdav/note-0.md'),
+        '# Historical draft\n',
+      )
+      const paused = await runIngestBatch(f.opts, () => assert.fail())
+      const config = path.join(f.opts.root, '../opts.json')
+      await writeFile(
+        config,
+        JSON.stringify({
+          ...f.opts,
+          batchId: paused.batch_id,
+          decisionId: paused.questions[0].id,
+          answer: 'reprocess',
+        }),
+      )
+      await assert.rejects(
+        exec(process.execPath, ['tests/fixtures/ingest-crash.mjs', config, phase, '1']),
+        (error) => error.signal === 'SIGKILL',
+      )
+      const inspected = await runIngestBatch(f.opts, () => assert.fail('inspect only'))
+      const done = await answer(f, inspected, inspected.questions[0], 'retry', async (batch) => {
+        assert.equal(batch.sources[0].source_key, 'note-1.md')
+        return f.worker(batch)
+      })
+      assert.equal(done.status, 'done', done.blocker)
+      assert.equal(done.ingested, 2)
+      assert.equal(await f.git('status', '--porcelain'), '')
+      assert.equal(await f.git('rev-list', '--count', 'HEAD'), '3')
+    })
+})
+
+test('fully installed recovery tolerates a manually removed draft', async (t) => {
+  const f = await fixture(t, 1)
+  const paused = await runIngestBatch(
+    {
+      ...f.opts,
+      onPhase: (phase) => {
+        if (phase === 'commit_installed') throw new Error('Synthetic interruption')
+      },
+    },
+    f.worker,
+  )
+  await rm(path.join(f.opts.root, 'drafts', paused.batch_id), { recursive: true })
+  const inspected = await runIngestBatch(f.opts, () => assert.fail())
+  const done = await answer(f, inspected, inspected.questions[0], 'retry', () => assert.fail())
+  assert.equal(done.status, 'done', done.blocker)
+  assert.equal(done.questions.length, 0)
+  assert.equal(done.ingested, 1)
+  assert.equal(await f.git('rev-list', '--count', 'HEAD'), '2')
+})
+
+test('native long-line truncation pauses as an extraction limit, never certifies a full read', async (t) => {
+  const f = await fixture(t, 1)
+  let calls = 0
+  const result = await runIngestBatch(f.opts, async (batch) => {
+    calls++
+    await f.worker(batch)
+    const source = batch.sources[0]
+    const read = nativeTool('read', { path: source.source_path })
+    // OpenCode 2.1.2 native output for a minified single-line HTML source.
+    read.content[0].state.content = [
+      {
+        type: 'text',
+        text: `1: <html>${'x'.repeat(1994)} (line truncated to 2000 chars)\n\n(End of file - total 1 lines)`,
+      },
+    ]
+    const evidence = workerEvidence(
+      [
+        nativeTool('skill', { id: 'wiki-ingest' }),
+        read,
+        nativeTool('write', { path: source.wiki_path }),
+      ],
+      source.wiki_path,
+      'succeeded',
+      { sourcePath: source.source_path, sourceLines: 1 },
+    )
+    assert.equal(evidence.source_read, false)
+    return evidence
+  })
+  assert.equal(calls, 1)
+  assert.equal(result.status, 'paused')
+  assert.equal(result.questions[0].reason, 'worker_source_truncated')
+  assert.equal(result.ingested, 0)
+  assert.equal(await f.git('status', '--porcelain'), '')
+  assert.equal(await f.git('rev-list', '--count', 'HEAD'), '1')
 })
 
 test('revocation during file installation blocks the commit and retains the recovery checkpoint', async (t) => {
