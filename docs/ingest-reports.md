@@ -134,12 +134,14 @@ the batch tool to `build`. No automatic reconciliation or permission expansion
 is performed; denied worker actions still require a configuration fix or an
 explicitly authorized continuation.
 
-An unchanged dirty retry preserves the same decision ID. Do not recommend
+An unchanged technical-blocker retry preserves the same decision ID. Do not recommend
 another retry until the technical state changes. Deliver already confirmed
 source decisions such as defer before a global retry; re-read questions after
 each answer and obtain fresh confirmation for changed IDs or proposals.
 Approval of an exact historical dirty page survives a failed private worker,
-so its source can be retried without losing admission. Changing the dirty
+so its source can be retried without losing admission. While that admission is
+retained, only its source may dispatch; independent sources wait until its
+publication consumes admission. Changing the dirty
 snapshot, deferring the source or marking it unresolved revokes that admission;
 the live page is never reset or silently adopted. Metadata errors on this exact
 approved page belong to its source repair, not a second global blocker;

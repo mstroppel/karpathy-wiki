@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { rm } from 'node:fs/promises'
+import { lstat, realpath, rm } from 'node:fs/promises'
 import path from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import {
@@ -170,6 +170,20 @@ function checkState(state, opts) {
     )
       throw new IngestFault('invalid_batch_state')
   }
+}
+
+async function loadActiveState(opts) {
+  const bytes = await fileBytes(path.join(opts.root, 'active.json'), opts.root, { absent: true })
+  const active = bytes === null ? null : JSON.parse(bytes)
+  if (active === null || active.batch_id === null) return null
+  if (!batchPattern.test(active.batch_id)) throw new IngestFault('invalid_active_batch')
+  const state = await jsonFile(
+    path.join(opts.root, 'batches', active.batch_id, 'state.json'),
+    opts.root,
+  )
+  checkState(state, opts)
+  if (state.batch_id !== active.batch_id) throw new IngestFault('invalid_batch_state')
+  return state
 }
 
 async function snapshot(opts) {
@@ -425,27 +439,23 @@ export async function inspectIngestBatch(input = {}) {
   const offset = opts.offset ?? 0
   if (!Number.isInteger(offset) || offset < 0) throw new IngestFault('invalid_diagnostic_offset')
   try {
-    const pointer = await fileBytes(path.join(opts.root, 'active.json'), opts.root, {
-      absent: true,
-    })
-    const active = pointer === null ? null : JSON.parse(pointer)
-    if (!active?.batch_id) return { status: 'idle', batch_id: null }
-    if (!batchPattern.test(active.batch_id)) throw new IngestFault('invalid_active_batch')
-    const state = await jsonFile(
-      path.join(opts.root, 'batches', active.batch_id, 'state.json'),
-      opts.root,
-    )
-    checkState(state, opts)
-    if (state.batch_id !== active.batch_id) throw new IngestFault('invalid_batch_state')
+    const state = await loadActiveState(opts)
+    if (!state) return { status: 'idle', batch_id: null }
     const paths = await dirtyPaths(opts.wikiRoot)
     const report = path.join(opts.root, 'batches', state.batch_id, 'report.md')
-    const reportExists = await fileBytes(report, opts.root, { absent: true })
+    let reportExists = false
+    try {
+      const info = await lstat(report)
+      reportExists = info.isFile() && info.nlink === 1 && (await realpath(report)) === report
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error
+    }
     return {
       status: state.status,
       batch_id: state.batch_id,
       owner_session: state.owner_session,
       blocker: state.blocker ?? null,
-      report_path: reportExists === null ? null : report,
+      report_path: reportExists ? report : null,
       observation: 'non_atomic_read_only',
       dirty_paths: paths.slice(0, 100),
       dirty_count: paths.length,
@@ -463,7 +473,7 @@ export async function inspectIngestBatch(input = {}) {
       continuation: 'original_session_only',
     }
   } catch (error) {
-    throw new IngestFault(reason(error))
+    throw new IngestFault(error instanceof IngestFault ? error.code : 'diagnostic_failed')
   }
 }
 
@@ -505,20 +515,13 @@ export async function runIngestBatch(input, worker) {
   return withIngestLock(path.join(opts.wikiRoot, '.git/wiki-ingest-publication.lock'), async () => {
     await safeDirectory(opts.root)
     const activePath = path.join(opts.root, 'active.json')
-    const activeBytes = await fileBytes(activePath, opts.root, { absent: true })
-    const pointer = activeBytes === null ? null : JSON.parse(activeBytes)
-    const active = pointer?.batch_id === null ? null : pointer
-    if (active && !batchPattern.test(active.batch_id)) throw new IngestFault('invalid_active_batch')
+    const active = await loadActiveState(opts)
     if (opts.batchId && (!batchPattern.test(opts.batchId) || active?.batch_id !== opts.batchId))
       throw new IngestFault('batch_not_active')
     const status = await opts.scan()
     let state
     if (active) {
-      state = await jsonFile(
-        path.join(opts.root, 'batches', active.batch_id, 'state.json'),
-        opts.root,
-      )
-      checkState(state, opts)
+      state = active
     } else {
       if (opts.batchId) throw new IngestFault('batch_not_active')
       const selection = pending(status).filter(
@@ -699,9 +702,17 @@ export async function runIngestBatch(input, worker) {
         source.status =
           opts.answer === 'retry' ? 'pending' : opts.answer === 'defer' ? 'deferred' : 'unresolved'
         if (opts.answer === 'retry') source.blocker = null
+        if (
+          opts.answer === 'retry' &&
+          ['continuation_available', 'provider_or_metadata_diagnostics'].includes(state.blocker)
+        )
+          state.blocker = null
         if (opts.answer === 'retry' && question.selection) applyApprovedSelection(source, question)
       }
-      state.questions = state.questions.filter((item) => item.id !== question.id)
+      // A global retry may observe the same technical blocker again. Keep its
+      // old binding available to finish(); only a real change earns a new ID.
+      if (question.source_index !== null || opts.answer !== 'retry')
+        state.questions = state.questions.filter((item) => item.id !== question.id)
       await persist()
       if (state.blocker || ['defer', 'unresolved'].includes(opts.answer)) return finish()
     }
@@ -735,6 +746,7 @@ export async function runIngestBatch(input, worker) {
       )
       let dispatchPause = null
       for (const source of ordered) {
+        if (state.adoption && source !== state.sources[state.adoption.source_index]) continue
         if (!dispatchable.has(source.status)) continue
         if (opts.signal?.aborted) {
           state.status = 'cancelled'
@@ -783,7 +795,11 @@ export async function runIngestBatch(input, worker) {
                 (item) => item.path === source.wiki_path || item.source_key === source.source_key,
               )
             )
-              if (!state.adoption?.approved) throw new IngestFault('invalid_source_metadata')
+              if (
+                !state.adoption?.approved ||
+                source !== state.sources[state.adoption.source_index]
+              )
+                throw new IngestFault('invalid_source_metadata')
             if (
               source.approval &&
               (selected.source_revision !== source.approval.revision ||

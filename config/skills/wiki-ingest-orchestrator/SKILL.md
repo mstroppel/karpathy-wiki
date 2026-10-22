@@ -1,6 +1,6 @@
 ---
 name: wiki-ingest-orchestrator
-description: Startet ausdrückliche Ingest-Aufträge und setzt deren gebundene Rückfragen nach Nutzerentscheidung fort.
+description: Startet ausdrückliche Ingest-Aufträge, diagnostiziert technische Pausen und setzt gebundene Rückfragen nach Nutzerentscheidung fort.
 ---
 
 # Quellen einlesen
