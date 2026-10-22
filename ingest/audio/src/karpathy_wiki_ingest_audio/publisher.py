@@ -1034,6 +1034,7 @@ def run(once: bool) -> None:
                     incoming,
                     os.environ["WEBDAV_PATH"],
                     timeout_seconds=environment.sync_timeout,
+                    limits=limits,
                 )
                 source_ids = load_mapping(mapping)
                 changed, failed, degraded = process_cycle(

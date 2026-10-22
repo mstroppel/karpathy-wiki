@@ -31,7 +31,7 @@ selected WebDAV folder (audio extensions only)
    Add an opt-in `audio` profile. Its WebDAV connector uses the existing
    WebDAV credentials but keeps its own private raw-audio directory; it does
    not change the Markdown-only WebDAV provider or publish raw files under
-   `sources/`. Sync a complete inventory to a private snapshot before making
+   `sources/`. Sync only supported audio files to a private snapshot before making
    it available to the worker. The worker reads immutable snapshots rather
    than files while rclone is updating them. Set format, size and duration
    limits and reject unsupported/corrupt files with content-free errors.

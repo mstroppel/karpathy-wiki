@@ -34,6 +34,7 @@ from karpathy_wiki_ingest.manifest import (
     build_manifest,
     write_manifest,
 )
+from karpathy_wiki_ingest.rclone import has_supported_suffix, suffix_filter_args
 from karpathy_wiki_ingest.shared import (
     TargetedAnonymizer,
     atomic_write,
@@ -67,6 +68,7 @@ GENERATIONS_DIRECTORY = "generations"
 ACTIVE_SYMLINK = "current"
 GENERATION_METADATA_FILENAME = ".generation.json"
 STAGING_PREFIX = ".staging-"
+SYNCED_SUFFIXES = {".md", ".html", ".htm", ".xlsx"}
 
 
 @dataclass(frozen=True)
@@ -103,10 +105,11 @@ class GenerationItem:
 
 def source_files(incoming: Path) -> set[Path]:
     """Select text sources and spreadsheets (unsupported Excel formats fail explicitly)."""
+    # Retain already-local unsupported spreadsheets as explicit rejection candidates.
     return {
         path.relative_to(incoming)
         for path in incoming.rglob("*")
-        if path.is_file() and path.suffix.lower() in {".md", ".html", ".htm"} | SPREADSHEET_SUFFIXES
+        if path.is_file() and has_supported_suffix(path, SYNCED_SUFFIXES | SPREADSHEET_SUFFIXES)
     }
 
 
@@ -705,6 +708,7 @@ def synchronize(incoming: Path, path: str) -> None:
             "sync",
             f"webdav:{path}",
             str(incoming),
+            *suffix_filter_args(SYNCED_SUFFIXES),
             "--create-empty-src-dirs",
             "--retries",
             "3",
