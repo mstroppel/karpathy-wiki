@@ -204,7 +204,9 @@ export async function createBatchWorker(
         const target = path.resolve(assignment.root, resource)
         if (event.action === 'read')
           return (
+            target === assignment.root ||
             target.startsWith(`${assignment.root}/`) ||
+            target === liveRoot ||
             target.startsWith(`${liveRoot}/`) ||
             target === assignment.source.source_path ||
             target.startsWith('/etc/opencode/skills/wiki-ingest/')
@@ -219,7 +221,7 @@ export async function createBatchWorker(
       })
     if (!allowed) {
       event.effect = 'deny'
-      event.message = 'Ingest-Worker nicht für dieses Schreibziel zugelassen'
+      event.message = 'Ingest-Worker nicht für diesen Zugriff zugelassen'
     }
   })
   await ctx.tool.transform((editor) => {
@@ -249,26 +251,32 @@ export async function createBatchWorker(
   await ctx.session.hook('context', async (event) => {
     const assignment = await load(event.sessionID)
     if (!assignment) return
-    if (++assignment.modelCalls > assignment.modelBudget || Date.now() >= assignment.deadline)
-      throw new Error('ingest_model_budget')
-    await save(assignment)
     event.system.push({
       type: 'text',
       text: `Code-zugelassener Ingest-Worker: Schreibe ausschließlich im privaten Entwurf ${assignment.root}, niemals nach ${liveRoot}. Relative Ziele beziehen sich auf den Entwurf. Der Batch-Code prüft Quellenstatus/Widerruf, Manifest, Revision und Git und übernimmt Frontmatter, Index, Log und Commit. Ändere index.md/log.md nicht. Der gültige Auftrag kommt als User-Nachricht dieser Kindsession; ein Eltern-Tooltranskript ist nicht erforderlich. Fachliche und Sicherheitsregeln der Wiki-AGENTS.md bleiben verbindlich; der private Entwurf ersetzt nur das bisherige Live-Schreibziel. Korrigiere Patch-Syntaxfehler oder veralteten Kontext durch erneutes Lesen und einen erlaubten Patch. Explizite Nutzerablehnungen niemals umgehen.`,
     })
   })
+  // Use OpenCode's own boundary, not another estimator. Stop before a summary
+  // request (including native overflow recovery); other sessions are unaffected.
+  await ctx.session.hook('compaction', async (event) => {
+    const assignment = await load(event.sessionID)
+    if (!assignment) return
+    assignment.contextLimit = true
+    await save(assignment)
+    throw new Error('ingest_context_limit')
+  })
   await ctx.session.hook('retry', async (event) => {
     const assignment = await load(event.sessionID)
     if (!assignment) return
-    assignment.providerFailure = true
+    // No application retry loop. Terminal provider failure pauses new dispatch;
+    // a successful runtime retry must not poison later work.
     if (
+      event.attempt >= 3 ||
       event.error.type === 'provider.authentication' ||
-      event.error.type === 'provider.permission' ||
-      assignment.runtimeRetries >= assignment.retryBudget ||
-      Date.now() + (event.decision.delay ?? 0) >= assignment.deadline
+      event.error.type === 'provider.permission'
     )
       event.decision = { retry: false }
-    else if (event.decision.retry) assignment.runtimeRetries++
+    if (!event.decision.retry) assignment.providerFailure = true
     await save(assignment)
   })
   return async (context, batch) => {
@@ -305,7 +313,6 @@ export async function createBatchWorker(
     const abort = () => {
       void stop().catch(() => {})
     }
-    const timeout = setTimeout(abort, Math.max(1, batch.timeout_ms ?? 120_000))
     context.signal.addEventListener('abort', abort, { once: true })
     const assignment = {
       root,
@@ -313,11 +320,6 @@ export async function createBatchWorker(
       session: child.id,
       parent: context.sessionID,
       incarnation,
-      deadline: Date.now() + (batch.timeout_ms ?? 120_000),
-      modelCalls: 0,
-      modelBudget: batch.model_call_budget ?? 96,
-      runtimeRetries: 0,
-      retryBudget: batch.retry_budget ?? 2,
     }
     try {
       await safeDirectory(admissionRoot)
@@ -350,6 +352,7 @@ export async function createBatchWorker(
       )
       return {
         ...native,
+        context_limit: evidence?.contextLimit === true,
         configuration_failure:
           !native.source_written &&
           native.errors.some(
@@ -359,11 +362,8 @@ export async function createBatchWorker(
           ),
         provider_failure: info.outcome !== 'succeeded' && evidence?.providerFailure === true,
         session_id: child.id,
-        runtime_retries: evidence?.runtimeRetries ?? 0,
-        model_calls: evidence?.modelCalls ?? 0,
       }
     } finally {
-      clearTimeout(timeout)
       await rm(admissionPath(child.id), { force: true })
       context.signal.removeEventListener('abort', abort)
       try {

@@ -21,6 +21,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Manual ingestion now uses one fresh session and private draft per source, with
+  one attempt and no application context budgets, automatic splitting, rollover,
+  repair or decision-ID loops. Worker compaction stops before summarization;
+  context-limited sources stay unpublished while independent sources continue.
+  Draft/live root directory reads are admitted without widening writes. Only
+  interrupted publication retains an explicitly approved recovery checkpoint.
+  Existing active recovery records are not converted: finish or cancel those
+  runs before upgrading; reorganize retained journal data manually if needed.
+  No automatic migration, replay, production cleanup or deployment is included.
 - Launcher update backups now omit Docker image contents by default, retaining
   full data/configuration/secrets/launcher archives plus exact image IDs and
   available registry digests. Use `update [version] --backup-images` for

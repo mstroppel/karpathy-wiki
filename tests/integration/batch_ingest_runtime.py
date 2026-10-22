@@ -20,6 +20,8 @@ TARGET = ""
 MUTATION = "write"
 ACTION: dict = {}
 ERRORS: list[str] = []
+SUMMARY_REQUESTS: list[str] = []
+CONTEXT_FAILURES: list[str] = []
 RESULT = "Synthetic finding, source line 1. Contradictions: none. Limits: fully read line 1."
 
 
@@ -46,7 +48,9 @@ def worker_calls(batch):
                     "edit",
                     {
                         "path": TARGET,
-                        "oldString": file.read_text().splitlines()[0],
+                        "oldString": file.read_text().splitlines()[0]
+                        if file.is_file()
+                        else "# Protected synthetic page",
                         "newString": "Forbidden",
                     },
                 )
@@ -66,7 +70,7 @@ def worker_calls(batch):
             ]
         return [("write", {"path": TARGET, "content": "Forbidden\n"})]
     if MODE in ("patch", "mixed", "syntax"):
-        calls = []
+        calls: list[tuple[str, dict]] = []
         if MODE == "mixed":
             calls.append(
                 (
@@ -95,9 +99,15 @@ def worker_calls(batch):
             calls.append(patch(target, "# Patched finding", "# Finding"))
         return calls
     calls = [
+        ("read", {"path": str(root)}),
+        ("read", {"path": str(WIKI)}),
         ("read", {"path": source}),
         ("write", {"path": source, "content": "# Finding\nSource line 1.\n"}),
     ]
+    if MODE == "pagination":
+        calls.insert(
+            0, ("read", {"path": batch["sources"][0]["source_path"], "offset": 2, "limit": 2})
+        )
     if MODE == "partial":
         return calls + [
             ("write", {"path": "/knowledge/wiki/overview.md", "content": "Forbidden live write\n"})
@@ -140,6 +150,27 @@ class Model(BaseHTTPRequestHandler):
                     batch = json.loads(text.split("Batchdaten:\n", 1)[1])
         tools = {tool["function"]["name"]: tool["function"] for tool in body.get("tools", [])}
         history = [message for message in messages if message.get("role") == "tool"]
+        summarizing = any("<template>" in str(message.get("content")) for message in messages)
+        if summarizing:
+            SUMMARY_REQUESTS.append(MODE)
+        limited = batch and batch["sources"][0]["source_key"] == "notes.md"
+        if MODE == "context-provider" and limited and len(history) >= 7:
+            assert batch is not None
+            CONTEXT_FAILURES.append(batch["wiki_root"])
+            self.send_response(400)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(
+                json.dumps(
+                    {
+                        "error": {
+                            "code": "context_length_exceeded",
+                            "message": "maximum context length exceeded",
+                        }
+                    }
+                ).encode()
+            )
+            return
         if not batch:
             last_user = max(
                 (i for i, message in enumerate(messages) if message.get("role") == "user"),
@@ -149,8 +180,14 @@ class Model(BaseHTTPRequestHandler):
                 message for message in messages[last_user + 1 :] if message.get("role") == "tool"
             ]
         call = None
-        content = RESULT
-        if not tools:
+        content = (
+            "## Objective\n- Synthetic diagnosis\n\n## Important Details\n- No edits\n\n"
+            "## Work State\n### Completed\n- Diagnosis\n### Active\n- (none)\n"
+            "### Blocked\n- (none)\n\n## Next Move\n1. (none)\n\n## Relevant Files\n- (none)"
+            if summarizing
+            else RESULT
+        )
+        if MODE == "ordinary-compaction" or summarizing or not tools:
             pass
         elif MODE == "diagnose":
             assert not batch
@@ -171,6 +208,8 @@ class Model(BaseHTTPRequestHandler):
             call = ("read", {"path": "/knowledge/wiki/AGENTS.md"})
         elif len(history) == 2:
             call = ("read", {"path": batch["sources"][0]["source_path"]})
+            if MODE == "pagination":
+                call[1]["limit"] = 1
         else:
             calls = worker_calls(batch)
             step = len(history) - 3
@@ -184,7 +223,8 @@ class Model(BaseHTTPRequestHandler):
                 props = tools[name]["parameters"]["properties"]
                 candidates = ("path", "filePath", "file_path") if name == "read" else ("id", "name")
                 key = next(key for key in candidates if key in props)
-                args = {key: next(iter(args.values()))}
+                value = args.pop("path" if name == "read" else "id")
+                args = {**args, key: value}
             delta = {
                 "role": "assistant",
                 "tool_calls": [
@@ -213,7 +253,13 @@ class Model(BaseHTTPRequestHandler):
             {
                 **base,
                 "choices": [{"index": 0, "delta": {}, "finish_reason": finish}],
-                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                "usage": {
+                    "prompt_tokens": 127000
+                    if MODE == "context-auto" and limited and len(history) >= 6
+                    else 1,
+                    "completion_tokens": 1,
+                    "total_tokens": 2,
+                },
             },
         ):
             self.wfile.write(f"data: {json.dumps(chunk)}\n\n".encode())
@@ -232,7 +278,7 @@ def request(route, data=None):
         return json.loads(raw) if raw else None
 
 
-def run(sid=None, approval=False):
+def run(sid=None):
     if sid is None:
         sid = request(
             "/api/session",
@@ -248,18 +294,6 @@ def run(sid=None, approval=False):
             },
         )["data"]["id"]
     request(f"/api/session/{sid}/prompt", {"text": "Run synthetic action"})
-    if approval:
-        for _ in range(100):
-            pending = request(f"/api/session/{sid}/permission")["data"]
-            if pending:
-                assert len(pending) == 1, pending
-                item = pending[0]
-                assert item["action"] == "ingest_decision", item
-                request(f"/api/session/{sid}/permission/{item['id']}/reply", {"decision": "once"})
-                break
-            time.sleep(0.1)
-        else:
-            raise AssertionError("Bound decision did not ask for approval")
     request(f"/api/experimental/session/{sid}/wait", {})
     states = list(JOURNAL.glob("batches/*/state.json"))
     state = json.loads(max(states, key=lambda file: file.stat().st_mtime_ns).read_text())
@@ -307,7 +341,7 @@ def main():
         ("commit", "-qm", "baseline"),
     ]:
         subprocess.run(["git", "-C", str(WIKI), *args], check=True)
-    manifest = {
+    manifest: dict = {
         "contract": "karpathy-wiki-provider-manifest",
         "version": 1,
         "source": "webdav",
@@ -399,11 +433,11 @@ def main():
                     ]
                     raise AssertionError((mode, state, failures))
             # An allowed source write followed by a forbidden live write stays
-            # private. A bound answer in the same chat then completes it.
+            # private. A new explicit request starts a fresh interpretation.
             change_source()
             MODE = "partial"
             sid, state = run()
-            assert state["status"] == "paused", state
+            assert state["status"] == "partial", state
             before = (WIKI / "sources/webdav/notes.md").read_bytes()
             # A fresh build chat can inspect an existing batch, but cannot
             # resume it or mutate its state by loading an orchestrator skill.
@@ -429,17 +463,12 @@ def main():
                 if part["type"] == "tool" and part["name"] == "wiki_ingest_diagnostics"
             ]
             assert len(observations) == 1, observations
-            assert observations[0]["owner_session"] == sid, observations
-            assert observations[0]["sources"][0]["worker_errors"], observations
-            question = next(item for item in state["questions"] if item["source_index"] == 0)
-            ACTION = {
-                "batch_id": state["batch_id"],
-                "decision_id": question["id"],
-                "answer": "retry",
-            }
+            assert observations[0]["status"] == "idle", observations
+            failed_worker = state["sources"][0]["worker_session"]
             MODE = "normal"
-            _, state = run(sid, approval=True)
+            _, state = run(sid)
             assert state["status"] == "done", state
+            assert state["sources"][0]["worker_session"] != failed_worker
             assert (WIKI / "sources/webdav/notes.md").read_bytes() != before
             # The pinned native read tool shortens long lines, even at EOF.
             # Successful writes/model prose must not turn that into full coverage.
@@ -448,9 +477,9 @@ def main():
             before = (WIKI / "sources/webdav/notes.md").read_bytes()
             sid, state = run()
             source = state["sources"][0]
-            assert state["status"] == "paused" and source["blocker"] == "worker_source_truncated", (
-                state
-            )
+            assert (
+                state["status"] == "partial" and source["blocker"] == "worker_source_truncated"
+            ), state
             assert len(source["attempts"]) == 1 and not source["commit"], source
             native = request(f"/api/experimental/session/{source['worker_session']}/export")["data"]
             reads = [
@@ -467,13 +496,76 @@ def main():
                 reads
             )
             assert (WIKI / "sources/webdav/notes.md").read_bytes() == before
-            ACTION = {
-                "batch_id": state["batch_id"],
-                "decision_id": state["questions"][0]["id"],
-                "answer": "cancel",
-            }
-            _, state = run(sid, approval=True)
-            assert state["status"] == "cancelled", state
+            change_source("Synthetic line 1\nSynthetic line 2\nSynthetic line 3\n")
+            MODE = "pagination"
+            _, state = run()
+            assert state["status"] == "done", state
+            # Native automatic threshold and actual provider overflow both stop
+            # after an allowed write, publish nothing, and admit independent work.
+            for mode in ("context-auto", "context-provider"):
+                change_source()
+                before = (WIKI / "sources/webdav/notes.md").read_bytes()
+                independent = "Synthetic independent source\n"
+                (SOURCE / "independent.md").write_text(independent)
+                revision = hashlib.sha256(independent.encode()).hexdigest()
+                manifest["items"].append(
+                    {
+                        "source_key": "independent.md",
+                        "source_path": "independent.md",
+                        "wiki_path": "webdav/independent.md",
+                        "source_revision": revision,
+                        "frontmatter": {
+                            "source": "webdav",
+                            "source_path": "independent.md",
+                            "source_revision": revision,
+                        },
+                        "claim": {"source": "webdav", "source_path": "independent.md"},
+                    }
+                )
+                # Make the independent page outdated for the second round too.
+                independent += mode + "\n"
+                (SOURCE / "independent.md").write_text(independent)
+                revision = hashlib.sha256(independent.encode()).hexdigest()
+                manifest["items"][-1]["source_revision"] = revision
+                manifest["items"][-1]["frontmatter"]["source_revision"] = revision
+                (SOURCE / "manifest.json").write_text(json.dumps(manifest))
+                MODE, ACTION = mode, {}
+                _, state = run()
+                limited = next(
+                    source for source in state["sources"] if source["source_key"] == "notes.md"
+                )
+                assert state["status"] == "partial", state
+                assert limited["blocker"] == "source_context_limit", state
+                assert limited["source_written"] and not limited["commit"], limited
+                assert len(limited["attempts"]) == 1
+                if mode == "context-provider":
+                    assert len(CONTEXT_FAILURES) == 1, CONTEXT_FAILURES
+                assert next(
+                    source
+                    for source in state["sources"]
+                    if source["source_key"] == "independent.md"
+                )["commit"]
+                assert (WIKI / "sources/webdav/notes.md").read_bytes() == before
+                native = request(f"/api/experimental/session/{limited['worker_session']}/export")[
+                    "data"
+                ]
+                assert any(
+                    message["type"] == "idle"
+                    and message.get("error", {}).get("message") == "ingest_context_limit"
+                    for message in native["messages"]
+                ), native
+                assert not any(message["type"] == "compaction" for message in native["messages"])
+                assert not SUMMARY_REQUESTS, SUMMARY_REQUESTS
+            # The same hook must leave ordinary chat compaction functional.
+            MODE = "ordinary-compaction"
+            request(f"/api/session/{diagnostic_sid}/compact", {})
+            request(f"/api/experimental/session/{diagnostic_sid}/wait", {})
+            native = request(f"/api/experimental/session/{diagnostic_sid}/export")["data"]
+            assert any(
+                message["type"] == "compaction" and message["status"] == "completed"
+                for message in native["messages"]
+            ), native
+            ACTION = {"source_path": str(SOURCE / "notes.md")}
             forbidden = [
                 "AGENTS.md",
                 "log.md",
@@ -493,27 +585,19 @@ def main():
                         for name in forbidden
                     }
                     sid, state = run()
-                    assert state["status"] == "paused", (mutation, target, state)
+                    assert state["status"] in ("partial", "blocked"), (mutation, target, state)
                     assert not state["sources"][0]["commit"], state
                     for name, original in protected.items():
                         assert (
                             Path(name) if Path(name).is_absolute() else WIKI / name
                         ).read_bytes() == original, (mutation, target)
-                    question = state["questions"][0]
-                    ACTION = {
-                        "batch_id": state["batch_id"],
-                        "decision_id": question["id"],
-                        "answer": "cancel",
-                    }
-                    _, state = run(sid, approval=True)
-                    assert state["status"] == "cancelled", state
             assert not subprocess.check_output(
                 ["git", "-C", str(WIKI), "status", "--porcelain"], text=True
             ).strip()
             assert not ERRORS, ERRORS
             print(
                 "batch-ingest-runtime: draft Location, native evidence, corrected patches, "
-                "read/write/edit permissions and bound approval/resumption OK"
+                "root directory reads, context stops, independent continuation and permissions OK"
             )
         finally:
             backend.terminate()

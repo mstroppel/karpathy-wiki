@@ -19,6 +19,7 @@ await runIngestBatch(
   },
   async (batch) => {
     await writeFile(batch.sources[0].wiki_path, '# Recovered synthetic finding\nSource line 1.\n')
+    if (process.argv[3] === 'worker_written') process.kill(process.pid, 'SIGKILL')
     return { source_written: true, errors: [] }
   },
 )

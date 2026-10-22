@@ -279,9 +279,11 @@ class ConfigTests(unittest.TestCase):
         config = json.loads((ROOT / "config" / "opencode.json").read_text())
         template = config["commands"]["ingest-new"]["template"]
         skill = (ROOT / "config" / "skills" / "wiki-ingest" / "SKILL.md").read_text()
-        orchestrator = (
-            ROOT / "config" / "skills" / "wiki-ingest-orchestrator" / "SKILL.md"
-        ).read_text()
+        orchestrator = " ".join(
+            (ROOT / "config" / "skills" / "wiki-ingest-orchestrator" / "SKILL.md")
+            .read_text()
+            .split()
+        )
         renderer = (ROOT / "config" / "tools" / "wiki_ingest_batch_core.mjs").read_text()
         self.assertIn("Verlinke den privaten Bericht", template)
         self.assertIn("offene Arbeit", template)
@@ -302,7 +304,7 @@ class ConfigTests(unittest.TestCase):
         self.assertIn("Aktuelle Quellen nicht erneut auswerten", orchestrator)
         self.assertIn("`source_path` aus `wiki_ingest_status`", orchestrator)
         self.assertIn("vermeide Duplikatseiten", skill)
-        # Source evidence and questions stay durable; success requires verification.
+        # Source evidence stays durable; success requires verification.
         self.assertIn("wiki_ingest_batch", skill)
         self.assertIn("verifizierten Commit", skill)
 

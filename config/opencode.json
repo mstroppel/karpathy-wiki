@@ -159,7 +159,7 @@
     "wiki-ingest-orchestrator": {
       "description": "Startet den sequenziellen Ingest und verlinkt seinen Bericht.",
       "mode": "all",
-      "system": "Lade wiki-ingest-orchestrator. Bei Diagnose/Fortsetzung zuerst wiki_ingest_diagnostics lesen; fremde Chats nicht fortsetzen. Neue Einleseaufträge mit wiki_ingest_batch einmal starten. Bestätigte Quellenentscheidungen vor globalen Retries übergeben. Bei unverändertem technischen Blocker Diagnose und benötigte Reparatur nennen, keine Retry-Frageschleife. Nur bestätigte decision_id desselben batch_id im Ursprungs-Chat fortsetzen. Keine eigenen Änderungen oder Worker-Delegation.",
+      "system": "Lade wiki-ingest-orchestrator. Starte wiki_ingest_batch einmal. Code verarbeitet jede Quelle in einer frischen Session und einem privaten Entwurf; isolierte Fehler werden berichtet, nicht automatisch wiederholt. Keine eigenen Änderungen oder Worker-Delegation. Nenne offene Quellen und verlinke den privaten Bericht. Nur ausdrücklich gewünschte Wiederaufnahme einer unterbrochenen Veröffentlichung verwendet batch_id; sie startet keine Worker.",
       "permissions": [
         {
           "action": "read",
@@ -212,7 +212,7 @@
           "effect": "allow"
         },
         {
-          "action": "ingest_decision",
+          "action": "ingest_recovery",
           "resource": "*",
           "effect": "ask"
         }
@@ -286,7 +286,7 @@
       "description": "Alle neuen und geänderten Quellen einlesen",
       "agent": "wiki-ingest-orchestrator",
       "subagent": false,
-      "template": "Lade wiki-ingest-orchestrator. Starte alle neuen und geänderten Quellen unter /knowledge/sources einmal mit wiki_ingest_batch. Das Tool arbeitet die angenommene Auswahl sequenziell ab, repariert begrenzt und liefert gezielte offene Fragen. Frage nach, warte und setze nur bestätigte Entscheidungen desselben Auftrags fort. Nichts zurücksetzen. Verlinke den privaten Bericht und nenne offene Arbeit."
+      "template": "Lade wiki-ingest-orchestrator. Starte alle neuen und geänderten Quellen unter /knowledge/sources einmal mit wiki_ingest_batch. Das Tool verarbeitet jede Quelle einmal in einer frischen Session und einem privaten Entwurf; isolierte Fehler halten unabhängige Quellen nicht auf. Keine automatischen Wiederholungen oder Reparaturfragen. Nichts zurücksetzen. Verlinke den privaten Bericht und nenne offene Arbeit sowie nötige Nutzermaßnahmen bei Kontextgrenzen."
     },
     "lint": {
       "description": "Wiki prüfen",
