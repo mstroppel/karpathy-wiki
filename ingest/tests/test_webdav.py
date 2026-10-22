@@ -1009,6 +1009,17 @@ class SettingsTests(unittest.TestCase):
 
 
 class SynchronizeTests(unittest.TestCase):
+    def test_sync_includes_only_supported_formats(self):
+        with mock.patch("karpathy_wiki_ingest_webdav.subprocess.run") as run_mock:
+            synchronize(Path("/incoming"), "Wiki Sources")
+        command = run_mock.call_args.args[0]
+        filters = [command[index + 1] for index, flag in enumerate(command) if flag == "--filter"]
+        self.assertEqual(set(filters[:-1]), {"+ *.md", "+ *.html", "+ *.htm", "+ *.xlsx"})
+        self.assertEqual(filters[-1], "- *")
+        self.assertIn("--ignore-case", command)
+        self.assertNotIn("--delete-excluded", command)
+        self.assertTrue(run_mock.call_args.kwargs["check"])
+
     def test_rclone_command_contains_retries(self):
         with mock.patch("karpathy_wiki_ingest_webdav.subprocess.run") as run_mock:
             synchronize(Path("/incoming"), "Wiki Sources")

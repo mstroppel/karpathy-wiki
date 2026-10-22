@@ -8,9 +8,11 @@ original source without conversion or serialization. `.xlsx` workbooks are
 extracted locally with resource-limited openpyxl before redaction and Markdown
 escaping; formula caches are not calculated or verified. See `docs/webdav-xlsx.md`
 for supported formats, visibility, limits and recalculation-before-upload.
-`.xls`, `.xlsb`, and `.xlsm` are rejected; other non-source formats are
-ignored. Rejected files produce content-free quarantine reports and prevent
-publication of the candidate generation.
+Synchronization includes only `.md`, `.html`, `.htm`, and `.xlsx`, recursively
+and case-insensitively; unsupported formats are not downloaded. Existing local
+excluded files are left untouched (no `--delete-excluded`). Locally present
+`.xls`, `.xlsb`, and `.xlsm` are still rejected. Rejected files produce
+content-free quarantine reports and prevent publication of the candidate generation.
 
 HTML redaction is not HTML sanitization. Active content is retained, never
 executed, and no linked resources are fetched. Treat the output as untrusted

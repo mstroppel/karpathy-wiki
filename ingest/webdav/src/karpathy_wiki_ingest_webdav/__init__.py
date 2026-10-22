@@ -67,6 +67,7 @@ GENERATIONS_DIRECTORY = "generations"
 ACTIVE_SYMLINK = "current"
 GENERATION_METADATA_FILENAME = ".generation.json"
 STAGING_PREFIX = ".staging-"
+SUPPORTED_SUFFIXES = {".md", ".html", ".htm", ".xlsx"}
 
 
 @dataclass(frozen=True)
@@ -106,7 +107,7 @@ def source_files(incoming: Path) -> set[Path]:
     return {
         path.relative_to(incoming)
         for path in incoming.rglob("*")
-        if path.is_file() and path.suffix.lower() in {".md", ".html", ".htm"} | SPREADSHEET_SUFFIXES
+        if path.is_file() and path.suffix.lower() in SUPPORTED_SUFFIXES | SPREADSHEET_SUFFIXES
     }
 
 
@@ -705,6 +706,14 @@ def synchronize(incoming: Path, path: str) -> None:
             "sync",
             f"webdav:{path}",
             str(incoming),
+            "--ignore-case",
+            *[
+                flag
+                for suffix in sorted(SUPPORTED_SUFFIXES)
+                for flag in ("--filter", f"+ *{suffix}")
+            ],
+            "--filter",
+            "- *",
             "--create-empty-src-dirs",
             "--retries",
             "3",

@@ -1,9 +1,9 @@
 """Private snapshot connector: rclone discovery of WebDAV audio files.
 
 The audio provider keeps its own raw-audio directory; it never publishes raw
-files under ``sources/``. A cycle first mirrors the complete upstream
-inventory into the snapshot directory, then classifies files: supported
-audio extensions become pending work, everything else is ignored
+files under ``sources/``. A cycle mirrors only supported audio extensions
+into the snapshot directory, then inventories them as pending work.
+Everything else is excluded from synchronization
 (Markdown-only files belong to the Markdown WebDAV provider).
 """
 
@@ -13,7 +13,7 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
-from karpathy_wiki_speech.types import TranscriptionLimits, file_revision
+from karpathy_wiki_speech.types import DEFAULT_LIMITS, TranscriptionLimits, file_revision
 
 
 def probe(path: str, rclone_binary: str = "rclone") -> None:
@@ -33,14 +33,23 @@ def synchronize(
     rclone_binary: str = "rclone",
     *,
     timeout_seconds: int = 3600,
+    limits: TranscriptionLimits = DEFAULT_LIMITS,
 ) -> None:
-    """Mirror the upstream WebDAV folder into the private snapshot."""
+    """Mirror supported audio files into the private snapshot."""
     subprocess.run(
         [
             rclone_binary,
             "sync",
             f"webdav:{path}",
             str(incoming),
+            "--ignore-case",
+            *[
+                flag
+                for suffix in sorted(limits.allowed_extensions)
+                for flag in ("--filter", f"+ *{suffix}")
+            ],
+            "--filter",
+            "- *",
             "--create-empty-src-dirs",
             "--retries",
             "3",
