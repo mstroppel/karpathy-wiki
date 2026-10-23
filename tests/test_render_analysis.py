@@ -456,6 +456,27 @@ class AnalysisImageTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.render(self.image())
 
+    def test_svg_inferred_viewport_dimensions_are_bounded(self):
+        for attrs in (
+            'width="20000" viewBox="0 0 1 2"',
+            'height="20000" viewBox="0 0 2 1"',
+            'width="4000" viewBox="0 0 1 3"',
+            'height="4000" viewBox="0 0 3 1"',
+            'width="50%" height="100"',
+            'width="100" height="1em"',
+        ):
+            with self.subTest(attrs=attrs), self.assertRaises(ValueError):
+                renderer.checked_svg(f'<svg xmlns="{renderer.SVG_NS}" {attrs}/>'.encode())
+        for attrs in (
+            'width="640" viewBox="0 0 2 1"',
+            'height="220" viewBox="0 0 2 1"',
+            'width="640"',
+            'height="220"',
+            'viewBox="0 0 2 1"',
+        ):
+            with self.subTest(attrs=attrs):
+                renderer.checked_svg(f'<svg xmlns="{renderer.SVG_NS}" {attrs}/>'.encode())
+
 
 class RenderAnalysisTests(unittest.TestCase):
     def test_print_view_preserves_structure_and_sanitizes_content(self):

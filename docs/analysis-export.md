@@ -91,8 +91,12 @@ removal is not anonymization of labels or plotted values.
   `stop`, `marker` and `use`. References must be unambiguous local fragments;
   missing targets, cycles and excessive expansion are rejected. Dimensions must
   be positive and bounded to 20,000 nominal CSS pixels per axis and 40 megapixels
-  per viewport; percentages cannot exceed 100%. Relative font units use 16 pixels
-  for this conservative check. Numeric magnitudes are bounded to 10 million and
+  per viewport, including dimensions inferred from a `viewBox` ratio when only
+  one axis is supplied (without a ratio the missing axis uses the default
+  300px width or 150px height). SVG viewport dimensions must use absolute lengths,
+  not percentages or font-relative units. For other geometry percentages cannot
+  exceed 100% in dimension attributes; relative font units use 16 pixels for the
+  conservative dimension check. Numeric magnitudes are bounded to 10 million and
   individual attributes to 100,000 characters.
 - Simple SVG presentation attributes and inline `style` declarations are
   supported. A CSS parser validates declarations and converts allowed properties

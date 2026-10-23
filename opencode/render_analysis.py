@@ -494,19 +494,33 @@ def checked_svg(data: bytes) -> bytes:
     }
     for node in root.iter():
         dimensions = {}
+        is_viewport = node.tag == f"{{{SVG_NS}}}svg"
         for name in ("width", "height", "markerWidth", "markerHeight"):
             if name in node.attrib:
                 match = re.fullmatch(rf"({NUMBER})(px|pt|pc|mm|cm|in|em|ex|%)?", node.attrib[name])
                 number, unit = float(match[1]), match[2] or ""
+                if is_viewport and unit in {"%", "em", "ex"}:
+                    raise ValueError("SVG viewport dimensions must use absolute lengths")
                 if number <= 0 or number * units[unit] > 20_000 or (unit == "%" and number > 100):
                     raise ValueError("SVG dimensions must be positive and bounded")
                 dimensions[name] = number * units[unit]
-        if dimensions.get("width", 1) * dimensions.get("height", 1) > MAX_PIXELS:
-            raise ValueError("SVG viewport exceeds the 40 megapixel limit")
+        ratio = None
         if "viewBox" in node.attrib:
             values = re.split(r"[\s,]+", node.attrib["viewBox"].strip())
             if len(values) != 4 or any(float(v) <= 0 for v in values[2:]):
                 raise ValueError("SVG viewBox must have four values and positive dimensions")
+            ratio = float(values[2]) / float(values[3])
+            if not math.isfinite(ratio) or ratio <= 0:
+                raise ValueError("SVG viewBox ratio must be finite and positive")
+        if is_viewport:
+            if "width" in dimensions and "height" not in dimensions:
+                dimensions["height"] = dimensions["width"] / ratio if ratio else 150
+            elif "height" in dimensions and "width" not in dimensions:
+                dimensions["width"] = dimensions["height"] * ratio if ratio else 300
+        if any(value > 20_000 for value in dimensions.values()):
+            raise ValueError("SVG inferred viewport dimension exceeds limit")
+        if dimensions.get("width", 300) * dimensions.get("height", 150) > MAX_PIXELS:
+            raise ValueError("SVG viewport exceeds the 40 megapixel limit")
     # Includes child edges and all fragment references: prevents recursive use,
     # pattern/gradient cycles and exponentially expanded use graphs.
     costs = {}
