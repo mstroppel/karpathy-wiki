@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Analysis print exports embed validated local PNG and static SVG diagrams as
+  self-contained images. PNGs are decoded and re-encoded without metadata; SVGs
+  use a bounded static allowlist with local references only. Invalid/unsupported
+  images fail explicitly instead of disappearing. Asset reads reject symlinks
+  and path escapes, and failed renders preserve the previous HTML view. The
+  print layout, save workflow and documentation include diagram handling.
+
 ### Fixed
 
 - Ingest workers now require code-owned session admission and native evidence of

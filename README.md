@@ -251,6 +251,7 @@ scripts/test-python.sh
 npm test
 docker build --target opencode -t kw-opencode:integration -f opencode/Dockerfile .
 docker build --target openchamber -t kw-openchamber:integration -f opencode/Dockerfile .
+sh tests/integration/analysis-images.sh  # installed PNG/SVG renderer, offline, synthetic fixtures
 sh tests/integration/chat.sh  # authentication, discovery, native SSE and restart persistence
 sh tests/integration/batch-ingest.sh  # synthetic model, private drafts, context stops, permissions and commits
 sh tests/integration/runtime-write-isolation.sh  # pinned-runtime proof of the reader boundary

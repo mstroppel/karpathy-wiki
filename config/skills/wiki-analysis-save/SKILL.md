@@ -31,12 +31,20 @@ nichts speichern und die fehlende Schreibberechtigung melden.
    '<WIKI_PUBLIC_URL>'` aus. Verwende die öffentliche Wiki-URL aus `AGENTS.md`,
    keine beispielhafte URL. Das Skript erzeugt
    `assets/analyses/<slug>.html` aus der Markdown-Seite und der Druckvorlage.
-   Prüfe den Exit-Status und den erzeugten Inhalt; bei einem Fehler nicht
-   committen. Bearbeite das HTML nicht manuell.
+   Für mitgelieferte Diagramme lies [die Bildregeln](images.md):
+   lokale PNG-/statische SVG-Assets unter
+   `assets/analyses/<slug>/`, Markdown-Bilder mit Alternativtext und Pfad
+   `/.fs/assets/analyses/<slug>/<datei>.png` oder `.svg`. Keine externen Bilder,
+   Data-URLs oder Inline-HTML-/SVG-Einbindungen. Nicht unterstützte SVGs nicht
+   still vereinfachen; Blocker melden oder ein vorhandenes PNG verwenden.
+   Prüfe Exit-Status, erzeugten Inhalt und die ausgegebene PNG-/SVG-Anzahl gegen
+   die erwarteten Diagramme; bei einem Fehler nicht committen. Bearbeite das
+   HTML nicht manuell.
 4. Trage die Seite alphabetisch unter `## Analysen` in `index.md` ein; ergänze
    einen Logeintrag mit Datum, Titel und Pfad. Verlinke sie bei Bedarf in
    `overview.md`. Prüfe Diff und Links und erstelle genau einen fokussierten
-   Commit `feat(analyses): <titel> speichern`.
+   Commit `feat(analyses): <titel> speichern`, einschließlich Markdown,
+   Diagrammassets und erzeugter HTML-Ansicht.
 
 Melde Commit-Hash, geänderte Seiten, öffentliche Wiki- und Druckansichts-URL.
 Die Druckansicht kann im Browser als PDF gespeichert werden. Bei einem Fehler
