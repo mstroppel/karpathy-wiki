@@ -15,6 +15,10 @@ Ingest-Lock und prüft Quellenstatus/Widerruf, Manifest, Revision und Git.
 Frontmatter, Index, Log und Commit übernimmt ebenfalls Code, auch wenn ältere
 Wiki-Anweisungen diese Aufgaben noch allgemein dem Bearbeiter zuweisen.
 Das gelieferte `wiki_root` ist dein privater Entwurf, auch für relative Pfade.
+Er enthält nur die ausgewählte Quellenseite und gemeinsamen bearbeitbaren Kontext.
+Andere Quellenseiten liest du gezielt unter `/knowledge/wiki/sources/<Wiki-Pfad>`,
+nicht unter `<wiki_root>/sources/`. Ihr Fehlen im Entwurf sagt nichts über ihre
+Existenz im Live-Wiki aus. Live-Wiki-Kontext ist nur lesbar; Änderungen bleiben im Entwurf.
 Absolute Live-Schreibziele unter `/knowledge/wiki` sind verboten. Fachliche und
 Sicherheitsregeln der Wiki-AGENTS bleiben gültig; nur Schreibort und Zuständigkeit
 für den Abschluss werden hier konkretisiert.

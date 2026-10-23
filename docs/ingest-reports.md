@@ -13,6 +13,8 @@ Each source gets one fresh child session and one private draft under
 source page and shared editable Markdown context, index/log and safety instructions,
 not other source pages, Git history or configuration. Workers can read targeted
 live wiki context but cannot write it. Read-only sources stay under `/knowledge/sources`.
+For other source pages, workers read `/knowledge/wiki/sources/<wiki-path>` directly;
+their absence in the draft is expected, not evidence of a missing live page.
 Code alone owns frontmatter, index/log and publication. The initializer never
 replaces existing `AGENTS.md`; manually align ingest task ownership and the private
 draft exception while preserving all local safety rules.
