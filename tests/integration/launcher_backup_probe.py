@@ -24,8 +24,10 @@ def main():
         project = Path(temporary)
         name = f"kw-backup-{os.getpid()}-{int(time.time())}"
         source_image = image
-        image = f"{name}:installed"
-        retained_image = f"{name}:cached"
+        # Newer image stores assign even local builds a repository digest. Keep
+        # that repository unreachable so it cannot recover a deleted test image.
+        image = f"localhost.invalid/{name}:installed"
+        retained_image = f"localhost.invalid/{name}:cached"
         cache = project / ".cache"
         cache.mkdir()
         data = project / "data"
@@ -134,6 +136,12 @@ def main():
             installed_image = run(
                 "docker", "inspect", container, "--format", "{{.Image}}"
             ).stdout.strip()
+            installed_digests = (
+                json.loads(run("docker", "image", "inspect", installed_image).stdout)[0].get(
+                    "RepoDigests"
+                )
+                or []
+            )
             # Remove only this probe's private tag, retaining the installed image.
             run("docker", "image", "rm", image)
             updated = run("sh", str(launcher), "update", "2.0.0", "-v")
@@ -143,7 +151,7 @@ def main():
             ]
             identifier = metadata[0]["id"]
             assert metadata[0]["images"][image] == installed_image
-            assert metadata[0]["image_digests"][installed_image] == []
+            assert metadata[0]["image_digests"][installed_image] == installed_digests
             assert "images.tar" not in metadata[0]["sha256"]
             assert not (project / "backups" / identifier / "images.tar").exists()
             missing_tag = subprocess.run(["docker", "image", "inspect", image], capture_output=True)
