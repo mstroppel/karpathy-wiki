@@ -182,6 +182,35 @@ SVG_ENUMS = {
     "version": {"1.0", "1.1", "2.0"},
     "space": {"default", "preserve"},
 }
+SVG_LENGTHS = {
+    "x",
+    "y",
+    "dx",
+    "dy",
+    "cx",
+    "cy",
+    "x1",
+    "y1",
+    "x2",
+    "y2",
+    "r",
+    "rx",
+    "ry",
+    "fx",
+    "fy",
+    "fr",
+    "width",
+    "height",
+    "refX",
+    "refY",
+    "markerWidth",
+    "markerHeight",
+    "font-size",
+    "textLength",
+    "stroke-width",
+    "stroke-dashoffset",
+}
+SVG_FRACTIONS = {"opacity", "fill-opacity", "stroke-opacity", "stop-opacity", "offset"}
 
 
 def checked_png(data: bytes) -> bytes:
@@ -334,6 +363,8 @@ def svg_value(name: str, value: str, tag: str) -> str | None:
         )
     elif name == "orient" and value in {"auto", "auto-start-reverse"}:
         valid = True
+    elif name == "orient":
+        valid = re.fullmatch(rf"{NUMBER}(?:deg|rad|grad)?", value)
     elif name == "stroke-dasharray" and value == "none":
         valid = True
     elif name in {"viewBox", "points", "stroke-dasharray", "rotate"}:
@@ -345,19 +376,21 @@ def svg_value(name: str, value: str, tag: str) -> str | None:
         valid = True
     elif name in {"x", "y", "dx", "dy"} and tag in {"text", "tspan"} and NUMBERS.fullmatch(value):
         valid = True
-    else:
+    elif name in SVG_FRACTIONS:
+        match = re.fullmatch(rf"({NUMBER})(%)?", value)
+        valid = match and 0 <= float(match[1]) <= (100 if match[2] else 1)
+    elif name in {"pathLength", "stroke-miterlimit"}:
+        valid = re.fullmatch(NUMBER, value)
+        if valid:
+            valid = float(value) >= (1 if name == "stroke-miterlimit" else 0)
+    elif name in SVG_LENGTHS:
         valid = re.fullmatch(rf"{NUMBER}(?:px|pt|pc|mm|cm|in|em|ex|%)?", value)
-        if valid and name in {
-            "opacity",
-            "fill-opacity",
-            "stroke-opacity",
-            "stop-opacity",
-            "offset",
-        }:
-            number = float(re.match(NUMBER, value)[0])
-            valid = 0 <= number <= (100 if value.endswith("%") else 1)
         if valid and name in {"r", "rx", "ry", "fr", "stroke-width", "textLength"}:
             valid = float(re.match(NUMBER, value)[0]) >= 0
+        if valid and name == "font-size":
+            valid = float(re.match(NUMBER, value)[0]) >= 0
+    else:
+        valid = False
     if not valid:
         raise ValueError(f"unsupported SVG value for {name}")
     # Bound numeric magnitudes without interpreting digits in IDs or color names.
@@ -395,6 +428,8 @@ def checked_svg(data: bytes) -> bytes:
             raise ValueError(f"unsupported SVG element: {tag[:80]}")
         attributes = dict(node.attrib)
         if style := attributes.pop("style", None):
+            if len(style) > MAX_ATTRIBUTE:
+                raise ValueError("SVG style attribute is too long")
             for declaration in tinycss2.parse_declaration_list(
                 style, skip_comments=True, skip_whitespace=True
             ):
@@ -403,6 +438,25 @@ def checked_svg(data: bytes) -> bytes:
                 name = declaration.lower_name
                 if name not in PRESENTATION:
                     raise ValueError(f"unsupported SVG style property: {name[:80]}")
+                for token in declaration.value:
+                    if token.type == "function":
+                        if token.lower_name not in {"rgb", "rgba"} or any(
+                            part.type not in {"number", "percentage", "literal", "whitespace"}
+                            for part in token.arguments
+                        ):
+                            raise ValueError("unsupported or nested SVG CSS function")
+                    elif token.type not in {
+                        "ident",
+                        "hash",
+                        "number",
+                        "dimension",
+                        "percentage",
+                        "literal",
+                        "whitespace",
+                        "string",
+                        "url",
+                    }:
+                        raise ValueError("unsupported SVG CSS token")
                 attributes[name] = tinycss2.serialize(declaration.value).strip()
         node.attrib.clear()
         refs = []

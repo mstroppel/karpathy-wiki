@@ -262,6 +262,7 @@ class AnalysisImageTests(unittest.TestCase):
             '<rect style="@import url(test);"/>',
             '<rect style="fill: red !important"/>',
             '<rect style="bad"/>',
+            '<rect style="fill: ' + "rgb(" * 1000 + "1" + ")" * 1000 + '"/>',
             '<rect fill="var(--x)"/>',
             '<rect xmlns="https://example.org/ns"/>',
             '<rect xmlns:x="https://example.org/ns" x:fill="red"/>',
@@ -428,6 +429,32 @@ class AnalysisImageTests(unittest.TestCase):
             'skewX(10) skewY(10)"><text x="0 10" y="20" font-weight="bold">Test</text></g>'
         )
         self.assertEqual(len(ImageTags(self.render(self.image())).images), 1)
+
+    def test_svg_units_match_attribute_value_types(self):
+        for name in ("opacity", "fill-opacity", "stroke-opacity", "stop-opacity", "offset"):
+            tag = "stop" if name in {"stop-opacity", "offset"} else "rect"
+            for invalid in ("0.5px", "0.5em", "1pt", "-0.1", "101%", "2"):
+                with self.subTest(name=name, value=invalid), self.assertRaises(ValueError):
+                    self.svg(f'<{tag} {name}="{invalid}"/>')
+                    self.render(self.image())
+            for valid in ("0", "0.5", "1", "50%", "100%"):
+                with self.subTest(name=name, value=valid):
+                    self.svg(f'<{tag} {name}="{valid}"/>')
+                    self.assertEqual(len(ImageTags(self.render(self.image())).images), 1)
+        for attributes in (
+            'pathLength="1px"',
+            'stroke-miterlimit="2em"',
+            'stroke-miterlimit="0.5"',
+            'pathLength="-1"',
+        ):
+            with self.subTest(attributes=attributes), self.assertRaises(ValueError):
+                self.svg(f'<path d="M0 0 L1 1" {attributes}/>')
+                self.render(self.image())
+        self.svg('<path d="M0 0 L1 1" stroke-width="2px" stroke-miterlimit="2" pathLength="10"/>')
+        self.assertEqual(len(ImageTags(self.render(self.image())).images), 1)
+        self.svg('<rect style="opacity: 0.5px"/>')
+        with self.assertRaises(ValueError):
+            self.render(self.image())
 
 
 class RenderAnalysisTests(unittest.TestCase):
