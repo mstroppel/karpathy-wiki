@@ -100,8 +100,12 @@ removal is not anonymization of labels or plotted values.
   scripts, event handlers, animation, `foreignObject`, embedded images, external
   fonts/resources, DTDs/entities and processing instructions are rejected.
   Unknown elements, attributes and values fail rather than silently dropping
-  diagram content. General-purpose SVG exports may need an explicitly supported
-  export preset or a supplied PNG alternative; this is not full SVG support.
+  diagram content. Path commands must have complete argument groups and valid
+  arc flags/radii; transforms have checked argument counts and point lists need
+  coordinate pairs. The numeric-list subset uses whitespace or single commas;
+  compact arc flags must be separated. General-purpose SVG exports may need an
+  explicitly supported export preset or a supplied PNG alternative; this is not
+  full SVG support.
 - **Document:** at most 50 image occurrences and 50 MiB final UTF-8 HTML, including
   base64 expansion. Repeated assets are validated once but count on each use.
 

@@ -82,7 +82,7 @@ SVG_TAGS = set(
     "clipPath pattern linearGradient radialGradient stop marker use".split()
 )
 NUMBER = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?"
-NUMBERS = re.compile(rf"{NUMBER}(?:[\s,]+{NUMBER})*\Z")
+NUMBERS = re.compile(rf"{NUMBER}(?:(?:\s*,\s*|\s+){NUMBER})*\Z")
 IDENTIFIER = re.compile(r"[a-zA-Z_][a-zA-Z0-9_.-]*\Z")
 REFERENCE = re.compile(r"url\(#([a-zA-Z_][a-zA-Z0-9_.-]*)\)\Z")
 PRESENTATION = set(
@@ -147,6 +147,41 @@ GEOMETRY = {
     },
     "use": {"x", "y", "width", "height", "href"},
 }
+SVG_ENUMS = {
+    "font-style": {"normal", "italic", "oblique"},
+    "text-anchor": {"start", "middle", "end"},
+    "dominant-baseline": {
+        "auto",
+        "text-bottom",
+        "alphabetic",
+        "ideographic",
+        "middle",
+        "central",
+        "mathematical",
+        "hanging",
+        "text-top",
+        "text-after-edge",
+        "text-before-edge",
+        "use-script",
+        "no-change",
+        "reset-size",
+    },
+    "stroke-linecap": {"butt", "round", "square"},
+    "stroke-linejoin": {"miter", "miter-clip", "round", "bevel", "arcs"},
+    "fill-rule": {"nonzero", "evenodd"},
+    "clip-rule": {"nonzero", "evenodd"},
+    "visibility": {"visible", "hidden", "collapse"},
+    "display": {"inline", "none"},
+    "lengthAdjust": {"spacing", "spacingAndGlyphs"},
+    "clipPathUnits": {"userSpaceOnUse", "objectBoundingBox"},
+    "patternUnits": {"userSpaceOnUse", "objectBoundingBox"},
+    "patternContentUnits": {"userSpaceOnUse", "objectBoundingBox"},
+    "gradientUnits": {"userSpaceOnUse", "objectBoundingBox"},
+    "spreadMethod": {"pad", "reflect", "repeat"},
+    "markerUnits": {"strokeWidth", "userSpaceOnUse"},
+    "version": {"1.0", "1.1", "2.0"},
+    "space": {"default", "preserve"},
+}
 
 
 def checked_png(data: bytes) -> bytes:
@@ -159,7 +194,9 @@ def checked_png(data: bytes) -> bytes:
                     raise ValueError("file is not a PNG")
                 if image.width * image.height > MAX_PIXELS:
                     raise ValueError("PNG exceeds the 40 megapixel limit")
-                if getattr(image, "n_frames", 1) != 1:
+                image.verify()
+            with Image.open(io.BytesIO(data)) as image:
+                if getattr(image, "n_frames", 1) != 1 or "loop" in image.info:
                     raise ValueError("animated PNG is unsupported")
                 image.load()
                 # A fresh image drops textual metadata, EXIF and color profiles.
@@ -173,6 +210,7 @@ def checked_png(data: bytes) -> bytes:
                 return output.getvalue()
     except (
         OSError,
+        SyntaxError,
         UnidentifiedImageError,
         Image.DecompressionBombError,
         Image.DecompressionBombWarning,
@@ -180,7 +218,82 @@ def checked_png(data: bytes) -> bytes:
         raise ValueError("invalid or oversized PNG") from exc
 
 
-def svg_value(name: str, value: str) -> str | None:
+def svg_numbers(value: str) -> list[float]:
+    value = value.strip()
+    if not NUMBERS.fullmatch(value):
+        raise ValueError("invalid SVG numeric list")
+    return [float(number) for number in re.findall(NUMBER, value)]
+
+
+def svg_path(value: str) -> None:
+    """Validate complete path commands, implicit repetitions and arc flags."""
+    tokens = []
+    end = 0
+    previous = ""
+    for match in re.finditer(rf"[MmZzLlHhVvCcSsQqTtAa]|{NUMBER}", value):
+        token = match[0]
+        separator = value[end : match.start()]
+        if separator.strip(" \t\r\n,") or separator.count(",") > 1:
+            raise ValueError("invalid SVG path separator")
+        if "," in separator and (not previous or previous.isalpha() or token.isalpha()):
+            raise ValueError("invalid SVG path comma")
+        tokens.append(token)
+        previous, end = token, match.end()
+    if value[end:].strip() or not tokens or tokens[0] not in {"M", "m"}:
+        raise ValueError("SVG path must begin with a complete moveto")
+    arities = {"M": 2, "L": 2, "H": 1, "V": 1, "C": 6, "S": 4, "Q": 4, "T": 2, "A": 7}
+    index = 0
+    command = ""
+    while index < len(tokens):
+        if tokens[index].isalpha():
+            command = tokens[index].upper()
+            index += 1
+            if command == "Z":
+                command = ""
+                continue
+        if not command:
+            raise ValueError("SVG path coordinates need a command")
+        arity = arities[command]
+        arguments = tokens[index : index + arity]
+        if len(arguments) != arity or any(part.isalpha() for part in arguments):
+            raise ValueError("incomplete SVG path command")
+        if command == "A" and (
+            float(arguments[0]) < 0
+            or float(arguments[1]) < 0
+            or arguments[3] not in {"0", "1"}
+            or arguments[4] not in {"0", "1"}
+        ):
+            raise ValueError("invalid SVG arc radius or flag")
+        index += arity
+        if command == "M":
+            command = "L"
+
+
+def svg_transform(value: str) -> None:
+    arities = {
+        "matrix": {6},
+        "translate": {1, 2},
+        "scale": {1, 2},
+        "rotate": {1, 3},
+        "skewX": {1},
+        "skewY": {1},
+    }
+    end = 0
+    found = False
+    for match in re.finditer(r"([a-zA-Z]+)\(([^()]*)\)", value):
+        separator = value[end : match.start()]
+        if separator.strip(" \t\r\n,") or separator.count(",") > 1:
+            raise ValueError("invalid SVG transform separator")
+        if not found and "," in separator:
+            raise ValueError("invalid SVG transform comma")
+        if len(svg_numbers(match[2].strip())) not in arities.get(match[1], set()):
+            raise ValueError("invalid SVG transform arguments")
+        found, end = True, match.end()
+    if not found or value[end:].strip():
+        raise ValueError("invalid SVG transform")
+
+
+def svg_value(name: str, value: str, tag: str) -> str | None:
     """Validate a static SVG attribute; return its local reference, if any."""
     if len(value) > MAX_ATTRIBUTE:
         raise ValueError("SVG attribute is too long")
@@ -199,53 +312,52 @@ def svg_value(name: str, value: str) -> str | None:
         return match.group(1)
     elif name in {"fill", "stroke", "color", "stop-color"}:
         if match := REFERENCE.fullmatch(value):
+            if name not in {"fill", "stroke"}:
+                raise ValueError(f"SVG {name} cannot reference a paint server")
             return match.group(1)
-        valid = value == "none" or parse_color(value) is not None
+        valid = (value == "none" and name in {"fill", "stroke"}) or parse_color(value) is not None
     elif name in {"transform", "gradientTransform", "patternTransform"}:
-        valid = re.fullmatch(
-            rf"\s*(?:(?:matrix|translate|scale|rotate|skewX|skewY)\([\s,]*"
-            rf"{NUMBER}(?:[\s,]+{NUMBER})*[\s,]*\)\s*)+",
-            value,
-        )
+        svg_transform(value)
+        valid = True
     elif name == "d":
-        valid = re.fullmatch(r"[MmZzLlHhVvCcSsQqTtAa0-9eE+.,\s-]+", value)
-    elif name in {
-        "font-family",
-        "font-style",
-        "font-weight",
-        "text-anchor",
-        "dominant-baseline",
-        "stroke-linecap",
-        "stroke-linejoin",
-        "fill-rule",
-        "clip-rule",
-        "visibility",
-        "display",
-        "lengthAdjust",
-        "clipPathUnits",
-        "patternUnits",
-        "patternContentUnits",
-        "gradientUnits",
-        "spreadMethod",
-        "markerUnits",
-        "preserveAspectRatio",
-        "version",
-    }:
+        svg_path(value)
+        valid = True
+    elif name == "font-family":
         valid = re.fullmatch(r"[a-zA-Z0-9 _.,'-]+", value)
-    elif name == "space":
-        valid = value in {"default", "preserve"}
+    elif name in SVG_ENUMS:
+        valid = value in SVG_ENUMS[name]
+    elif name == "preserveAspectRatio":
+        valid = re.fullmatch(r"none|x(?:Min|Mid|Max)Y(?:Min|Mid|Max)(?: (?:meet|slice))?", value)
+    elif name == "font-weight":
+        valid = value in {"normal", "bold", "bolder", "lighter"} or (
+            re.fullmatch(NUMBER, value) and 1 <= float(value) <= 1000
+        )
     elif name == "orient" and value in {"auto", "auto-start-reverse"}:
         valid = True
     elif name == "stroke-dasharray" and value == "none":
         valid = True
     elif name in {"viewBox", "points", "stroke-dasharray", "rotate"}:
-        valid = NUMBERS.fullmatch(value)
-    elif name in {"width", "height", "markerWidth", "markerHeight"}:
-        valid = re.fullmatch(rf"{NUMBER}(?:px|pt|pc|mm|cm|in|em|ex|%)?", value)
+        numbers = svg_numbers(value)
+        if name == "points" and (len(numbers) % 2 or len(numbers) < 2):
+            raise ValueError("SVG points must be coordinate pairs")
+        if name == "stroke-dasharray" and any(number < 0 for number in numbers):
+            raise ValueError("SVG dash lengths must be nonnegative")
+        valid = True
+    elif name in {"x", "y", "dx", "dy"} and tag in {"text", "tspan"} and NUMBERS.fullmatch(value):
+        valid = True
     else:
         valid = re.fullmatch(rf"{NUMBER}(?:px|pt|pc|mm|cm|in|em|ex|%)?", value)
-        if not valid:
-            valid = NUMBERS.fullmatch(value)
+        if valid and name in {
+            "opacity",
+            "fill-opacity",
+            "stroke-opacity",
+            "stop-opacity",
+            "offset",
+        }:
+            number = float(re.match(NUMBER, value)[0])
+            valid = 0 <= number <= (100 if value.endswith("%") else 1)
+        if valid and name in {"r", "rx", "ry", "fr", "stroke-width", "textLength"}:
+            valid = float(re.match(NUMBER, value)[0]) >= 0
     if not valid:
         raise ValueError(f"unsupported SVG value for {name}")
     # Bound numeric magnitudes without interpreting digits in IDs or color names.
@@ -302,7 +414,7 @@ def checked_svg(data: bytes) -> bytes:
                 name = "space"
             if name not in PRESENTATION | GEOMETRY.get(tag, set()) | {"id", "transform", "space"}:
                 raise ValueError(f"unsupported SVG attribute: {name[:80]}")
-            ref = svg_value(name, value)
+            ref = svg_value(name, value, tag)
             if ref:
                 refs.append(ref)
             if name == "id":
@@ -346,7 +458,8 @@ def checked_svg(data: bytes) -> bytes:
     costs = {}
     active = set()
 
-    def cost(node, depth=0):
+    def expansion_metrics(node, depth=0):
+        """Return expanded element count and maximum reference/child height."""
         if node in active or depth > MAX_SVG_DEPTH:
             raise ValueError("cyclic or deeply expanded SVG reference")
         if node in costs:
@@ -361,7 +474,7 @@ def checked_svg(data: bytes) -> bytes:
             if target not in ids:
                 raise ValueError("missing SVG fragment target")
         for child in list(node) + [ids[target] for target in references[node]]:
-            child_cost, child_height = cost(child, depth + 1)
+            child_cost, child_height = expansion_metrics(child, depth + 1)
             total += child_cost
             height = max(height, child_height + 1)
             if total > MAX_SVG_EXPANSION:
@@ -370,7 +483,7 @@ def checked_svg(data: bytes) -> bytes:
         costs[node] = total, height
         return total, height
 
-    cost(root)
+    expansion_metrics(root)
     return tostring(root, encoding="utf-8")
 
 

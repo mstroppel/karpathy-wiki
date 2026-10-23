@@ -8,7 +8,8 @@ Werte erfinden. Grafikdateien sind genauso wie Markdown veröffentlichter Inhalt
 2. Binde sie als `![Aussagekräftiger Alternativtext](/.fs/assets/analyses/<slug>/<name>.svg)`
    ein. Kein HTML, Inline-SVG, externer Bildabruf oder vorgefertigte Data-URL.
 3. PNG muss statisch und dekodierbar sein. SVG braucht den Namespace
-   `http://www.w3.org/2000/svg` und einen positiven `viewBox`. Unterstützt werden
+   `http://www.w3.org/2000/svg`; ein optionaler `viewBox` muss positive Breite
+   und Höhe haben. Unterstützt werden
    Formen, Pfade, Gruppen, Text, lokale Ausschnitte, Schraffuren, Gradienten,
    Marker und lokale `use`-Referenzen. Verwende Darstellungsattribute oder einfache
    `style`-Deklarationen, keine Stylesheets, Metadaten-Namespaces, Fremdbilder,

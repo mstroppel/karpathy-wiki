@@ -229,6 +229,16 @@ class AnalysisImageTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "animated"):
             self.render(self.image("chart.png"))
         self.png()
+        original = (self.assets / "chart.png").read_bytes()
+        # Damage the IDAT checksum, not the image signature or compressed pixels.
+        broken = bytearray(original)
+        start = original.index(b"IDAT")
+        length = int.from_bytes(original[start - 4 : start], "big")
+        broken[start + 4 + length] ^= 1
+        (self.assets / "chart.png").write_bytes(broken)
+        with self.assertRaisesRegex(ValueError, "PNG"):
+            self.render(self.image("chart.png"))
+        self.png()
         with patch.object(renderer, "MAX_PIXELS", 10):
             with self.assertRaisesRegex(ValueError, "megapixel"):
                 self.render(self.image("chart.png"))
@@ -368,6 +378,56 @@ class AnalysisImageTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "ambiguous"):
             self.render(self.image())
+
+    def test_svg_geometry_requires_complete_commands_and_arguments(self):
+        invalid = (
+            '<path d="M0 0 L"/>',
+            '<path d="M0 0 L1"/>',
+            '<path d="L0 0"/>',
+            '<path d="M0,,0"/>',
+            '<path d="M,0 0"/>',
+            '<path d="M0 0,"/>',
+            '<path d="M0 0 Z 1 2"/>',
+            '<path d="M0 0 A1 1 0 2 0 1 1"/>',
+            '<path d="M0 0 A-1 1 0 0 0 1 1"/>',
+            '<path d="M0 0 A1 1 0 0.0 0 1 1"/>',
+            '<g transform="translate(1 2 3)"/>',
+            '<g transform="scale()"/>',
+            '<g transform="rotate(1 2)"/>',
+            '<g transform="matrix(1 2 3)"/>',
+            '<g transform="skewX(1 2)"/>',
+            '<g transform="translate(1),"/>',
+            '<g transform="scale(1,,2)"/>',
+            '<g transform="scale(1); rotate(2)"/>',
+            '<g transform="unknown(1)"/>',
+            '<polyline points="0 0 1"/>',
+            '<polygon points="0,,0 1,1"/>',
+            '<rect x="1 2"/>',
+            '<path stroke-linecap="unknown" d="M0 0"/>',
+            '<text text-anchor="bogus"/>',
+            '<svg preserveAspectRatio="bogus"/>',
+            '<rect opacity="-1"/>',
+            '<path stroke-dasharray="-1 2" d="M0 0"/>',
+            '<circle r="-1"/>',
+        )
+        for content in invalid:
+            with self.subTest(content=content), self.assertRaises(ValueError):
+                self.svg(content)
+                self.render(self.image())
+        for path in (
+            "M0 0 10 20 L30 40 50 60 Z",
+            "m1e-2-.5h2v3c1 2 3 4 5 6s1 2 3 4q1 2 3 4t5 6z",
+            "M0 0 A10 20 30 0 1 40 50 a5 5 0 1 0 -5 -5",
+            "M.5.5L1-2M3,4",
+        ):
+            with self.subTest(path=path):
+                self.svg(f'<path d="{path}"/>')
+                self.assertEqual(len(ImageTags(self.render(self.image())).images), 1)
+        self.svg(
+            '<g transform="matrix(1 0 0 1 0 0), translate(1, 2) scale(2) rotate(45 0 0) '
+            'skewX(10) skewY(10)"><text x="0 10" y="20" font-weight="bold">Test</text></g>'
+        )
+        self.assertEqual(len(ImageTags(self.render(self.image())).images), 1)
 
 
 class RenderAnalysisTests(unittest.TestCase):
