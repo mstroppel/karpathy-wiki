@@ -101,6 +101,7 @@ def worker_calls(batch):
     calls = [
         ("read", {"path": str(root)}),
         ("read", {"path": str(WIKI)}),
+        ("read", {"path": str(WIKI / "sources/webdav/other.md")}),
         ("read", {"path": source}),
         ("write", {"path": source, "content": "# Finding\nSource line 1.\n"}),
     ]
@@ -416,6 +417,18 @@ def main():
                 "info"
             ]
             assert source["source_written"] and source["worker_errors"] == [], source
+            context_reads = [
+                part
+                for message in native["messages"]
+                for part in message.get("content", [])
+                if part.get("type") == "tool"
+                and part.get("name") == "read"
+                and part.get("state", {}).get("input", {}).get("path")
+                == str(WIKI / "sources/webdav/other.md")
+            ]
+            assert context_reads and all(
+                part["state"]["status"] == "completed" for part in context_reads
+            ), context_reads
             assert source["attempts"][0]["recovered_errors"], source
             for mode in ("patch", "mixed", "syntax"):
                 change_source()

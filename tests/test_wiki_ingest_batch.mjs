@@ -83,6 +83,25 @@ async function fixture(t, count = 3) {
   return { opts, git, manifest, publish, worker, state }
 }
 
+test('other source pages remain readable live while absent from the private draft', async (t) => {
+  const f = await fixture(t, 2)
+  const other = 'sources/webdav/note-0.md'
+  let context
+  const result = await runIngestBatch(f.opts, async (batch) => {
+    if (batch.sources[0].source_key === 'note-1.md') {
+      await assert.rejects(readFile(path.join(batch.wiki_root, other)), { code: 'ENOENT' })
+      context = await readFile(path.join(f.opts.wikiRoot, other), 'utf8')
+      assert.ok(context.includes('# Supported finding'))
+    }
+    return f.worker(batch)
+  })
+  assert.equal(result.status, 'done', result.blocker)
+  assert.equal(result.ingested, 2)
+  assert.ok(result.commit)
+  assert.ok(context)
+  assert.equal(await readFile(path.join(f.opts.wikiRoot, other), 'utf8'), context)
+})
+
 test('one request drains fourteen sources with unique drafts and verified focused commits', async (t) => {
   const f = await fixture(t, 14)
   const roots = new Set()
@@ -895,8 +914,29 @@ test('worker admission allows directory reads but not broader writes; compaction
         events.push(input)
         return { id: 'ses_child' }
       },
-      prompt: async () => {
-        for (const resource of [root, `${root}/`, '.', '/knowledge/wiki', '/knowledge/wiki/']) {
+      prompt: async ({ text }) => {
+        const event = { sessionID: 'ses_child', system: [] }
+        await hooks.context(event)
+        for (const guidance of [text, event.system[0].text]) {
+          assert.ok(
+            guidance.includes(
+              `Lies andere Quellenseiten gezielt unter /knowledge/wiki/sources/<Wiki-Pfad>, nicht unter ${root}/sources`,
+            ),
+          )
+          assert.ok(
+            guidance.includes(
+              'Live-Wiki-Kontext ist nur lesbar; alle Änderungen bleiben im Entwurf',
+            ),
+          )
+        }
+        for (const resource of [
+          root,
+          `${root}/`,
+          '.',
+          '/knowledge/wiki',
+          '/knowledge/wiki/',
+          '/knowledge/wiki/sources/webdav/other.md',
+        ]) {
           const event = {
             sessionID: 'ses_child',
             agent: 'wiki-ingest',
@@ -910,6 +950,7 @@ test('worker admission allows directory reads but not broader writes; compaction
         for (const resource of [
           root,
           '/knowledge/wiki',
+          '/knowledge/wiki/sources/webdav/other.md',
           `${root}/sources/webdav/other.md`,
           `${root}/index.md`,
           `${root}/AGENTS.md`,
