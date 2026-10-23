@@ -101,10 +101,12 @@ def worker_calls(batch):
     calls = [
         ("read", {"path": str(root)}),
         ("read", {"path": str(WIKI)}),
-        ("read", {"path": str(WIKI / "sources/webdav/other.md")}),
         ("read", {"path": source}),
         ("write", {"path": source, "content": "# Finding\nSource line 1.\n"}),
     ]
+    if MODE == "normal":
+        # Context-limit scenarios deliberately depend on the original call count.
+        calls.insert(2, ("read", {"path": str(WIKI / "sources/webdav/other.md")}))
     if MODE == "pagination":
         calls.insert(
             0, ("read", {"path": batch["sources"][0]["source_path"], "offset": 2, "limit": 2})
