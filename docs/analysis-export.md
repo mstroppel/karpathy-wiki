@@ -46,6 +46,90 @@ HTML together. For example:
 render-analysis analyses/example.md --wiki-url 'https://wiki.example.com'
 ```
 
+## Diagram images
+
+Use ordinary Markdown images with nonempty alternative text. Store each image
+inside the asset directory belonging to the analysis:
+
+```text
+analyses/example.md
+assets/analyses/example/daily-volume.svg
+assets/analyses/example/scatter.png
+assets/analyses/example.html
+```
+
+```markdown
+![Daily documented volume, with missing days marked](/.fs/assets/analyses/example/daily-volume.svg)
+![Individual measurements](/.fs/assets/analyses/example/scatter.png "Measurements")
+```
+
+This root-relative `/.fs/` path addresses a local file in SilverBullet. During
+export the renderer reads the corresponding file directly; it makes no HTTP
+requests. Only lowercase ASCII kebab-case filenames ending in `.png` or `.svg`
+in that analysis's directory are accepted. No subdirectories, symlinks, parent
+traversal, query strings, fragments, external URLs, author-provided data URLs,
+raw HTML images or inline SVG are supported. Code examples remain ordinary text.
+
+The renderer validates every image, then embeds it as a generated base64 data
+URL in an `<img>`. The resulting HTML remains self-contained when downloaded:
+diagram display needs neither a network connection nor a wiki login. The wiki
+page still uses the original asset files. Publish those assets together with
+the Markdown and generated HTML. Image content is published data; PNG metadata
+removal is not anonymization of labels or plotted values.
+
+### Formats and limits
+
+- **PNG:** a decoded static PNG, at most 10 MiB and 40 megapixels. It is re-encoded
+  without source metadata, preserving transparency. APNG and mismatched/corrupt
+  files are rejected. Re-encoded PNGs must also fit the 10 MiB limit.
+- **SVG:** at most 2 MiB, 10,000 elements, XML/reference depth 64 and 100,000
+  expanded elements. The root and elements must use the SVG namespace. Shapes,
+  paths, groups, text, local clipping, patterns, gradients, markers and `use`
+  references are supported. Supported elements are `svg`, `g`, `defs`, `title`,
+  `desc`, `path`, `rect`, `circle`, `ellipse`, `line`, `polyline`, `polygon`,
+  `text`, `tspan`, `clipPath`, `pattern`, `linearGradient`, `radialGradient`,
+  `stop`, `marker` and `use`. References must be unambiguous local fragments;
+  missing targets, cycles and excessive expansion are rejected. Dimensions must
+  be positive and bounded to 20,000 nominal CSS pixels per axis and 40 megapixels
+  per viewport, including dimensions inferred from a `viewBox` ratio when only
+  one axis is supplied (without a ratio the missing axis uses the default
+  300px width or 150px height). SVG viewport dimensions must use absolute lengths,
+  not percentages or font-relative units. For other geometry percentages cannot
+  exceed 100% in dimension attributes; relative font units use 16 pixels for the
+  conservative dimension check. Numeric magnitudes are bounded to 10 million and
+  individual attributes to 100,000 characters.
+- Simple SVG presentation attributes and inline `style` declarations are
+  supported. A CSS parser validates declarations and converts allowed properties
+  to presentation attributes. Stylesheets, CSS variables, imports, `!important`,
+  scripts, event handlers, animation, `foreignObject`, embedded images, external
+  fonts/resources, DTDs/entities and processing instructions are rejected.
+  Unknown elements, attributes and values fail rather than silently dropping
+  diagram content. Path commands must have complete argument groups and valid
+  arc flags/radii; transforms have checked argument counts and point lists need
+  coordinate pairs. The numeric-list subset uses whitespace or single commas;
+  compact arc flags must be separated. General-purpose SVG exports may need an
+  explicitly supported export preset or a supplied PNG alternative; this is not
+  full SVG support.
+- **Document:** at most 50 image occurrences and 50 MiB final UTF-8 HTML, including
+  base64 expansion. Repeated assets are validated once but count on each use.
+
+Embedded SVG is an isolated static image, not inline document markup. There are
+no per-point interactive controls or guaranteed embedded-font fidelity. Keep
+full values, uncertainty explanations and source links in a readable HTML table
+when the analysis includes them; alternative text is not a replacement.
+
+The existing HTML sanitizer remains in place. Its protocol allowlist does not
+accept arbitrary `data:` URLs; only renderer-created, validated image nodes are
+inserted after sanitization. Local reads are directory-relative and do not follow
+symlinks. The renderer reports the number of embedded PNG and SVG occurrences.
+Any unsupported image fails the export with a nonzero exit status. A previously
+generated HTML view is replaced atomically only after the whole render succeeds;
+on failure it remains the old view, not evidence of a successful current export.
+
+The print template scales images to available width, preserves aspect ratios
+and limits tall diagrams for A4 printing. Check the actual browser/PDF output;
+very dense diagrams still require appropriate source dimensions and labels.
+
 ## Links
 
 Both links are derived from `WIKI_PUBLIC_URL`:

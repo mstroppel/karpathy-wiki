@@ -8,6 +8,7 @@ OPENCODE_SMOKE_IMAGE=${BACKEND_IMAGE:-kw-opencode:integration}
 
 # shellcheck disable=SC1007
 repository_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+BACKEND_IMAGE="$OPENCODE_SMOKE_IMAGE" sh "$repository_root/tests/integration/analysis-images.sh"
 prefix="kw-oc-smoke-$(date +%s)-$$"
 backend="$prefix-opencode"
 frontend="$prefix-openchamber"
