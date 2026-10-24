@@ -11,7 +11,7 @@ ARG APP_UID=1000
 ARG APP_GID=100
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl git ripgrep tzdata python3 python3-markdown python3-bleach \
+    && apt-get install -y --no-install-recommends ca-certificates curl git ripgrep tzdata python3 python3-markdown python3-bleach python3-pil python3-defusedxml python3-tinycss2 \
     && rm -rf /var/lib/apt/lists/*
 
 RUN arch="${TARGETARCH:-$(dpkg --print-architecture)}" \

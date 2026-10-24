@@ -115,6 +115,15 @@
         background: none;
         padding: 0;
       }
+      main img {
+        display: block;
+        max-width: 100%;
+        max-height: 50rem;
+        width: auto;
+        height: auto;
+        object-fit: contain;
+        margin: 0.75rem auto;
+      }
       main table {
         border-collapse: collapse;
         width: 100%;
@@ -175,6 +184,12 @@
           font-size: 0.78em;
           color: var(--muted);
           overflow-wrap: anywhere;
+        }
+        main img {
+          max-width: 100%;
+          max-height: 220mm;
+          break-inside: avoid;
+          page-break-inside: avoid;
         }
       }
     </style>
