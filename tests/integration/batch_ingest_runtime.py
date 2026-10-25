@@ -40,6 +40,34 @@ def worker_calls(batch):
     root = Path(batch.get("wiki_root", str(WIKI)))
     source = batch["sources"][0]["wiki_path"]
     relative = str(Path(source).relative_to(root))
+    if MODE in ("relative-read", "add-stale"):
+        create = f"*** Add File: {relative}\n+# Finding\n+Source line 1.\n"
+        update = "*** Update File: overview.md\n@@\n-{}\n+# Finding\n"
+        current = (root / "overview.md").read_text().splitlines()[0]
+        if MODE == "relative-read":
+            return [
+                ("read", {"path": relative}),
+                ("patch", {"patchText": f"*** Begin Patch\n{create}*** End Patch"}),
+            ]
+        return [
+            (
+                "patch",
+                {
+                    "patchText": f"*** Begin Patch\n{create}"
+                    + update.format("Nonexistent stale context")
+                    + "*** End Patch"
+                },
+            ),
+            ("read", {"path": "overview.md"}),
+            (
+                "patch",
+                {
+                    "patchText": f"*** Begin Patch\n{create}"
+                    + update.format(current)
+                    + "*** End Patch"
+                },
+            ),
+        ]
     if MODE == "denied":
         file = Path(TARGET) if Path(TARGET).is_absolute() else root / TARGET
         if MUTATION == "edit":
@@ -290,7 +318,8 @@ def run(sid=None):
                 "model": {
                     "providerID": "fake",
                     "id": "gpt-5-synthetic"
-                    if MODE in ("patch", "mixed", "syntax") or MUTATION == "patch"
+                    if MODE in ("patch", "mixed", "syntax", "relative-read", "add-stale")
+                    or MUTATION == "patch"
                     else "synthetic",
                 },
                 "location": {"directory": str(WIKI)},
@@ -355,23 +384,23 @@ def main():
         "errors": [],
     }
 
-    def change_source(text=None):
+    def change_source(text=None, name="notes.md"):
         if text is None:
             text = f"Synthetic source line 1, generation {time.monotonic_ns()}.\n"
-        (SOURCE / "notes.md").write_text(text)
+        (SOURCE / name).write_text(text)
         revision = hashlib.sha256(text.encode()).hexdigest()
         manifest["items"] = [
             {
-                "source_key": "notes.md",
-                "source_path": "notes.md",
-                "wiki_path": "webdav/notes.md",
+                "source_key": name,
+                "source_path": name,
+                "wiki_path": f"webdav/{name}",
                 "source_revision": revision,
                 "frontmatter": {
                     "source": "webdav",
-                    "source_path": "notes.md",
+                    "source_path": name,
                     "source_revision": revision,
                 },
-                "claim": {"source": "webdav", "source_path": "notes.md"},
+                "claim": {"source": "webdav", "source_path": name},
             }
         ]
         (SOURCE / "manifest.json").write_text(json.dumps(manifest))
@@ -410,6 +439,23 @@ def main():
                     time.sleep(1)
             else:
                 raise AssertionError("Backend startup timed out")
+            ACTION = {"source_path": str(SOURCE / "notes.md")}
+            for mode in ("relative-read", "add-stale"):
+                MODE = mode
+                change_source(name=f"{mode}.md")
+                ACTION = {"source_path": str(SOURCE / f"{mode}.md")}
+                _, recovered = run()
+                assert recovered["status"] == "done", (recovered, ERRORS)
+                item = recovered["sources"][0]
+                assert item["status"] == "ingested" and item["commit"], item
+                subprocess.run(
+                    ["git", "-C", str(WIKI), "cat-file", "-e", f"{item['commit']}^{{commit}}"],
+                    check=True,
+                )
+                assert item["worker_errors"] == [], item
+                assert item["attempts"][0]["recovered_errors"], item
+            MODE = "normal"
+            change_source()
             ACTION = {"source_path": str(SOURCE / "notes.md")}
             _, state = run()
             assert state["status"] == "done", state

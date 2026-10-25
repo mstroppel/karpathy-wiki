@@ -75,6 +75,7 @@ export function workerEvidence(
     const later = tools.slice(index + 1)
     const error = part.state?.error
     const exact = targets(part, wikiRoot)
+    const missingPath = /^File not found: (.+)$/.exec(error?.message ?? '')?.[1]
     const targetRead =
       sourceAbsent &&
       index < creation &&
@@ -82,7 +83,8 @@ export function workerEvidence(
       exact.length === 1 &&
       exact[0] === source &&
       error?.type === 'tool.execution' &&
-      error.message === `File not found: ${source}`
+      missingPath !== undefined &&
+      path.resolve(wikiRoot, missingPath) === source
     const repeatedRead =
       part.name === 'read' &&
       error?.type === 'tool.execution' &&
@@ -113,6 +115,11 @@ export function workerEvidence(
         error.message ?? '',
       )
     const staleContext = /Failed to find expected lines/.test(error?.message ?? '')
+    const added = new Set(
+      [...(part.state.input?.patchText ?? '').matchAll(/^\*\*\* Add File: (.+)$/gm)].map((match) =>
+        path.resolve(wikiRoot, match[1]),
+      ),
+    )
     const correctedPatch =
       (catalog || patchSyntax) &&
       exact.length > 0 &&
@@ -125,7 +132,9 @@ export function workerEvidence(
                 mutations.has(item.name) &&
                 successful(item) &&
                 targets(item, wikiRoot).includes(target) &&
+                (!added.has(target) || created(item, target, wikiRoot)) &&
                 (!staleContext ||
+                  added.has(target) ||
                   later
                     .slice(0, mutationIndex)
                     .some(
