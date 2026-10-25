@@ -855,6 +855,69 @@ test('only an absent exact target read recovered by later creation is forgiven; 
   assert.ok(workerEvidence([denied, write], source, 'succeeded').errors.length)
 })
 
+test('missing target recovery normalizes only the exact absent draft target', () => {
+  const wikiRoot = '/knowledge/incoming/ingest-journal/drafts/synthetic/wiki'
+  const relative = 'sources/email/synthetic/index.md'
+  const target = `${wikiRoot}/${relative}`
+  const create = nativeTool('patch', {
+    patchText: `*** Begin Patch\n*** Add File: ${relative}\n+# Finding\n*** End Patch`,
+  })
+  for (const input of [relative, target]) {
+    for (const missingPath of [relative, target]) {
+      const missing = nativeTool('read', { path: input }, 'error', {
+        type: 'tool.execution',
+        message: `File not found: ${missingPath}`,
+      })
+      const options = { wikiRoot, sourceAbsent: true }
+      const result = workerEvidence([missing, create], target, 'succeeded', options)
+      assert.deepEqual(result.errors, [])
+      assert.deepEqual(result.recovered_errors, [{ code: 'worker_tool_failed', tool: 'read' }])
+      assert.ok(workerEvidence([missing], target, 'succeeded', options).errors.length)
+      assert.ok(workerEvidence([create, missing], target, 'succeeded', options).errors.length)
+      assert.ok(workerEvidence([missing, create], target, 'succeeded', { wikiRoot }).errors.length)
+    }
+  }
+  for (const [input, message, type] of [
+    [relative, 'File not found: sources/email/other/index.md', 'tool.execution'],
+    ['sources/email/other/index.md', `File not found: ${relative}`, 'tool.execution'],
+    [relative, `File not found: ${relative}`, 'permission.rejected'],
+    [relative, `Permission denied: ${relative}`, 'tool.execution'],
+  ]) {
+    const missing = nativeTool('read', { path: input }, 'error', { type, message })
+    assert.ok(
+      workerEvidence([missing, create], target, 'succeeded', { wikiRoot, sourceAbsent: true })
+        .errors.length,
+    )
+  }
+})
+
+test('mixed add/update stale patch recovery requires creation and rereading existing targets', () => {
+  const overview = '/knowledge/wiki/overview.md'
+  const input = {
+    patchText: `*** Begin Patch\n*** Add File: ${source}\n+# Finding\n*** Update File: ${overview}\n@@\n-Stale\n+Current\n*** End Patch`,
+  }
+  const failed = nativeTool('patch', input, 'error', {
+    type: 'tool.execution',
+    message: 'patch verification failed: Failed to find expected lines',
+  })
+  const corrected = nativeTool('patch', input)
+  const reread = read('1: Current\n', overview)
+  const result = workerEvidence([failed, reread, corrected], source, 'succeeded')
+  assert.deepEqual(result.errors, [])
+  assert.deepEqual(result.recovered_errors, [{ code: 'worker_tool_failed', tool: 'patch' }])
+  for (const messages of [
+    [failed, corrected],
+    [reread, failed, corrected],
+    [failed, corrected, reread],
+    [failed, reread, nativeTool('write', { path: overview })],
+    [failed, reread, nativeTool('write', { path: source })],
+    [failed, reread, nativeTool('edit', { path: source }), nativeTool('write', { path: overview })],
+    [failed, reread, failed],
+  ]) {
+    assert.ok(workerEvidence(messages, source, 'succeeded').errors.length)
+  }
+})
+
 test('safe in-session read/skill/patch correction is auditable; unrelated or late errors stay fatal', () => {
   const failedRead = nativeTool('read', { path: original }, 'error', { type: 'tool.execution' })
   const failedSkill = nativeTool('skill', { id: 'wiki-ingest' }, 'error', {
