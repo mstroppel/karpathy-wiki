@@ -4,6 +4,6 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@openchamber/web": "2.3.3"
+    "@openchamber/web": "2.5.1"
   }
 }
