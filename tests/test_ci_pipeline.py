@@ -118,6 +118,16 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("Unsupported integration image", result.stderr)
 
+    def test_prerelease_numbering_uses_all_tags_and_never_force_pushes(self):
+        workflow = (ROOT / ".github/workflows/pre-release.yml").read_text()
+        self.assertIn("fetch-depth: 0", workflow)
+        self.assertIn('version=$(python3 scripts/next-prerelease.py "$base")', workflow)
+        self.assertNotIn("seq 0 99", workflow)
+        self.assertNotIn("gh release view", workflow)
+        self.assertIn('git tag "v${VERSION}" "$GITHUB_SHA"', workflow)
+        self.assertIn('git push origin "refs/tags/v${VERSION}"', workflow)
+        self.assertNotIn("--force", workflow)
+
 
 class PromotionTests(unittest.TestCase):
     def metadata(self):

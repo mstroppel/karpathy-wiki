@@ -35,8 +35,6 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Compute pre-release version
         id: version
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           base=$(sed -n 's/^## \[\([0-9][0-9.]*\)\]-unreleased$/\1/p' CHANGELOG.md | head -n 1)
           if [ -z "$base" ]; then
@@ -51,18 +49,7 @@ jobs:
               base=$(printf '%s' "$last" | awk -F. '{printf "%d.%d.%d", $1, $2, $3+1}')
             fi
           fi
-          version=""
-          for candidate in $(seq 0 99); do
-            candidate="${base}-pre.${candidate}"
-            if ! gh release view "v${candidate}" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-              version="$candidate"
-              break
-            fi
-          done
-          if [ -z "$version" ]; then
-            printf 'No free pre-release version under %s\n' "$base" >&2
-            exit 1
-          fi
+          version=$(python3 scripts/next-prerelease.py "$base")
           printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
       - name: Create git tag
         env:
@@ -70,8 +57,8 @@ jobs:
         run: |
           git config user.name "${GITHUB_ACTOR}"
           git config user.email "${GITHUB_ACTOR}@users.noreply.github.com"
-          git tag -f "v${VERSION}" "$GITHUB_SHA"
-          git push origin "v${VERSION}" --force
+          git tag "v${VERSION}" "$GITHUB_SHA"
+          git push origin "refs/tags/v${VERSION}"
       - name: Promote tested CI images by digest without rebuilding
         env:
           IMAGE_VERSION: ${{ steps.version.outputs.version }}
