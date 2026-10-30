@@ -79,7 +79,7 @@ in `sources`, with `sources_total` and `sources_omitted`. Chat always shows each
 returned source's readable filename or email subject/date, short title, publication
 status, and one to five sentences about changes and relevant uncertainties. For
 larger batches it explicitly counts the additional entries in the private report;
-it does not silently omit them. The serialized brief list is also capped at 24 KiB
+it does not silently omit them. The serialized brief list is also capped at 12 KiB
 (including multibyte prose and changed paths); entries exceeding either limit remain
 in the full private report and count toward `sources_omitted`.
 Zero selected sources produce no invented findings.
@@ -87,7 +87,7 @@ Zero selected sources produce no invented findings.
 The existing worker ends its report with one `ingest-summary` JSON fence containing
 `title` (up to 120 characters) and `summary` (one to five single-line sentence
 strings, up to 400 characters each). Sentence boundaries are checked using German
-segmentation with numeric ordinals and common abbreviations protected; ambiguous
+segmentation with calendar-date ordinals and common abbreviations protected; ambiguous
 or malformed prose can be unavailable without failing ingestion. These
 optional model-written fields are validated and retained in private batch state,
 not added to wiki frontmatter. Missing/malformed briefs show the source identity

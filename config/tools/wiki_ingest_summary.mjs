@@ -3,7 +3,10 @@ const sentences = new Intl.Segmenter('de', { granularity: 'sentence' })
 function oneSentence(value) {
   // ICU otherwise splits ordinary German ordinals ("23. Oktober") and titles.
   const protectedText = value
-    .replace(/\b\d+\.(?=\s)/gu, (match) => match.replace('.', ''))
+    .replace(
+      /\b\d{1,2}\.(?=\s+(?:Januar|Februar|März|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember)\b)/giu,
+      (match) => match.replace('.', ''),
+    )
     .replace(/\b(?:z\. B|d\. h|u\. a|Dr|Prof|Nr|bzw|ggf|ca|vgl|usw)\./giu, (match) =>
       match.replaceAll('.', ''),
     )
@@ -38,8 +41,9 @@ export function ingestSourceLabel(source, text) {
 
 export function parseIngestSummary(content) {
   if (typeof content !== 'string' || content.length > 32 * 1024) return null
-  const blocks = [...content.matchAll(/^```ingest-summary\n([\s\S]*?)\n```\s*$/gm)]
-  if (blocks.length !== 1) return null
+  const blocks = [...content.matchAll(/^```ingest-summary\n([\s\S]*?)\n```[ \t]*(?=\r?\n|$)/gm)]
+  if (blocks.length !== 1 || content.slice(blocks[0].index + blocks[0][0].length).trim())
+    return null
   const text = (value, max) =>
     typeof value === 'string' &&
     value.trim().length > 0 &&
@@ -94,7 +98,7 @@ export function ingestChatSources(sources) {
   for (const source of sources.slice(0, 10)) {
     const item = ingestSourceResult(source)
     // Reserve space below the runtime's tool-output byte limit for batch metadata.
-    if (Buffer.byteLength(JSON.stringify([...items, item])) > 24 * 1024) break
+    if (Buffer.byteLength(JSON.stringify([...items, item])) > 12 * 1024) break
     items.push(item)
   }
   return items

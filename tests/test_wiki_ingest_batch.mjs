@@ -48,6 +48,7 @@ test('optional worker brief has bounded plain-text fields and one to five senten
     { ...brief, summary: [3] },
     { ...brief, summary: ['A. B. C. D. E. F.'] },
     { ...brief, summary: ['Erster Satz. Zweiter Satz.'] },
+    { ...brief, summary: ['Der Wert ist 42. Die Methode blieb gleich.'] },
   ])
     assert.equal(parseIngestSummary(reportWith(value)), null)
   for (const content of [
@@ -55,9 +56,11 @@ test('optional worker brief has bounded plain-text fields and one to five senten
     'No structured report',
     '```ingest-summary\n{bad json}\n```',
     reportWith(brief) + '\n' + reportWith(brief),
+    reportWith(brief) + '\nUnexpected trailing prose.',
     'x'.repeat(32 * 1024) + reportWith(brief),
   ])
     assert.equal(parseIngestSummary(content), null)
+  assert.deepEqual(parseIngestSummary(reportWith(brief) + '\n\n  '), brief)
   for (const sentence of [
     'Am 23. Oktober sind 870 ml erfasst.',
     'Der Wert ist z. B. unklar.',
@@ -112,8 +115,8 @@ test('chat briefs respect a serialized byte budget, including multibyte text and
   }
   const selected = ingestChatSources(Array(10).fill(source))
   assert.ok(selected.length > 0 && selected.length < 10)
-  assert.ok(Buffer.byteLength(JSON.stringify(selected)) <= 24 * 1024)
-  assert.deepEqual(ingestChatSources([{ ...source, changed_pages: ['x'.repeat(24 * 1024)] }]), [])
+  assert.ok(Buffer.byteLength(JSON.stringify(selected)) <= 12 * 1024)
+  assert.deepEqual(ingestChatSources([{ ...source, changed_pages: ['x'.repeat(12 * 1024)] }]), [])
 })
 
 async function fixture(t, count = 3, adapter = 'webdav') {
@@ -202,6 +205,22 @@ test('chat and private report share a durable brief with code-owned publication 
   assert.ok(report.indexOf('## Kurzüberblick') < report.indexOf('## Technische Details'))
   assert.ok(report.includes('note&#45;0&#46;md'))
   assert.ok(report.includes('Eine Mengenangabe bleibt unklar&#46;'))
+})
+
+test('complete batch response remains below the configured runtime tool-output cap', async (t) => {
+  const f = await fixture(t, 6)
+  const verbose = { title: 'Titel', summary: Array(5).fill('W'.repeat(399) + '.') }
+  const result = await runIngestBatch(f.opts, async (batch) => ({
+    ...(await f.worker(batch)),
+    content: reportWith(verbose),
+  }))
+  const config = JSON.parse(await readFile(new URL('../config/opencode.json', import.meta.url)))
+  assert.ok(Buffer.byteLength(JSON.stringify(result)) < config.tool_output.max_bytes)
+  assert.ok(result.sources.length > 0 && result.sources.length < 6)
+  assert.equal(result.sources_omitted, 6 - result.sources.length)
+  assert.equal(result.sources_total, 6)
+  assert.ok(result.report_path)
+  assert.equal((await f.state(result)).sources.length, 6)
 })
 
 test('email labels, literal Markdown/HTML and changed revisions preserve the same brief contract', async (t) => {
