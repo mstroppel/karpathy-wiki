@@ -49,6 +49,17 @@ für den Abschluss werden hier konkretisiert.
    Wiki-Seiten, Revisionsabgleich, Widersprüche/offene Fragen und
    Extraktionsgrenzen einschließlich gelesenen Umfangs und ausgelassener Teile.
    Ausführliche Befunde gehören ins Wiki, nicht nur in den Bericht.
+   Beende den Bericht mit genau einem Block `ingest-summary` (JSON):
+   ```ingest-summary
+   {"source_label":"Dateiname oder E-Mail-Betreff mit Datum","title":"Kurzer Änderungstitel","summary":["Was gegenüber dem bisherigen Wiki ergänzt oder geändert wurde.","Relevante Unklarheit, Widerspruch oder Extraktionsgrenze."]}
+   ```
+   Nutze nur die bereinigte Quelle für `source_label` (höchstens 240 Zeichen);
+   fehlt eine verständliche Bezeichnung, nutze den gelieferten Quellpfad.
+   `title`: höchstens 120 Zeichen. `summary`: insgesamt 1–5 Sätze als Array,
+   je Element ein Satz mit höchstens 400 Zeichen, ohne Zeilenumbrüche.
+   Keine neuen Erkenntnisse erfinden und keine Veröffentlichung behaupten:
+   beschreibe die fachlichen Entwurfsänderungen; ihren Status liefert Code.
+   Bei `SKIP:` bleibt diese Antwort unverändert, ohne JSON-Pflicht.
 
 Bei Werkzeugfehlern keinen Erfolg behaupten. Kein Rücksetzen; der Code entscheidet
 anhand nativer Evidenz und des Entwurfs. Syntax-/Kontextfehler durch frisches

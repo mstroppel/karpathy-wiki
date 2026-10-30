@@ -19,11 +19,45 @@ import { promisify } from 'node:util'
 import { inspectIngestBatch, runIngestBatch } from '../config/tools/wiki_ingest_batch_core.mjs'
 import { createBatchWorker, workerEvidence } from '../config/tools/wiki_ingest_batch_worker.mjs'
 import { withIngestLock } from '../config/tools/wiki_ingest_storage.mjs'
+import { parseIngestSummary } from '../config/tools/wiki_ingest_summary.mjs'
 
 const exec = promisify(execFile)
 const sha = (bytes) => createHash('sha256').update(bytes).digest('hex')
+const brief = {
+  source_label: 'Tabelle.xlsx',
+  title: 'Tabelle um neue Werte ergänzt',
+  summary: ['Die Quellenseite enthält zusätzliche Werte.', 'Eine Mengenangabe bleibt unklar.'],
+}
+const reportWith = (value) =>
+  `Befunde und Fundstellen.\n\n\`\`\`ingest-summary\n${JSON.stringify(value)}\n\`\`\``
 
-async function fixture(t, count = 3) {
+test('optional worker brief has bounded plain-text fields and one to five sentences', () => {
+  assert.deepEqual(parseIngestSummary(reportWith(brief)), brief)
+  for (const value of [
+    null,
+    {},
+    { ...brief, title: '' },
+    { ...brief, title: 'x'.repeat(121) },
+    { ...brief, source_label: 'x'.repeat(241) },
+    { ...brief, summary: [] },
+    { ...brief, summary: Array(6).fill('Satz.') },
+    { ...brief, summary: ['x'.repeat(401)] },
+    { ...brief, summary: ['\nNeue Zeile.'] },
+    { ...brief, summary: [3] },
+    { ...brief, source_label: '\u0000hidden' },
+  ])
+    assert.equal(parseIngestSummary(reportWith(value)), null)
+  for (const content of [
+    undefined,
+    'No structured report',
+    '```ingest-summary\n{bad json}\n```',
+    reportWith(brief) + '\n' + reportWith(brief),
+    'x'.repeat(32 * 1024) + reportWith(brief),
+  ])
+    assert.equal(parseIngestSummary(content), null)
+})
+
+async function fixture(t, count = 3, adapter = 'webdav') {
   const base = await mkdtemp(path.join(os.tmpdir(), 'wiki-ingest-'))
   t.after(() => rm(base, { recursive: true, force: true }))
   const opts = {
@@ -31,8 +65,8 @@ async function fixture(t, count = 3) {
     sourceRoot: path.join(base, 'sources'),
     root: path.join(base, 'journal'),
   }
-  await mkdir(path.join(opts.wikiRoot, 'sources/webdav'), { recursive: true })
-  await mkdir(path.join(opts.sourceRoot, 'webdav'), { recursive: true })
+  await mkdir(path.join(opts.wikiRoot, 'sources', adapter), { recursive: true })
+  await mkdir(path.join(opts.sourceRoot, adapter), { recursive: true })
   const git = async (...args) => (await exec('git', args, { cwd: opts.wikiRoot })).stdout.trim()
   await git('init', '-q')
   await git('config', 'user.name', 'Synthetic test')
@@ -44,8 +78,8 @@ async function fixture(t, count = 3) {
   const manifest = {
     contract: 'karpathy-wiki-provider-manifest',
     version: 1,
-    source: 'webdav',
-    wiki_root: 'webdav',
+    source: adapter,
+    wiki_root: adapter,
     generated_at: 1760000000,
     items: [],
     revoked: [],
@@ -54,18 +88,18 @@ async function fixture(t, count = 3) {
   for (let i = 0; i < count; i++) {
     const name = `note-${i}.md`
     const text = `Synthetic source ${i}.\n`
-    await writeFile(path.join(opts.sourceRoot, 'webdav', name), text)
+    await writeFile(path.join(opts.sourceRoot, adapter, name), text)
     manifest.items.push({
       source_key: name,
       source_path: name,
-      wiki_path: `webdav/${name}`,
+      wiki_path: `${adapter}/${name}`,
       source_revision: sha(text),
-      frontmatter: { source: 'webdav', source_path: name, source_revision: sha(text) },
-      claim: { source: 'webdav', source_path: name },
+      frontmatter: { source: adapter, source_path: name, source_revision: sha(text) },
+      claim: { source: adapter, source_path: name },
     })
   }
   const publish = () =>
-    writeFile(path.join(opts.sourceRoot, 'webdav/manifest.json'), JSON.stringify(manifest))
+    writeFile(path.join(opts.sourceRoot, adapter, 'manifest.json'), JSON.stringify(manifest))
   await publish()
   const worker = async ({ sources }) => {
     assert.equal(sources.length, 1)
@@ -82,6 +116,95 @@ async function fixture(t, count = 3) {
     )
   return { opts, git, manifest, publish, worker, state }
 }
+
+test('chat and private report share a durable brief with code-owned publication evidence', async (t) => {
+  const f = await fixture(t, 1)
+  const malicious = { ...brief, status: 'failed', commit: 'invented', wiki_path: '/invented' }
+  const result = await runIngestBatch(f.opts, async (batch) => ({
+    ...(await f.worker(batch)),
+    content: reportWith(malicious),
+  }))
+  const [item] = result.sources
+  assert.equal(result.sources_total, 1)
+  assert.equal(result.sources_omitted, 0)
+  assert.equal(item.status, 'ingested')
+  assert.equal(item.commit, result.commit)
+  assert.notEqual(item.wiki_path, '/invented')
+  assert.equal(item.source_label, brief.source_label)
+  assert.deepEqual(item.summary, brief.summary)
+  assert.deepEqual((await f.state(result)).sources[0].brief, brief)
+  const report = await readFile(result.report_path, 'utf8')
+  assert.ok(report.indexOf('## Kurzüberblick') < report.indexOf('## Technische Details'))
+  assert.ok(report.includes('Tabelle&#46;xlsx'))
+  assert.ok(report.includes('Eine Mengenangabe bleibt unklar&#46;'))
+})
+
+test('email labels, literal Markdown/HTML and changed revisions preserve the same brief contract', async (t) => {
+  const f = await fixture(t, 1, 'email')
+  await runIngestBatch(f.opts, f.worker)
+  const email = {
+    ...brief,
+    source_label: 'E-Mail: Terminänderung · 2026-01-02',
+    title: '<b>[Titel](x)</b>',
+  }
+  const bytes = 'Revised synthetic source.\n'
+  await writeFile(path.join(f.opts.sourceRoot, 'email/note-0.md'), bytes)
+  f.manifest.items[0].source_revision = sha(bytes)
+  f.manifest.items[0].frontmatter.source_revision = sha(bytes)
+  await f.publish()
+  const result = await runIngestBatch(f.opts, async (batch) => ({
+    ...(await f.worker(batch)),
+    content: reportWith(email),
+  }))
+  assert.equal(result.ingested, 1)
+  assert.equal(result.sources[0].source_label, email.source_label)
+  assert.equal(result.sources[0].title, email.title)
+  assert.equal(result.sources[0].source_path, path.join(f.opts.sourceRoot, 'email/note-0.md'))
+  const overview = (await readFile(result.report_path, 'utf8')).split('## Technische Details')[0]
+  assert.ok(!overview.includes('<b>'))
+  assert.ok(!overview.includes('[Titel](x)'))
+})
+
+test('missing or invalid briefs never retry, downgrade a commit or invent content', async (t) => {
+  const f = await fixture(t, 2)
+  let calls = 0
+  const result = await runIngestBatch(f.opts, async (batch) => {
+    calls++
+    return { ...(await f.worker(batch)), content: calls === 1 ? 'Unstructured' : reportWith({}) }
+  })
+  assert.equal(calls, 2)
+  assert.equal(result.ingested, 2)
+  for (const item of result.sources) {
+    assert.equal(item.status, 'ingested')
+    assert.equal(item.source_label, item.source_path)
+    assert.deepEqual(item.summary, ['Inhaltliche Zusammenfassung nicht verfügbar.'])
+  }
+  const empty = await runIngestBatch(f.opts, () => assert.fail('already current'))
+  assert.deepEqual(empty.sources, [])
+  assert.equal(empty.sources_total, 0)
+})
+
+test('failed and never-started sources cannot present draft findings as published', async (t) => {
+  for (const mode of ['context', 'provider'])
+    await t.test(mode, async (t) => {
+      const f = await fixture(t, 2)
+      const result = await runIngestBatch(f.opts, async (batch) => ({
+        ...(await f.worker(batch)),
+        content: reportWith(brief),
+        ...(mode === 'context' ? { context_limit: true } : { provider_failure: true }),
+      }))
+      assert.equal(result.sources[0].status, 'failed')
+      assert.equal(result.sources[0].commit, null)
+      assert.deepEqual(result.sources[0].changed_pages, [])
+      assert.match(result.sources[0].summary.join(' '), /Nicht übernommen/)
+      assert.ok(!result.sources[0].summary.includes(brief.summary[0]))
+      if (mode === 'provider') assert.equal(result.sources[1].status, 'not_started')
+      const overview = (await readFile(result.report_path, 'utf8')).split(
+        '## Technische Details',
+      )[0]
+      assert.ok(!overview.includes(brief.summary[0]))
+    })
+})
 
 test('other source pages remain readable live while absent from the private draft', async (t) => {
   const f = await fixture(t, 2)
@@ -121,9 +244,13 @@ test('one request drains fourteen sources with unique drafts and verified focuse
   assert.equal(roots.size, 14)
   assert.equal(result.ingested, 14)
   assert.equal(result.remaining, 0)
+  assert.equal(result.sources.length, 10)
+  assert.equal(result.sources_total, 14)
+  assert.equal(result.sources_omitted, 4)
   assert.equal(await f.git('rev-list', '--count', 'HEAD'), '15')
   assert.equal(await f.git('status', '--porcelain'), '')
   const report = await readFile(result.report_path, 'utf8')
+  assert.equal(report.split('## Technische Details')[0].match(/### /g).length, 14)
   for (const source of (await f.state(result)).sources) assert.ok(report.includes(source.commit))
   assert.equal((await runIngestBatch(f.opts, () => assert.fail('already current'))).status, 'done')
 })
@@ -419,11 +546,15 @@ test('control storage is mandatory; failed report storage cannot undo or repeat 
             })
       },
     },
-    f.worker,
+    async (batch) => ({ ...(await f.worker(batch)), content: reportWith(brief) }),
   )
   assert.equal(result.status, 'done')
   assert.equal(result.ingested, 3)
   assert.equal(result.report_path, null)
+  assert.equal(result.sources.length, 3)
+  assert.ok(result.sources.every((item) => item.status === 'ingested' && item.commit))
+  assert.ok(result.sources.every((item) => item.source_label === brief.source_label))
+  assert.ok(result.sources.every((item) => item.summary.join(' ') === brief.summary.join(' ')))
   assert.equal(await f.git('rev-list', '--count', 'HEAD'), '4')
 })
 

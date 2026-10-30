@@ -22,6 +22,11 @@ import {
   storageBytes,
 } from './wiki_ingest_files.mjs'
 import { preparePublication, publishPrepared } from './wiki_ingest_publication.mjs'
+import {
+  ingestSourceResult,
+  ingestSummaryMarkdown,
+  parseIngestSummary,
+} from './wiki_ingest_summary.mjs'
 
 const defaults = {
   wikiRoot: '/knowledge/wiki',
@@ -93,6 +98,11 @@ function reportText(state) {
     '# Einlesebericht',
     `Lauf: ${state.batch_id}`,
     `Status: ${state.status}`,
+    '\n## Kurzüberblick',
+    ...(state.sources.length
+      ? state.sources.map(ingestSummaryMarkdown)
+      : ['Keine neuen oder geänderten Quellen ausgewählt.']),
+    '\n## Technische Details und Modellbefunde',
     ...state.sources.map((source) =>
       [
         `\n## ${source.source_path}`,
@@ -166,6 +176,9 @@ function resultFor(state, report, reportError) {
     report_error: reportError,
     remaining: state.summary.new + state.summary.outdated,
     summary: state.summary,
+    sources: state.sources.slice(0, 10).map(ingestSourceResult),
+    sources_total: state.sources.length,
+    sources_omitted: Math.max(0, state.sources.length - 10),
   }
 }
 
@@ -420,6 +433,7 @@ export async function runIngestBatch(input, worker) {
             ],
           })
           source.content = result?.content?.slice(0, 32 * 1024)
+          source.brief = parseIngestSummary(result?.content)
           source.worker_session = result?.session_id
           source.worker_errors = result?.errors ?? []
           source.source_written = result?.source_written === true
