@@ -357,17 +357,27 @@ class PackageLockTests(unittest.TestCase):
 
 
 class DependabotCoverageTests(unittest.TestCase):
-    def test_chat_security_exception_is_scoped_to_blocked_dependencies(self):
+    def test_chat_security_updates_are_not_ignored(self):
         blocks = read(DEPENDABOT).split("- package-ecosystem:")[1:]
         chat = next(block for block in blocks if "directory: /openchamber\n" in block)
-        ignored = re.findall(r"dependency-name: [\"']?([^\s\"']+)", chat)
-        self.assertEqual(ignored, ["simple-git", "@simple-git/argv-parser"])
-        self.assertIn("#168", chat)
         self.assertIn("chat-runtime:", chat)
         for block in blocks:
-            if block != chat:
-                self.assertNotIn("dependency-name: simple-git", block)
-                self.assertNotIn("@simple-git/argv-parser", block)
+            self.assertNotIn("dependency-name: simple-git", block)
+            self.assertNotIn("@simple-git/argv-parser", block)
+
+    def test_chat_git_dependencies_include_advisory_fixes(self):
+        lock = json.loads(read(ROOT / "openchamber" / "package-lock.json"))
+        for name, minimum in (("simple-git", (4, 0, 2)), ("@simple-git/argv-parser", (2, 0, 1))):
+            matches = [
+                package
+                for path, package in lock["packages"].items()
+                if path.endswith(f"node_modules/{name}")
+            ]
+            self.assertTrue(matches, f"missing {name}")
+            for package in matches:
+                with self.subTest(package=name, version=package["version"]):
+                    version = tuple(int(part) for part in package["version"].split("."))
+                    self.assertGreaterEqual(version, minimum)
 
     def test_all_package_sources_are_covered(self):
         config = read(DEPENDABOT)
