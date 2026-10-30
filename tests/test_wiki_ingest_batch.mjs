@@ -19,12 +19,15 @@ import { promisify } from 'node:util'
 import { inspectIngestBatch, runIngestBatch } from '../config/tools/wiki_ingest_batch_core.mjs'
 import { createBatchWorker, workerEvidence } from '../config/tools/wiki_ingest_batch_worker.mjs'
 import { withIngestLock } from '../config/tools/wiki_ingest_storage.mjs'
-import { parseIngestSummary } from '../config/tools/wiki_ingest_summary.mjs'
+import {
+  ingestChatSources,
+  ingestSourceLabel,
+  parseIngestSummary,
+} from '../config/tools/wiki_ingest_summary.mjs'
 
 const exec = promisify(execFile)
 const sha = (bytes) => createHash('sha256').update(bytes).digest('hex')
 const brief = {
-  source_label: 'Tabelle.xlsx',
   title: 'Tabelle um neue Werte ergänzt',
   summary: ['Die Quellenseite enthält zusätzliche Werte.', 'Eine Mengenangabe bleibt unklar.'],
 }
@@ -38,13 +41,13 @@ test('optional worker brief has bounded plain-text fields and one to five senten
     {},
     { ...brief, title: '' },
     { ...brief, title: 'x'.repeat(121) },
-    { ...brief, source_label: 'x'.repeat(241) },
     { ...brief, summary: [] },
     { ...brief, summary: Array(6).fill('Satz.') },
     { ...brief, summary: ['x'.repeat(401)] },
     { ...brief, summary: ['\nNeue Zeile.'] },
     { ...brief, summary: [3] },
-    { ...brief, source_label: '\u0000hidden' },
+    { ...brief, summary: ['A. B. C. D. E. F.'] },
+    { ...brief, summary: ['Erster Satz. Zweiter Satz.'] },
   ])
     assert.equal(parseIngestSummary(reportWith(value)), null)
   for (const content of [
@@ -55,6 +58,62 @@ test('optional worker brief has bounded plain-text fields and one to five senten
     'x'.repeat(32 * 1024) + reportWith(brief),
   ])
     assert.equal(parseIngestSummary(content), null)
+  for (const sentence of [
+    'Am 23. Oktober sind 870 ml erfasst.',
+    'Der Wert ist z. B. unklar.',
+    'Die Quelle nennt Dr. Beispiel.',
+    '870.5 ml wurden ergänzt.',
+    'Eine Mengenangabe bleibt unklar.',
+  ])
+    assert.deepEqual(parseIngestSummary(reportWith({ ...brief, summary: [sentence] }))?.summary, [
+      sentence,
+    ])
+})
+
+test('source labels are grounded in sanitized headers or code-owned source paths', () => {
+  const source = { adapter: 'webdav', source_key: 'folder/note.md', source_path: '/safe/note.md' }
+  assert.equal(ingestSourceLabel(source, '# Invented.xlsx\n'), 'folder/note.md')
+  const workbook = { ...source, source_key: `xlsx/${'a'.repeat(64)}/workbook.md` }
+  assert.equal(
+    ingestSourceLabel(workbook, '# Workbook: folder/Tabelle\\.xlsx\n'),
+    'folder/Tabelle.xlsx',
+  )
+  assert.equal(ingestSourceLabel(workbook, 'No heading'), source.source_path)
+  const email = { ...source, adapter: 'email' }
+  assert.equal(
+    ingestSourceLabel(email, '# Terminänderung\n\n- **Date:** 2026-01-02\n\n## Message\nText\n'),
+    'E-Mail: Terminänderung · 2026-01-02',
+  )
+  assert.equal(
+    ingestSourceLabel(email, '# Terminänderung\n\n## Message\n- **Date:** Invented\n'),
+    'E-Mail: Terminänderung',
+  )
+  for (const text of [
+    'No headers',
+    `# ${'x'.repeat(241)}\n\n## Message\n`,
+    '# Bad\u0000\n\n## Message\n',
+  ])
+    assert.equal(ingestSourceLabel(email, text), email.source_path)
+  assert.equal(
+    ingestSourceLabel({ ...source, adapter: 'custom' }, '# Unverified\n'),
+    source.source_path,
+  )
+})
+
+test('chat briefs respect a serialized byte budget, including multibyte text and changed paths', () => {
+  const source = {
+    source_path: '/sources/synthetic.md',
+    wiki_path: '/wiki/sources/synthetic.md',
+    status: 'ingested',
+    commit: 'a'.repeat(40),
+    attempts: [{}],
+    brief: { title: 'Titel', summary: Array(5).fill('漢'.repeat(399) + '。') },
+    changed_pages: [],
+  }
+  const selected = ingestChatSources(Array(10).fill(source))
+  assert.ok(selected.length > 0 && selected.length < 10)
+  assert.ok(Buffer.byteLength(JSON.stringify(selected)) <= 24 * 1024)
+  assert.deepEqual(ingestChatSources([{ ...source, changed_pages: ['x'.repeat(24 * 1024)] }]), [])
 })
 
 async function fixture(t, count = 3, adapter = 'webdav') {
@@ -119,7 +178,13 @@ async function fixture(t, count = 3, adapter = 'webdav') {
 
 test('chat and private report share a durable brief with code-owned publication evidence', async (t) => {
   const f = await fixture(t, 1)
-  const malicious = { ...brief, status: 'failed', commit: 'invented', wiki_path: '/invented' }
+  const malicious = {
+    ...brief,
+    source_label: 'Invented.xlsx',
+    status: 'failed',
+    commit: 'invented',
+    wiki_path: '/invented',
+  }
   const result = await runIngestBatch(f.opts, async (batch) => ({
     ...(await f.worker(batch)),
     content: reportWith(malicious),
@@ -130,12 +195,12 @@ test('chat and private report share a durable brief with code-owned publication 
   assert.equal(item.status, 'ingested')
   assert.equal(item.commit, result.commit)
   assert.notEqual(item.wiki_path, '/invented')
-  assert.equal(item.source_label, brief.source_label)
+  assert.equal(item.source_label, 'note-0.md')
   assert.deepEqual(item.summary, brief.summary)
   assert.deepEqual((await f.state(result)).sources[0].brief, brief)
   const report = await readFile(result.report_path, 'utf8')
   assert.ok(report.indexOf('## Kurzüberblick') < report.indexOf('## Technische Details'))
-  assert.ok(report.includes('Tabelle&#46;xlsx'))
+  assert.ok(report.includes('note&#45;0&#46;md'))
   assert.ok(report.includes('Eine Mengenangabe bleibt unklar&#46;'))
 })
 
@@ -144,10 +209,9 @@ test('email labels, literal Markdown/HTML and changed revisions preserve the sam
   await runIngestBatch(f.opts, f.worker)
   const email = {
     ...brief,
-    source_label: 'E-Mail: Terminänderung · 2026-01-02',
     title: '<b>[Titel](x)</b>',
   }
-  const bytes = 'Revised synthetic source.\n'
+  const bytes = '# Terminänderung\n\n- **Date:** 2026-01-02\n\n## Message\nRevised source.\n'
   await writeFile(path.join(f.opts.sourceRoot, 'email/note-0.md'), bytes)
   f.manifest.items[0].source_revision = sha(bytes)
   f.manifest.items[0].frontmatter.source_revision = sha(bytes)
@@ -157,7 +221,7 @@ test('email labels, literal Markdown/HTML and changed revisions preserve the sam
     content: reportWith(email),
   }))
   assert.equal(result.ingested, 1)
-  assert.equal(result.sources[0].source_label, email.source_label)
+  assert.equal(result.sources[0].source_label, 'E-Mail: Terminänderung · 2026-01-02')
   assert.equal(result.sources[0].title, email.title)
   assert.equal(result.sources[0].source_path, path.join(f.opts.sourceRoot, 'email/note-0.md'))
   const overview = (await readFile(result.report_path, 'utf8')).split('## Technische Details')[0]
@@ -176,7 +240,7 @@ test('missing or invalid briefs never retry, downgrade a commit or invent conten
   assert.equal(result.ingested, 2)
   for (const item of result.sources) {
     assert.equal(item.status, 'ingested')
-    assert.equal(item.source_label, item.source_path)
+    assert.equal(item.source_label, path.basename(item.source_path))
     assert.deepEqual(item.summary, ['Inhaltliche Zusammenfassung nicht verfügbar.'])
   }
   const empty = await runIngestBatch(f.opts, () => assert.fail('already current'))
@@ -553,7 +617,7 @@ test('control storage is mandatory; failed report storage cannot undo or repeat 
   assert.equal(result.report_path, null)
   assert.equal(result.sources.length, 3)
   assert.ok(result.sources.every((item) => item.status === 'ingested' && item.commit))
-  assert.ok(result.sources.every((item) => item.source_label === brief.source_label))
+  assert.ok(result.sources.every((item) => item.source_label === path.basename(item.source_path)))
   assert.ok(result.sources.every((item) => item.summary.join(' ') === brief.summary.join(' ')))
   assert.equal(await f.git('rev-list', '--count', 'HEAD'), '4')
 })

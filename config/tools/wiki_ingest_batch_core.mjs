@@ -23,7 +23,8 @@ import {
 } from './wiki_ingest_files.mjs'
 import { preparePublication, publishPrepared } from './wiki_ingest_publication.mjs'
 import {
-  ingestSourceResult,
+  ingestChatSources,
+  ingestSourceLabel,
   ingestSummaryMarkdown,
   parseIngestSummary,
 } from './wiki_ingest_summary.mjs'
@@ -160,6 +161,7 @@ async function loadActiveState(opts) {
 
 function resultFor(state, report, reportError) {
   const failed = state.sources.filter((source) => source.status === 'failed')
+  const sources = ingestChatSources(state.sources)
   return {
     status: state.status,
     batch_id: state.batch_id,
@@ -176,9 +178,9 @@ function resultFor(state, report, reportError) {
     report_error: reportError,
     remaining: state.summary.new + state.summary.outdated,
     summary: state.summary,
-    sources: state.sources.slice(0, 10).map(ingestSourceResult),
+    sources,
     sources_total: state.sources.length,
-    sources_omitted: Math.max(0, state.sources.length - 10),
+    sources_omitted: state.sources.length - sources.length,
   }
 }
 
@@ -410,6 +412,7 @@ export async function runIngestBatch(input, worker) {
             throw new IngestFault('invalid_source_metadata')
           Object.assign(source, selected)
           const bytes = await sourceBytes(source, opts)
+          source.source_label = ingestSourceLabel(source, bytes.toString('utf8'))
           const sourceHash = digest(bytes)
           const draft = await createDraft(
             opts,
@@ -428,6 +431,7 @@ export async function runIngestBatch(input, worker) {
             sources: [
               {
                 ...selected,
+                source_label: source.source_label,
                 wiki_path: path.join(draft.wiki, path.relative(opts.wikiRoot, source.wiki_path)),
               },
             ],

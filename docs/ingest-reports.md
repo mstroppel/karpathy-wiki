@@ -74,23 +74,31 @@ interrupted batch without model work; another explicit request starts new work.
 
 ## Durable publication and reports
 
-Every completed call returns a per-source brief for the first ten selected sources
+Every completed call returns a per-source brief for up to ten selected sources
 in `sources`, with `sources_total` and `sources_omitted`. Chat always shows each
 returned source's readable filename or email subject/date, short title, publication
 status, and one to five sentences about changes and relevant uncertainties. For
 larger batches it explicitly counts the additional entries in the private report;
-it does not silently omit them. Zero selected sources produce no invented findings.
+it does not silently omit them. The serialized brief list is also capped at 24 KiB
+(including multibyte prose and changed paths); entries exceeding either limit remain
+in the full private report and count toward `sources_omitted`.
+Zero selected sources produce no invented findings.
 
 The existing worker ends its report with one `ingest-summary` JSON fence containing
-`source_label` (up to 240 characters), `title` (120), and `summary` (one to five
-single-line sentence strings, up to 400 characters each). Labels come only from
-sanitized source data; unknown filenames/subjects are not reconstructed. These
+`title` (up to 120 characters) and `summary` (one to five single-line sentence
+strings, up to 400 characters each). Sentence boundaries are checked using German
+segmentation with numeric ordinals and common abbreviations protected; ambiguous
+or malformed prose can be unavailable without failing ingestion. These
 optional model-written fields are validated and retained in private batch state,
-not added to wiki frontmatter. Missing/malformed briefs show the exact source path
+not added to wiki frontmatter. Missing/malformed briefs show the source identity
 and an explicit unavailable-summary notice without retrying or blocking ingestion.
 The existing worker call produces the brief; no second model pass is introduced.
 
 Code supplies source identity, status, page paths and verified commit evidence.
+The code-owned `source_label` uses the WebDAV source key, the sanitized XLSX workbook
+heading, or the sanitized email subject/date header (never its body). Unknown formats,
+missing metadata, control characters or labels over 240 characters use the exact
+source path; model-proposed labels cannot override it.
 Failed and unstarted entries show non-publication and the recorded blocker rather
 than the worker's draft-change summary. Chat links published entries to the wiki source page.
 The private `report.md` starts with the same overview for **all** selected sources,

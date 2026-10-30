@@ -99,7 +99,7 @@ publisher or transaction protocol is involved; automatic ingestion is post-1.0 (
 Private reports under `${DATA_ROOT}/incoming/ingest-journal/batches/<id>` contain
 commits, changed pages, findings, contradictions and extraction limits. Chat shows
 each source's filename/email subject, short title, status and a 1–5 sentence summary
-of changes and uncertainties (first ten sources; all entries in the private report),
+of changes and uncertainties (up to ten sources within the chat byte limit; all entries in the private report),
 links the report and summarizes remaining work. See [ingestion reports](docs/ingest-reports.md).
 
 Readers can see intermediate edits. Other writers must stay idle during ingest.
