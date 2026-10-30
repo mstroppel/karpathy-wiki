@@ -4,8 +4,8 @@ FROM debian:bookworm-slim@sha256:7ff6ba31527b9e336162fa061746c366c4b2032f4d2cff2
 # the pinned sha512 digest (hex) for the supported amd64 architecture.
 # Update the digest together with OPENCODE_VERSION; the scheduled
 # OpenCode update workflow opens a pull request that bumps both.
-ARG OPENCODE_VERSION=2.2.2
-ARG OPENCODE_SHA512_LINUX_X64=c1ad289751d468a3434ea8dfa89c2a9aade7e2d95e8c1cb6513e3cc15442ca94541b2f566c8a5778bf719479a58c0a1d403e8771947676a8896054e50cca8854
+ARG OPENCODE_VERSION=2.2.4
+ARG OPENCODE_SHA512_LINUX_X64=ad66e708e3ff9c837c20b02dd2172ec39d6c35bb97fb3708992097eed3d40ac69881534b719ef7c217d6e2561cd3864c3e1c5ec92a2837422f7cbbe7b1a25f81
 ARG TARGETARCH
 ARG APP_UID=1000
 ARG APP_GID=100
