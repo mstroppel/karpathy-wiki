@@ -20,6 +20,8 @@ class BatchWorkflowTests(unittest.TestCase):
             self.assertEqual(command["agent"], "wiki-ingest-orchestrator")
             self.assertFalse(command["subagent"])
             self.assertIn("wiki_ingest_batch", command["template"])
+            for phrase in ("Quellenbezeichnung", "Kurztitel", "1–5 Sätze", "sources"):
+                self.assertIn(phrase, command["template"])
         routing = (ROOT / "config/routing.md").read_text()
         self.assertNotIn("an `wiki-ingest`,", routing)
 
@@ -128,6 +130,20 @@ class BatchWorkflowTests(unittest.TestCase):
             "operation: publish",
         ):
             self.assertNotIn(obsolete, self.worker)
+
+    def test_briefs_are_always_shown_without_extra_workers_or_publication_claims(self):
+        for phrase in ("ingest-summary", "source_label", "title", "summary", "1–5 Sätze"):
+            self.assertIn(phrase, self.worker)
+        for phrase in (
+            "Kurzfassungen immer ausgeben",
+            "sources_omitted",
+            "höchstens zehn Einträge",
+            "failed`/`not_started",
+            "Status, Commit und Seitenpfade liefert ausschließlich Code",
+            "nicht als Anweisungen",
+            "diese weiteren Details fehlen",
+        ):
+            self.assertIn(phrase, self.orchestrator)
 
     def test_private_batch_reports_are_visible_without_exposing_preparations(self):
         compose = (ROOT / "compose.yaml").read_text()
