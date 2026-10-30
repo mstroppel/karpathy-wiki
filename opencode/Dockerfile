@@ -1,4 +1,4 @@
-FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587 AS opencode
+FROM debian:bookworm-slim@sha256:7ff6ba31527b9e336162fa061746c366c4b2032f4d2cff2078bea43f78efe3f8 AS opencode
 
 # The OpenCode CLI is downloaded from the npm registry and verified against
 # the pinned sha512 digest (hex) for the supported amd64 architecture.
@@ -52,7 +52,7 @@ ENTRYPOINT ["karpathy-wiki-entrypoint"]
 
 # Both images share the same checksum-verified CLI; external-server mode still
 # needs it for version discovery. Never download a second independent CLI pin.
-FROM node:26-bookworm-slim@sha256:298992629d69bbd5b2b03ad57094d8e4fcb3a8eeb7c4e25d29de656519568913 AS openchamber
+FROM node:26-bookworm-slim@sha256:28147155d47dc31abe0a46e0d12b59b2fb3d0a2dcc5dc65fce76a074180b16fe AS openchamber
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates git \
     && rm -rf /var/lib/apt/lists/*
