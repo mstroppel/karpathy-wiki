@@ -22,7 +22,11 @@ ACTION: dict = {}
 ERRORS: list[str] = []
 SUMMARY_REQUESTS: list[str] = []
 CONTEXT_FAILURES: list[str] = []
-RESULT = "Synthetic finding, source line 1. Contradictions: none. Limits: fully read line 1."
+RESULT = (
+    "Synthetic finding, source line 1. Contradictions: none. Limits: fully read line 1.\n\n"
+    '```ingest-summary\n{"title":"Synthetic finding",'
+    '"summary":["Added a supported finding.","No contradiction found in line 1."]}\n```'
+)
 
 
 def patch(target, old, new):
@@ -460,6 +464,13 @@ def main():
             _, state = run()
             assert state["status"] == "done", state
             source = state["sources"][0]
+            assert source["brief"] == {
+                "title": "Synthetic finding",
+                "summary": ["Added a supported finding.", "No contradiction found in line 1."],
+            }, source
+            overview = (JOURNAL / "batches" / state["batch_id"] / "report.md").read_text()
+            assert source["source_label"] == "notes.md", source
+            assert "## Kurzüberblick" in overview and "Quelle: notes&#46;md" in overview
             native = request(f"/api/experimental/session/{source['worker_session']}/export")["data"]
             assert "/ingest-journal/drafts/" in native["info"]["location"]["directory"], native[
                 "info"

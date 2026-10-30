@@ -280,13 +280,13 @@
       "description": "Quelle einlesen",
       "agent": "wiki-ingest-orchestrator",
       "subagent": false,
-      "template": "Lade wiki-ingest-orchestrator. Verarbeite nur die ausdrücklich angeforderte neue/geänderte Quelle über wiki_ingest_batch mit source_path aus wiki_ingest_status. Auftrag: $ARGUMENTS"
+      "template": "Lade wiki-ingest-orchestrator. Verarbeite nur die ausdrücklich angeforderte neue/geänderte Quelle über wiki_ingest_batch mit source_path aus wiki_ingest_status. Berichte Quellenbezeichnung, Kurztitel, Status und 1–5 Sätze zu Änderungen und Unklarheiten aus sources; verlinke den privaten Bericht. Auftrag: $ARGUMENTS"
     },
     "ingest-new": {
       "description": "Alle neuen und geänderten Quellen einlesen",
       "agent": "wiki-ingest-orchestrator",
       "subagent": false,
-      "template": "Lade wiki-ingest-orchestrator. Starte alle neuen und geänderten Quellen unter /knowledge/sources einmal mit wiki_ingest_batch. Das Tool verarbeitet jede Quelle einmal in einer frischen Session und einem privaten Entwurf; isolierte Fehler halten unabhängige Quellen nicht auf. Keine automatischen Wiederholungen oder Reparaturfragen. Nichts zurücksetzen. Verlinke den privaten Bericht und nenne offene Arbeit sowie nötige Nutzermaßnahmen bei Kontextgrenzen."
+      "template": "Lade wiki-ingest-orchestrator. Starte alle neuen und geänderten Quellen unter /knowledge/sources einmal mit wiki_ingest_batch. Das Tool verarbeitet jede Quelle einmal in einer frischen Session und einem privaten Entwurf; isolierte Fehler halten unabhängige Quellen nicht auf. Keine automatischen Wiederholungen oder Reparaturfragen. Nichts zurücksetzen. Berichte je Eintrag aus sources Quellenbezeichnung, Kurztitel, Status und 1–5 Sätze zu Änderungen und Unklarheiten; nenne sources_omitted, falls weitere Einträge nur im Bericht stehen. Verlinke den privaten Bericht und nenne offene Arbeit sowie nötige Nutzermaßnahmen bei Kontextgrenzen."
     },
     "lint": {
       "description": "Wiki prüfen",
