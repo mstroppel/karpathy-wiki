@@ -302,6 +302,19 @@ export async function runIngestBatch(input, worker) {
       return writeIngestFile(path.join(directory, 'state.json'), bytes)
     }
     const finish = async () => {
+      // Reporting includes selected sources that never reached dispatch. This is
+      // a provenance-checked metadata read only, never another worker attempt.
+      for (const source of state.sources) {
+        if (source.source_label) continue
+        try {
+          source.source_label = ingestSourceLabel(
+            source,
+            (await sourceBytes(source, opts)).toString('utf8'),
+          )
+        } catch {
+          source.source_label = source.source_path
+        }
+      }
       const fresh = await opts.scan()
       state.summary = fresh.summary
       state.diagnostics = diagnosticsFor(fresh)

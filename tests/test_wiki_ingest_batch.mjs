@@ -270,6 +270,44 @@ test('failed and never-started sources cannot present draft findings as publishe
     })
 })
 
+test('selected unstarted emails retain readable metadata after early blockers without model work', async (t) => {
+  for (const blocker of ['dirty', 'capacity', 'provider', 'missing'])
+    await t.test(blocker, async (t) => {
+      const f = await fixture(t, 2, 'email')
+      for (const [i, item] of f.manifest.items.entries()) {
+        const bytes = `# Termin ${i}\n\n- **Date:** 2026-01-02\n\n## Message\nSynthetic text.\n`
+        await writeFile(path.join(f.opts.sourceRoot, 'email', item.source_path), bytes)
+        item.source_revision = sha(bytes)
+        item.frontmatter.source_revision = sha(bytes)
+      }
+      await f.publish()
+      if (blocker === 'dirty')
+        await writeFile(path.join(f.opts.wikiRoot, 'overview.md'), '# Dirty\n')
+      if (blocker === 'missing') await rm(path.join(f.opts.sourceRoot, 'email/note-1.md'))
+      let calls = 0
+      const result = await runIngestBatch(
+        { ...f.opts, ...(blocker === 'capacity' ? { maxDraftBytes: 1 } : {}) },
+        async (batch) => {
+          calls++
+          return { ...(await f.worker(batch)), provider_failure: true }
+        },
+      )
+      assert.equal(calls, ['dirty', 'capacity'].includes(blocker) ? 0 : 1)
+      assert.equal(result.sources[1].status, 'not_started')
+      assert.equal(
+        result.sources[1].source_label,
+        blocker === 'missing'
+          ? path.join(f.opts.sourceRoot, 'email/note-1.md')
+          : 'E-Mail: Termin 1 · 2026-01-02',
+      )
+      assert.equal((await f.state(result)).sources[1].source_label, result.sources[1].source_label)
+      const overview = (await readFile(result.report_path, 'utf8')).split(
+        '## Technische Details',
+      )[0]
+      if (blocker !== 'missing') assert.ok(overview.includes('E&#45;Mail: Termin 1'))
+    })
+})
+
 test('other source pages remain readable live while absent from the private draft', async (t) => {
   const f = await fixture(t, 2)
   const other = 'sources/webdav/note-0.md'

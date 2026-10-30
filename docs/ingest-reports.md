@@ -99,6 +99,9 @@ The code-owned `source_label` uses the WebDAV source key, the sanitized XLSX wor
 heading, or the sanitized email subject/date header (never its body). Unknown formats,
 missing metadata, control characters or labels over 240 characters use the exact
 source path; model-proposed labels cannot override it.
+Final reporting also reads provenance-checked metadata for selected sources that
+never dispatched after a blocker. Unavailable or changed sources keep the exact-path
+label; this optional read never starts/retries a worker or alters source status.
 Failed and unstarted entries show non-publication and the recorded blocker rather
 than the worker's draft-change summary. Chat links published entries to the wiki source page.
 The private `report.md` starts with the same overview for **all** selected sources,
