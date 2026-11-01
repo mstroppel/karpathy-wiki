@@ -1107,33 +1107,64 @@ test('only an absent exact target read recovered by later creation is forgiven; 
   assert.ok(workerEvidence([denied, write], source, 'succeeded').errors.length)
 })
 
-test('missing target recovery normalizes only the exact absent draft target', () => {
+test('missing target recovery normalizes only the exact absent draft or live target', () => {
   const wikiRoot = '/knowledge/incoming/ingest-journal/drafts/synthetic/wiki'
   const relative = 'sources/email/synthetic/index.md'
   const target = `${wikiRoot}/${relative}`
+  const live = `/knowledge/wiki/${relative}`
   const create = nativeTool('patch', {
     patchText: `*** Begin Patch\n*** Add File: ${relative}\n+# Finding\n*** End Patch`,
   })
-  for (const input of [relative, target]) {
-    for (const missingPath of [relative, target]) {
-      const missing = nativeTool('read', { path: input }, 'error', {
-        type: 'tool.execution',
-        message: `File not found: ${missingPath}`,
-      })
-      const options = { wikiRoot, sourceAbsent: true }
-      const result = workerEvidence([missing, create], target, 'succeeded', options)
-      assert.deepEqual(result.errors, [])
-      assert.deepEqual(result.recovered_errors, [{ code: 'worker_tool_failed', tool: 'read' }])
-      assert.ok(workerEvidence([missing], target, 'succeeded', options).errors.length)
-      assert.ok(workerEvidence([create, missing], target, 'succeeded', options).errors.length)
-      assert.ok(workerEvidence([missing, create], target, 'succeeded', { wikiRoot }).errors.length)
+  for (const [input, missingPath] of [
+    [relative, relative],
+    [relative, target],
+    [target, relative],
+    [target, target],
+    [live, live],
+  ]) {
+    const missing = nativeTool('read', { path: input }, 'error', {
+      type: 'tool.execution',
+      message: `File not found: ${missingPath}`,
+    })
+    const options = { wikiRoot, sourceAbsent: true }
+    const result = workerEvidence([missing, create], target, 'succeeded', options)
+    assert.deepEqual(result.errors, [])
+    assert.deepEqual(result.recovered_errors, [{ code: 'worker_tool_failed', tool: 'read' }])
+    assert.ok(workerEvidence([missing], target, 'succeeded', options).errors.length)
+    assert.ok(workerEvidence([create, missing], target, 'succeeded', options).errors.length)
+    assert.ok(workerEvidence([missing, create], target, 'succeeded', { wikiRoot }).errors.length)
+    for (const mutation of [
+      nativeTool('patch', create.content[0].state.input, 'error', { type: 'tool.execution' }),
+      nativeTool('write', { path: live }),
+      nativeTool('edit', { path: target }),
+    ]) {
+      assert.ok(workerEvidence([missing, mutation], target, 'succeeded', options).errors.length)
     }
   }
+  const missingReads = [target, live].map((file) =>
+    nativeTool('read', { path: file }, 'error', {
+      type: 'tool.execution',
+      message: `File not found: ${file}`,
+    }),
+  )
+  const recovered = workerEvidence([...missingReads, create], target, 'succeeded', {
+    wikiRoot,
+    sourceAbsent: true,
+  })
+  assert.deepEqual(recovered.errors, [])
+  assert.equal(recovered.recovered_errors.length, 2)
   for (const [input, message, type] of [
     [relative, 'File not found: sources/email/other/index.md', 'tool.execution'],
     ['sources/email/other/index.md', `File not found: ${relative}`, 'tool.execution'],
     [relative, `File not found: ${relative}`, 'permission.rejected'],
     [relative, `Permission denied: ${relative}`, 'tool.execution'],
+    [live, `File not found: ${target}`, 'tool.execution'],
+    [target, `File not found: ${live}`, 'tool.execution'],
+    ['/knowledge/wiki/sources/email/other/index.md', `File not found: ${live}`, 'tool.execution'],
+    [live, 'File not found: /knowledge/wiki/sources/email/other/index.md', 'tool.execution'],
+    [live, `File not found: ${live}`, 'permission.rejected'],
+    [live, `Permission denied: ${live}`, 'tool.execution'],
+    [original, `File not found: ${original}`, 'tool.execution'],
   ]) {
     const missing = nativeTool('read', { path: input }, 'error', { type, message })
     assert.ok(

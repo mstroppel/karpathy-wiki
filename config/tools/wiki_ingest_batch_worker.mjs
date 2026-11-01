@@ -43,6 +43,7 @@ export function workerEvidence(
     .flatMap((message) => (message.type === 'assistant' ? (message.content ?? []) : []))
     .filter((part) => part.type === 'tool')
   const creation = tools.findIndex((part) => created(part, source, wikiRoot))
+  const liveSource = path.resolve(liveRoot, path.relative(wikiRoot, source))
   const successful = (part) => part.state?.status === 'completed'
   const covered = new Set()
   const truncated = new Set()
@@ -81,10 +82,10 @@ export function workerEvidence(
       index < creation &&
       part.name === 'read' &&
       exact.length === 1 &&
-      exact[0] === source &&
+      (exact[0] === source || exact[0] === liveSource) &&
       error?.type === 'tool.execution' &&
       missingPath !== undefined &&
-      path.resolve(wikiRoot, missingPath) === source
+      path.resolve(wikiRoot, missingPath) === exact[0]
     const repeatedRead =
       part.name === 'read' &&
       error?.type === 'tool.execution' &&
