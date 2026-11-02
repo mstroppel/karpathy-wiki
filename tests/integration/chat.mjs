@@ -84,7 +84,7 @@ const agents = await json('/api/agent')
 const skills = await json('/api/skill')
 const skillPanel = await json(`/api/config/skills?directory=${encodeURIComponent(directory)}`)
 assert.notEqual(skillPanel.openCodeSkillsUnavailable, true, 'UI skill panel cannot reach OpenCode')
-for (const name of ['ingest-new', 'analysis', 'analysis-save', 'gap-review']) {
+for (const name of ['ingest-new', 'lint', 'analysis', 'analysis-save', 'gap-review']) {
   assert.ok(
     commands.some((entry) => entry.name === name),
     `Missing command: ${name}`,
@@ -96,7 +96,13 @@ for (const name of ['wiki-ingest', 'wiki-analysis', 'wiki-analysis-save', 'wiki-
     `Missing agent: ${name}`,
   )
 }
-for (const name of ['wiki-ingest', 'wiki-analysis', 'wiki-analysis-save', 'wiki-gap-review']) {
+for (const name of [
+  'wiki-ingest',
+  'wiki-lint',
+  'wiki-analysis',
+  'wiki-analysis-save',
+  'wiki-gap-review',
+]) {
   assert.ok(
     skills.some((entry) => entry.name === name),
     `Missing skill: ${name}`,

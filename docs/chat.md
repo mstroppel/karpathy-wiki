@@ -47,6 +47,11 @@ OpenCode. The `answers` profile is still required to publish confirmed Q&A.
 Use one active wiki-writing conversation at a time. Do not enable schedules or
 concurrent writer sessions: this stack does not add writer serialization.
 
+Run `/lint` without arguments for a full wiki check and a findings report, with
+no file changes or commit. Optional instructions can narrow the scope, for example
+`/lint Prüfe nur Wikilinks`. Repairs require an explicit request and remain subject
+to the lint skill's evidence and confirmation rules.
+
 The optional [reader-only backend mode](runtime-write-isolation.md) additionally
 prevents all backend wiki, source, journal and answer-inbox writes at the kernel
 boundary. No authoring is supported in that mode; it is not a general API sandbox.

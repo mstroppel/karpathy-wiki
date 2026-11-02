@@ -292,7 +292,7 @@
       "description": "Wiki prüfen",
       "agent": "wiki-lint",
       "subagent": true,
-      "template": "Führe diesen Prüfauftrag vollständig aus: $ARGUMENTS"
+      "template": "Lade den Skill wiki-lint. Prüfe standardmäßig das gesamte Wiki und berichte die Befunde. Beginne auch ohne zusätzliche Anweisungen mit der Prüfung. Zusätzliche Anweisungen können den Prüfumfang einschränken. Ändere keine Dateien und erstelle keinen Commit, außer wenn ausdrücklich Reparaturen beauftragt werden; beachte dabei die Sicherheits- und Bestätigungsregeln des Skills. Zusätzliche Anweisungen (optional): $ARGUMENTS"
     },
     "analysis": {
       "description": "Wissenschaftliche Analyse mit Internetquellen",
