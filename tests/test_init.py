@@ -195,6 +195,27 @@ class InitTests(unittest.TestCase):
 
 
 class ConfigTests(unittest.TestCase):
+    def test_lint_has_read_only_default_and_optional_scope(self):
+        config = json.loads((ROOT / "config" / "opencode.json").read_text())
+        command = config["commands"]["lint"]
+        self.assertEqual(command["agent"], "wiki-lint")
+        self.assertTrue(command["subagent"])
+        template = command["template"]
+        self.assertEqual(template.count("$ARGUMENTS"), 1)
+        for arguments in ("", "Prüfe nur Wikilinks", "Repariere sicher belegbare Fehler"):
+            with self.subTest(arguments=arguments):
+                prompt = template.replace("$ARGUMENTS", arguments)
+                self.assertIn("Lade den Skill wiki-lint", prompt)
+                self.assertIn("standardmäßig das gesamte Wiki", prompt)
+                self.assertIn("berichte die Befunde", prompt)
+                self.assertIn("Beginne auch ohne zusätzliche Anweisungen", prompt)
+                self.assertIn("können den Prüfumfang einschränken", prompt)
+                self.assertIn("Ändere keine Dateien und erstelle keinen Commit", prompt)
+                self.assertIn("außer wenn ausdrücklich Reparaturen beauftragt werden", prompt)
+                self.assertIn("Sicherheits- und Bestätigungsregeln des Skills", prompt)
+                self.assertTrue(prompt.endswith("Anweisungen (optional): " + arguments))
+                self.assertNotIn("$ARGUMENTS", prompt)
+
     def test_config_is_json_and_restricts_sources(self):
         config = json.loads((ROOT / "config" / "opencode.json").read_text())
         self.assertEqual(config["$schema"], "https://opencode.ai/config.json")
