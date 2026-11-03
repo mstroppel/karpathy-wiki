@@ -80,6 +80,18 @@ def worker_calls(batch):
                 },
             ),
         ]
+    if MODE == "indented-delete":
+        return [
+            patch(relative, (root / relative).read_text().splitlines()[0], "# Finding"),
+            (
+                "patch",
+                {
+                    "patchText": (
+                        "*** Begin Patch\n  *** Delete File: entities/matrix.md\n*** End Patch"
+                    )
+                },
+            ),
+        ]
     if MODE == "denied":
         file = Path(TARGET) if Path(TARGET).is_absolute() else root / TARGET
         if MUTATION == "edit":
@@ -332,7 +344,8 @@ def run(sid=None):
                 "model": {
                     "providerID": "fake",
                     "id": "gpt-5-synthetic"
-                    if MODE in ("patch", "mixed", "syntax", "relative-read", "add-stale")
+                    if MODE
+                    in ("patch", "mixed", "syntax", "relative-read", "add-stale", "indented-delete")
                     or MUTATION == "patch"
                     else "synthetic",
                 },
@@ -554,18 +567,24 @@ def main():
             assert (WIKI / "sources/webdav/notes.md").read_bytes() != before
             # A typo outside the assigned draft fails before native permissions.
             # Later valid reads/writes must not forgive that path-contract error.
-            for target in (
-                "/knowledge/incoming/ingest-journal/drafts/mistyped/wiki/overview.md",
-                "../escape.md",
+            for mode, target, tool, error in (
+                (
+                    "path-contract",
+                    "/knowledge/incoming/ingest-journal/drafts/mistyped/wiki/overview.md",
+                    "read",
+                    "ingest_path_contract",
+                ),
+                ("path-contract", "../escape.md", "read", "ingest_path_contract"),
+                ("indented-delete", "", "patch", "ingest_deletion_forbidden"),
             ):
                 change_source()
-                MODE, TARGET = "path-contract", target
+                MODE, TARGET = mode, target
                 before = (WIKI / "sources/webdav/notes.md").read_bytes()
                 _, state = run()
                 source = state["sources"][0]
-                assert state["status"] == "partial" and not source["commit"], state
+                assert state["status"] == "partial" and not source["commit"], (state, ERRORS)
                 assert source["source_written"] and source["worker_errors"] == [
-                    {"code": "worker_tool_failed", "tool": "read"}
+                    {"code": "worker_tool_failed", "tool": tool}
                 ], source
                 native = request(f"/api/experimental/session/{source['worker_session']}/export")[
                     "data"
@@ -576,9 +595,7 @@ def main():
                     for part in message.get("content", [])
                     if part.get("type") == "tool" and part["state"]["status"] == "error"
                 ]
-                assert len(failures) == 1 and failures[0]["message"] == "ingest_path_contract", (
-                    failures
-                )
+                assert len(failures) == 1 and failures[0]["message"] == error, failures
                 assert (WIKI / "sources/webdav/notes.md").read_bytes() == before
             # The pinned native read tool shortens long lines, even at EOF.
             # Successful writes/model prose must not turn that into full coverage.

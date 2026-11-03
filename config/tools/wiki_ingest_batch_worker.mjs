@@ -9,14 +9,16 @@ const mutations = new Set(['write', 'edit', 'patch'])
 const contextPaths = () =>
   `Dein Arbeitsverzeichnis ist der private Entwurf. Verwende dort ausschließlich relative Pfade, etwa overview.md oder sources/<Wiki-Pfad>, auch in Patch-Dateiköpfen; keine absoluten Entwurfspfade konstruieren. Der Entwurf enthält nur die ausgewählte Quellenseite und gemeinsamen bearbeitbaren Wiki-Kontext, keine anderen Quellenseiten. Lies andere Quellenseiten gezielt unter ${liveRoot}/sources/<Wiki-Pfad>, nicht unter ./sources. Live-Wiki-Kontext ist nur lesbar; alle Änderungen bleiben im Entwurf. Absolute Leseziele sind nur die zugewiesene Originalquelle, Live-Wiki-Kontext und /etc/opencode/skills/wiki-ingest/. Ein fehlendes Ziel im Entwurf belegt nicht, dass die Seite im Live-Wiki fehlt.`
 
+function patchHeaders(text) {
+  return text.split('\n').flatMap((line) => {
+    const match = /^\*\*\* (Add File|Update File|Delete File|Move to): (.+)$/.exec(line.trim())
+    return match ? [{ operation: match[1], resource: match[2].trim() }] : []
+  })
+}
+
 function inputPaths(name, input) {
   return name === 'patch'
-    ? (input.patchText ?? '').split('\n').flatMap((line) => {
-        const match = /^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)$/.exec(
-          line.trim(),
-        )
-        return match ? [match[1].trim()] : []
-      })
+    ? patchHeaders(input.patchText ?? '').map((header) => header.resource)
     : typeof input.path === 'string'
       ? [input.path]
       : []
@@ -54,8 +56,9 @@ function created(part, source, root) {
   return part.name === 'write'
     ? targets(part, root).includes(source)
     : part.name === 'patch' &&
-        [...(part.state.input?.patchText ?? '').matchAll(/^\*\*\* Add File: (.+)$/gm)].some(
-          (match) => path.resolve(root, match[1]) === source,
+        patchHeaders(part.state.input?.patchText ?? '').some(
+          (header) =>
+            header.operation === 'Add File' && path.resolve(root, header.resource) === source,
         )
 }
 
@@ -143,9 +146,9 @@ export function workerEvidence(
       )
     const staleContext = /Failed to find expected lines/.test(error?.message ?? '')
     const added = new Set(
-      [...(part.state.input?.patchText ?? '').matchAll(/^\*\*\* Add File: (.+)$/gm)].map((match) =>
-        path.resolve(wikiRoot, match[1]),
-      ),
+      patchHeaders(part.state.input?.patchText ?? '')
+        .filter((header) => header.operation === 'Add File')
+        .map((header) => path.resolve(wikiRoot, header.resource)),
     )
     const correctedPatch =
       (catalog || patchSyntax) &&
@@ -276,7 +279,11 @@ export async function createBatchWorker(
           }
           if (assignment && name === 'patch') {
             const text = input.patchText ?? ''
-            if (/^\*\*\* (?:Delete File|Move to):/m.test(text))
+            if (
+              patchHeaders(text).some((header) =>
+                ['Delete File', 'Move to'].includes(header.operation),
+              )
+            )
               throw new Error('ingest_deletion_forbidden')
             const paths = targets({ name: 'patch', state: { input } }, assignment.root)
             if (

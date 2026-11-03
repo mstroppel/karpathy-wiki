@@ -1364,15 +1364,17 @@ test('worker admission allows directory reads but not broader writes; compaction
           ['Delete File', 'concepts/a.md', /ingest_deletion_forbidden/],
           ['Move to', 'concepts/a.md', /ingest_deletion_forbidden/],
         ]) {
-          const count = nativeCalls.length
-          await assert.rejects(
-            tools.patch.execute(
-              { patchText: `*** Begin Patch\n*** ${header}: ${target}\n*** End Patch` },
-              context,
-            ),
-            error,
-          )
-          assert.equal(nativeCalls.length, count)
+          for (const indent of ['', '  ', '\t']) {
+            const count = nativeCalls.length
+            await assert.rejects(
+              tools.patch.execute(
+                { patchText: `*** Begin Patch\n${indent}*** ${header}: ${target}\n*** End Patch` },
+                context,
+              ),
+              error,
+            )
+            assert.equal(nativeCalls.length, count)
+          }
         }
         for (const resource of [
           root,
