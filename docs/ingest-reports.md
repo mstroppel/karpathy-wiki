@@ -25,6 +25,17 @@ admission. Workers cannot read other drafts/control files or change source mater
 Directory reads of the draft root and live wiki root are allowed; write permissions
 are not broadened.
 
+Worker task data uses `wiki_root: .` and a relative `wiki_path`; absolute draft
+roots stay internal to batch code. Draft reads and mutations (including every
+patch file header) require relative paths resolving inside the assigned draft.
+An assignment-scoped tool preflight rejects violations with `ingest_path_contract`
+before native execution. Absolute reads remain available for the exact assigned
+original source, live wiki context and ingest skill files, subject to existing
+permissions. This is fail-fast validation, not typo correction or a guarantee
+against model mistakes: path-contract failures remain fatal even after a later
+successful call. No paths are guessed, rewritten or retried and no permissions
+are broadened.
+
 Completion requires native evidence: fully covered source reads, successful skill
 loading and an explicit mutation of the exact selected page, plus valid final files,
 unchanged source identity/digest, permitted diff and a verified commit. Session
