@@ -10,9 +10,17 @@ const contextPaths = () =>
   `Dein Arbeitsverzeichnis ist der private Entwurf. Verwende dort ausschließlich relative Pfade, etwa overview.md oder sources/<Wiki-Pfad>, auch in Patch-Dateiköpfen; keine absoluten Entwurfspfade konstruieren. Der Entwurf enthält nur die ausgewählte Quellenseite und gemeinsamen bearbeitbaren Wiki-Kontext, keine anderen Quellenseiten. Lies andere Quellenseiten gezielt unter ${liveRoot}/sources/<Wiki-Pfad>, nicht unter ./sources. Live-Wiki-Kontext ist nur lesbar; alle Änderungen bleiben im Entwurf. Absolute Leseziele sind nur die zugewiesene Originalquelle, Live-Wiki-Kontext und /etc/opencode/skills/wiki-ingest/. Ein fehlendes Ziel im Entwurf belegt nicht, dass die Seite im Live-Wiki fehlt.`
 
 function patchHeaders(text) {
+  // Match the pinned native parser's boundaries, not marker-looking hunk text:
+  // Add bodies end at trimmed headers; Update bodies only at column-zero headers.
+  // Native execution still validates the complete patch syntax.
+  let update = false
   return text.split('\n').flatMap((line) => {
-    const match = /^\*\*\* (Add File|Update File|Delete File|Move to): (.+)$/.exec(line.trim())
-    return match ? [{ operation: match[1], resource: match[2].trim() }] : []
+    const match = /^\*\*\* (Add File|Update File|Delete File|Move to): (.+)$/.exec(
+      update ? line.trimEnd() : line.trim(),
+    )
+    if (!match) return []
+    if (match[1] !== 'Move to') update = match[1] === 'Update File'
+    return [{ operation: match[1], resource: match[2].trim() }]
   })
 }
 

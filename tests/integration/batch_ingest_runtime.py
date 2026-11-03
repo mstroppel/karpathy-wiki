@@ -80,6 +80,18 @@ def worker_calls(batch):
                 },
             ),
         ]
+    if MODE == "hunk-context":
+        return [
+            (
+                "patch",
+                {
+                    "patchText": (
+                        f"*** Begin Patch\n*** Update File: overview.md\n@@\n"
+                        f" *** Add File: {relative}\n-old\n+new\n*** End Patch"
+                    )
+                },
+            )
+        ]
     if MODE == "indented-delete":
         return [
             patch(relative, (root / relative).read_text().splitlines()[0], "# Finding"),
@@ -345,7 +357,15 @@ def run(sid=None):
                     "providerID": "fake",
                     "id": "gpt-5-synthetic"
                     if MODE
-                    in ("patch", "mixed", "syntax", "relative-read", "add-stale", "indented-delete")
+                    in (
+                        "patch",
+                        "mixed",
+                        "syntax",
+                        "relative-read",
+                        "add-stale",
+                        "indented-delete",
+                        "hunk-context",
+                    )
                     or MUTATION == "patch"
                     else "synthetic",
                 },
@@ -597,6 +617,24 @@ def main():
                 ]
                 assert len(failures) == 1 and failures[0]["message"] == error, failures
                 assert (WIKI / "sources/webdav/notes.md").read_bytes() == before
+            # Header-looking update context is data, never source-write evidence.
+            overview = WIKI / "overview.md"
+            overview.write_text(
+                overview.read_text() + "\n*** Add File: sources/webdav/notes.md\nold\n"
+            )
+            subprocess.run(["git", "-C", str(WIKI), "add", "overview.md"], check=True)
+            subprocess.run(
+                ["git", "-C", str(WIKI), "commit", "-qm", "synthetic context"], check=True
+            )
+            change_source()
+            MODE = "hunk-context"
+            before = overview.read_bytes()
+            _, state = run()
+            source = state["sources"][0]
+            assert source["blocker"] == "worker_no_source_write", state
+            assert not source["source_written"] and not source["commit"], source
+            assert source["worker_errors"] == [], source
+            assert overview.read_bytes() == before
             # The pinned native read tool shortens long lines, even at EOF.
             # Successful writes/model prose must not turn that into full coverage.
             change_source("<html>" + "x" * 5000 + "UNREAD_SUFFIX</html>\n")

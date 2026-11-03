@@ -1292,6 +1292,13 @@ test('worker admission allows directory reads but not broader writes; compaction
         assert.equal(task.sources[0].wiki_path, 'sources/webdav/a.md')
         assert.equal(task.sources[0].source_path, original)
         const context = { sessionID: 'ses_child' }
+        const contextOnly = {
+          patchText:
+            '*** Begin Patch\n*** Update File: overview.md\n@@\n *** Delete File: /knowledge/wiki/overview.md\n-old\n+new\n*** End Patch',
+        }
+        const beforeContext = nativeCalls.length
+        await tools.patch.execute(contextOnly, context)
+        assert.equal(nativeCalls.length, beforeContext + 1)
         for (const [name, input] of [
           ['read', { path: '.' }],
           ['read', { path: 'overview.md' }],
@@ -1483,6 +1490,33 @@ test('path-contract failures stay fatal after successful reads or mutations', ()
       'succeeded',
     )
     assert.deepEqual(evidence.errors, [{ code: 'worker_tool_failed', tool: name }])
+    assert.deepEqual(evidence.recovered_errors, [])
+  }
+})
+
+test('patch body text cannot certify source mutation or recover a missing source read', () => {
+  const root = '/knowledge/incoming/ingest-journal/drafts/synthetic/wiki'
+  const selected = `${root}/sources/webdav/a.md`
+  for (const header of ['Add File', 'Update File', 'Delete File', 'Move to']) {
+    const context = nativeTool('patch', {
+      patchText: [
+        '*** Begin Patch',
+        '*** Update File: overview.md',
+        '@@',
+        ` *** ${header}: sources/webdav/a.md`,
+        '-old',
+        '+new',
+        '*** End Patch',
+      ].join('\n'),
+    })
+    const options = { wikiRoot: root, sourceAbsent: true }
+    assert.equal(workerEvidence([context], selected, 'succeeded', options).source_written, false)
+    const missing = nativeTool('read', { path: selected }, 'error', {
+      type: 'tool.execution',
+      message: `File not found: ${selected}`,
+    })
+    const evidence = workerEvidence([missing, context], selected, 'succeeded', options)
+    assert.deepEqual(evidence.errors, [{ code: 'worker_tool_failed', tool: 'read' }])
     assert.deepEqual(evidence.recovered_errors, [])
   }
 })
