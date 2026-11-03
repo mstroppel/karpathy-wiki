@@ -131,6 +131,17 @@ class BatchWorkflowTests(unittest.TestCase):
         ):
             self.assertNotIn(obsolete, self.worker)
 
+    def test_worker_uses_relative_draft_paths_without_widening_permissions(self):
+        for text in (self.worker, self.config["agents"]["wiki-ingest"]["system"]):
+            for phrase in ("relative", "Patch-Dateiköpfen", "Originalquelle", "Live-Wiki-Kontext"):
+                self.assertIn(phrase, text)
+        self.assertIn("dem relativen `wiki_path`", self.worker)
+        self.assertIn("Pfadvertragsfehler und Berechtigungsablehnungen", self.worker)
+        for rule in self.config["agents"]["wiki-ingest"]["permissions"]:
+            self.assertFalse(
+                rule["effect"] == "allow" and "ingest-journal" in rule["resource"], rule
+            )
+
     def test_briefs_are_always_shown_without_extra_workers_or_publication_claims(self):
         for phrase in ("ingest-summary", "source_label", "title", "summary", "1–5 Sätze"):
             self.assertIn(phrase, self.worker)

@@ -1235,8 +1235,19 @@ test('worker admission allows directory reads but not broader writes; compaction
   let permission
   const root = '/knowledge/incoming/ingest-journal/drafts/synthetic/wiki'
   const events = []
+  const tools = {}
+  const nativeCalls = []
   const ctx = {
-    tool: { transform: async () => {} },
+    tool: {
+      transform: async (transform) =>
+        transform({
+          update: (name, update) => {
+            const tool = { execute: async (input) => nativeCalls.push({ name, input }) }
+            update(tool)
+            tools[name] = tool
+          },
+        }),
+    },
     permission: {
       hook: async (_name, callback) => {
         permission = callback
@@ -1264,9 +1275,10 @@ test('worker admission allows directory reads but not broader writes; compaction
         const event = { sessionID: 'ses_child', system: [] }
         await hooks.context(event)
         for (const guidance of [text, event.system[0].text]) {
+          assert.equal(guidance.includes(root), false)
           assert.ok(
             guidance.includes(
-              `Lies andere Quellenseiten gezielt unter /knowledge/wiki/sources/<Wiki-Pfad>, nicht unter ${root}/sources`,
+              'Lies andere Quellenseiten gezielt unter /knowledge/wiki/sources/<Wiki-Pfad>, nicht unter ./sources',
             ),
           )
           assert.ok(
@@ -1274,6 +1286,102 @@ test('worker admission allows directory reads but not broader writes; compaction
               'Live-Wiki-Kontext ist nur lesbar; alle Änderungen bleiben im Entwurf',
             ),
           )
+        }
+        const task = JSON.parse(text.split('Batchdaten:\n')[1])
+        assert.equal(task.wiki_root, '.')
+        assert.equal(task.sources[0].wiki_path, 'sources/webdav/a.md')
+        assert.equal(task.sources[0].source_path, original)
+        const context = { sessionID: 'ses_child' }
+        const contextOnly = {
+          patchText:
+            '*** Begin Patch\n*** Update File: overview.md\n@@\n *** Delete File: /knowledge/wiki/overview.md\n-old\n+new\n*** End Patch',
+        }
+        const beforeContext = nativeCalls.length
+        await tools.patch.execute(contextOnly, context)
+        assert.equal(nativeCalls.length, beforeContext + 1)
+        for (const [name, input] of [
+          ['read', { path: '.' }],
+          ['read', { path: 'overview.md' }],
+          ['read', { path: original }],
+          ['read', { path: '/knowledge/wiki' }],
+          ['read', { path: '/knowledge/wiki/overview.md' }],
+          ['read', { path: '/etc/opencode/skills/wiki-ingest/SKILL.md' }],
+          ['write', { path: 'sources/webdav/a.md' }],
+          ['edit', { path: 'overview.md' }],
+          [
+            'patch',
+            {
+              patchText:
+                '*** Begin Patch\n*** Add File: concepts/a.md\n+A\n*** Update File: overview.md\n@@\n-A\n+B\n*** End Patch',
+            },
+          ],
+        ]) {
+          const count = nativeCalls.length
+          await tools[name].execute(input, context)
+          assert.equal(nativeCalls.length, count + 1)
+          assert.deepEqual(nativeCalls.at(-1), { name, input })
+        }
+        for (const target of [
+          root,
+          `${root}/overview.md`,
+          '/knowledge/incoming/ingest-journal/drafts/mistyped/wiki/overview.md',
+          '../escape.md',
+          '~/escape.md',
+          'entities/../../escape.md',
+          '/knowledge/sources/webdav/other.md',
+          '/etc/opencode/skills/wiki-ingest/../other/SKILL.md',
+        ]) {
+          for (const name of ['read', 'write', 'edit', 'patch']) {
+            const input =
+              name === 'patch'
+                ? {
+                    patchText: `*** Begin Patch\n*** Add File: concepts/valid.md\n+A\n*** Add File: ${target}\n+B\n*** End Patch`,
+                  }
+                : { path: target }
+            const count = nativeCalls.length
+            await assert.rejects(tools[name].execute(input, context), /ingest_path_contract/)
+            assert.equal(nativeCalls.length, count)
+          }
+        }
+        for (const header of ['Update File', 'Delete File', 'Move to']) {
+          const count = nativeCalls.length
+          await assert.rejects(
+            tools.patch.execute(
+              {
+                patchText: `*** Begin Patch\n*** Update File: overview.md\n@@\n-A\n+B\n*** ${header}: ../escape.md\n*** End Patch`,
+              },
+              context,
+            ),
+            /ingest_path_contract/,
+          )
+          assert.equal(nativeCalls.length, count)
+        }
+        await assert.rejects(
+          tools.patch.execute(
+            {
+              patchText:
+                '*** Begin Patch\r\n  *** Add File: /knowledge/wiki/escape.md  \r\n+A\r\n*** End Patch',
+            },
+            context,
+          ),
+          /ingest_path_contract/,
+        )
+        for (const [header, target, error] of [
+          ['Update File', 'index.md', /ingest_catalog_owned/],
+          ['Delete File', 'concepts/a.md', /ingest_deletion_forbidden/],
+          ['Move to', 'concepts/a.md', /ingest_deletion_forbidden/],
+        ]) {
+          for (const indent of ['', '  ', '\t']) {
+            const count = nativeCalls.length
+            await assert.rejects(
+              tools.patch.execute(
+                { patchText: `*** Begin Patch\n${indent}*** ${header}: ${target}\n*** End Patch` },
+                context,
+              ),
+              error,
+            )
+            assert.equal(nativeCalls.length, count)
+          }
         }
         for (const resource of [
           root,
@@ -1358,4 +1466,57 @@ test('worker admission allows directory reads but not broader writes; compaction
   await permission(expired)
   assert.equal(expired.effect, 'deny')
   assert.deepEqual(await readdir(admissionRoot), [])
+  // Ordinary sessions retain their native path behavior.
+  const input = { path: '/tmp/synthetic-context.md' }
+  const count = nativeCalls.length
+  await tools.read.execute(input, { sessionID: 'ses_parent' })
+  assert.equal(nativeCalls.length, count + 1)
+  assert.deepEqual(nativeCalls.at(-1), { name: 'read', input })
+})
+
+test('path-contract failures stay fatal after successful reads or mutations', () => {
+  for (const name of ['read', 'write', 'edit', 'patch']) {
+    const input =
+      name === 'patch'
+        ? { patchText: '*** Begin Patch\n*** Add File: ../escape.md\n+A\n*** End Patch' }
+        : { path: '../escape.md' }
+    const failed = nativeTool(name, input, 'error', {
+      type: 'unknown',
+      message: 'ingest_path_contract',
+    })
+    const evidence = workerEvidence(
+      [failed, nativeTool('read', { path: 'overview.md' }), nativeTool('write', { path: source })],
+      source,
+      'succeeded',
+    )
+    assert.deepEqual(evidence.errors, [{ code: 'worker_tool_failed', tool: name }])
+    assert.deepEqual(evidence.recovered_errors, [])
+  }
+})
+
+test('patch body text cannot certify source mutation or recover a missing source read', () => {
+  const root = '/knowledge/incoming/ingest-journal/drafts/synthetic/wiki'
+  const selected = `${root}/sources/webdav/a.md`
+  for (const header of ['Add File', 'Update File', 'Delete File', 'Move to']) {
+    const context = nativeTool('patch', {
+      patchText: [
+        '*** Begin Patch',
+        '*** Update File: overview.md',
+        '@@',
+        ` *** ${header}: sources/webdav/a.md`,
+        '-old',
+        '+new',
+        '*** End Patch',
+      ].join('\n'),
+    })
+    const options = { wikiRoot: root, sourceAbsent: true }
+    assert.equal(workerEvidence([context], selected, 'succeeded', options).source_written, false)
+    const missing = nativeTool('read', { path: selected }, 'error', {
+      type: 'tool.execution',
+      message: `File not found: ${selected}`,
+    })
+    const evidence = workerEvidence([missing, context], selected, 'succeeded', options)
+    assert.deepEqual(evidence.errors, [{ code: 'worker_tool_failed', tool: 'read' }])
+    assert.deepEqual(evidence.recovered_errors, [])
+  }
 })
