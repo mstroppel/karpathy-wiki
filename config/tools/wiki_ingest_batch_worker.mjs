@@ -32,6 +32,15 @@ function inputPaths(name, input) {
       : []
 }
 
+function readableContext(target, assignment) {
+  return (
+    target === assignment.source.source_path ||
+    target === liveRoot ||
+    target.startsWith(`${liveRoot}/`) ||
+    target.startsWith('/etc/opencode/skills/wiki-ingest/')
+  )
+}
+
 function validatePaths(name, input, assignment) {
   for (const resource of inputPaths(name, input)) {
     // Native tools can expand home shorthand; it is never a draft-relative target.
@@ -39,12 +48,7 @@ function validatePaths(name, input, assignment) {
     const target = path.resolve(assignment.root, resource)
     const inside = target === assignment.root || target.startsWith(`${assignment.root}/`)
     const absoluteRead =
-      name === 'read' &&
-      path.isAbsolute(resource) &&
-      (target === assignment.source.source_path ||
-        target === liveRoot ||
-        target.startsWith(`${liveRoot}/`) ||
-        target.startsWith('/etc/opencode/skills/wiki-ingest/'))
+      name === 'read' && path.isAbsolute(resource) && readableContext(target, assignment)
     if ((!path.isAbsolute(resource) && inside) || absoluteRead) continue
     throw new Error('ingest_path_contract')
   }
@@ -255,10 +259,7 @@ export async function createBatchWorker(
           return (
             target === assignment.root ||
             target.startsWith(`${assignment.root}/`) ||
-            target === liveRoot ||
-            target.startsWith(`${liveRoot}/`) ||
-            target === assignment.source.source_path ||
-            target.startsWith('/etc/opencode/skills/wiki-ingest/')
+            readableContext(target, assignment)
           )
         return (
           target.startsWith(`${assignment.root}/`) &&
