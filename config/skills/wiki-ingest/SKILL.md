@@ -14,10 +14,14 @@ Keine Delegation, Shell, Git- oder eigenen Statusabfragen. Der Code hält den
 Ingest-Lock und prüft Quellenstatus/Widerruf, Manifest, Revision und Git.
 Frontmatter, Index, Log und Commit übernimmt ebenfalls Code, auch wenn ältere
 Wiki-Anweisungen diese Aufgaben noch allgemein dem Bearbeiter zuweisen.
-Das gelieferte `wiki_root` ist dein privater Entwurf, auch für relative Pfade.
+Dein Arbeitsverzeichnis (`wiki_root: .`) ist der private Entwurf. Verwende für
+alle Entwurfszugriffe ausschließlich relative Pfade, auch in Patch-Dateiköpfen:
+etwa `overview.md` oder das gelieferte relative `wiki_path`. Konstruiere keine
+absoluten Entwurfspfade. Absolute Leseziele sind nur die zugewiesene Originalquelle,
+Live-Wiki-Kontext und `/etc/opencode/skills/wiki-ingest/`.
 Er enthält nur die ausgewählte Quellenseite und gemeinsamen bearbeitbaren Kontext.
 Andere Quellenseiten liest du gezielt unter `/knowledge/wiki/sources/<Wiki-Pfad>`,
-nicht unter `<wiki_root>/sources/`. Ihr Fehlen im Entwurf sagt nichts über ihre
+nicht unter `./sources/`. Ihr Fehlen im Entwurf sagt nichts über ihre
 Existenz im Live-Wiki aus. Live-Wiki-Kontext ist nur lesbar; Änderungen bleiben im Entwurf.
 Absolute Live-Schreibziele unter `/knowledge/wiki` sind verboten. Fachliche und
 Sicherheitsregeln der Wiki-AGENTS bleiben gültig; nur Schreibort und Zuständigkeit
@@ -36,7 +40,7 @@ für den Abschluss werden hier konkretisiert.
    `SKIP: <konkreter Grund>`. OCR-Lücken, Widersprüche, fehlende Einzelangaben
    und unveränderte Befunde sind kein Abbruchgrund: sichere Befunde übernehmen,
    Grenzen benennen, nichts erfinden.
-3. Schreibe die Zusammenfassung nach `wiki_path`; Frontmatter erzeugt Code.
+3. Schreibe die Zusammenfassung nach dem relativen `wiki_path`; Frontmatter erzeugt Code.
    Erhalte gültiges Wissen und vermeide Duplikatseiten. Belege Aussagen mit
    Quellpfad und Zeilen, Seiten oder Zeitmarken; erhalte Zahlen, Einheiten,
    Termine und den sichtbaren `paperless_url`-Link. Transkripte und Nutzerangaben
@@ -64,5 +68,6 @@ für den Abschluss werden hier konkretisiert.
 Bei Werkzeugfehlern keinen Erfolg behaupten. Kein Rücksetzen; der Code entscheidet
 anhand nativer Evidenz und des Entwurfs. Syntax-/Kontextfehler durch frisches
 Lesen und erlaubte Mutation korrigieren; bei einem kombinierten Index-Patch nur
-den erlaubten Teil neu erstellen. Nutzerablehnungen niemals umgehen.
+den erlaubten Teil neu erstellen. Pfadvertragsfehler und Berechtigungsablehnungen
+sind fatal, auch nach späterem Erfolg; nicht umgehen oder selbst wiederholen.
 Einen verifizierten Commit meldet nur der aufrufende Code.
