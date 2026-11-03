@@ -41,9 +41,17 @@ def patch(target, old, new):
 
 
 def worker_calls(batch):
-    root = Path(batch.get("wiki_root", str(WIKI)))
+    assert batch["wiki_root"] == ".", batch
+    admission = next(
+        record
+        for file in (JOURNAL / "admissions").glob("*.json")
+        if (record := json.loads(file.read_text()))["source"]["source_path"]
+        == batch["sources"][0]["source_path"]
+    )
+    root = Path(admission["root"])
     source = batch["sources"][0]["wiki_path"]
-    relative = str(Path(source).relative_to(root))
+    assert not Path(source).is_absolute(), source
+    relative = source
     if MODE in ("relative-read", "add-stale"):
         create = f"*** Add File: {relative}\n+# Finding\n+Source line 1.\n"
         update = "*** Update File: overview.md\n@@\n-{}\n+# Finding\n"
@@ -69,6 +77,30 @@ def worker_calls(batch):
                     "patchText": f"*** Begin Patch\n{create}"
                     + update.format(current)
                     + "*** End Patch"
+                },
+            ),
+        ]
+    if MODE == "hunk-context":
+        return [
+            (
+                "patch",
+                {
+                    "patchText": (
+                        f"*** Begin Patch\n*** Update File: overview.md\n@@\n"
+                        f" *** Add File: {relative}\n-old\n+new\n*** End Patch"
+                    )
+                },
+            )
+        ]
+    if MODE == "indented-delete":
+        return [
+            patch(relative, (root / relative).read_text().splitlines()[0], "# Finding"),
+            (
+                "patch",
+                {
+                    "patchText": (
+                        "*** Begin Patch\n  *** Delete File: entities/matrix.md\n*** End Patch"
+                    )
                 },
             ),
         ]
@@ -127,15 +159,17 @@ def worker_calls(batch):
             "analyses/matrix.md",
         ]:
             old = (root / target).read_text().splitlines()[0]
-            calls.append(patch(str(root / target), old, "# Patched finding"))
+            calls.append(patch(target, old, "# Patched finding"))
             calls.append(patch(target, "# Patched finding", "# Finding"))
         return calls
     calls = [
-        ("read", {"path": str(root)}),
+        ("read", {"path": "."}),
         ("read", {"path": str(WIKI)}),
         ("read", {"path": source}),
         ("write", {"path": source, "content": "# Finding\nSource line 1.\n"}),
     ]
+    if MODE == "path-contract":
+        calls.insert(0, ("read", {"path": TARGET}))
     if MODE == "normal":
         # Context-limit scenarios deliberately depend on the original call count.
         calls.insert(2, ("read", {"path": str(WIKI / "sources/webdav/other.md")}))
@@ -152,7 +186,7 @@ def worker_calls(batch):
     ]
     for target in ["overview.md", "entities/matrix.md", "concepts/matrix.md", "analyses/matrix.md"]:
         calls += [
-            ("write", {"path": str(root / target), "content": "# Finding\n"}),
+            ("write", {"path": target, "content": "# Finding\n"}),
             ("edit", {"path": target, "oldString": "# Finding", "newString": "# Subject finding"}),
         ]
     return calls
@@ -322,7 +356,16 @@ def run(sid=None):
                 "model": {
                     "providerID": "fake",
                     "id": "gpt-5-synthetic"
-                    if MODE in ("patch", "mixed", "syntax", "relative-read", "add-stale")
+                    if MODE
+                    in (
+                        "patch",
+                        "mixed",
+                        "syntax",
+                        "relative-read",
+                        "add-stale",
+                        "indented-delete",
+                        "hunk-context",
+                    )
                     or MUTATION == "patch"
                     else "synthetic",
                 },
@@ -542,9 +585,60 @@ def main():
             assert state["status"] == "done", state
             assert state["sources"][0]["worker_session"] != failed_worker
             assert (WIKI / "sources/webdav/notes.md").read_bytes() != before
+            # A typo outside the assigned draft fails before native permissions.
+            # Later valid reads/writes must not forgive that path-contract error.
+            for mode, target, tool, error in (
+                (
+                    "path-contract",
+                    "/knowledge/incoming/ingest-journal/drafts/mistyped/wiki/overview.md",
+                    "read",
+                    "ingest_path_contract",
+                ),
+                ("path-contract", "../escape.md", "read", "ingest_path_contract"),
+                ("indented-delete", "", "patch", "ingest_deletion_forbidden"),
+            ):
+                change_source()
+                MODE, TARGET = mode, target
+                before = (WIKI / "sources/webdav/notes.md").read_bytes()
+                _, state = run()
+                source = state["sources"][0]
+                assert state["status"] == "partial" and not source["commit"], (state, ERRORS)
+                assert source["source_written"] and source["worker_errors"] == [
+                    {"code": "worker_tool_failed", "tool": tool}
+                ], source
+                native = request(f"/api/experimental/session/{source['worker_session']}/export")[
+                    "data"
+                ]
+                failures = [
+                    part["state"]["error"]
+                    for message in native["messages"]
+                    for part in message.get("content", [])
+                    if part.get("type") == "tool" and part["state"]["status"] == "error"
+                ]
+                assert len(failures) == 1 and failures[0]["message"] == error, failures
+                assert (WIKI / "sources/webdav/notes.md").read_bytes() == before
+            # Header-looking update context is data, never source-write evidence.
+            overview = WIKI / "overview.md"
+            overview.write_text(
+                overview.read_text() + "\n*** Add File: sources/webdav/notes.md\nold\n"
+            )
+            subprocess.run(["git", "-C", str(WIKI), "add", "overview.md"], check=True)
+            subprocess.run(
+                ["git", "-C", str(WIKI), "commit", "-qm", "synthetic context"], check=True
+            )
+            change_source()
+            MODE = "hunk-context"
+            before = overview.read_bytes()
+            _, state = run()
+            source = state["sources"][0]
+            assert source["blocker"] == "worker_no_source_write", state
+            assert not source["source_written"] and not source["commit"], source
+            assert source["worker_errors"] == [], source
+            assert overview.read_bytes() == before
             # The pinned native read tool shortens long lines, even at EOF.
             # Successful writes/model prose must not turn that into full coverage.
             change_source("<html>" + "x" * 5000 + "UNREAD_SUFFIX</html>\n")
+            MODE = "normal"
             ACTION = {"source_path": str(SOURCE / "notes.md")}
             before = (WIKI / "sources/webdav/notes.md").read_bytes()
             sid, state = run()
