@@ -17,6 +17,7 @@ import uuid
 from collections import Counter
 from collections.abc import Callable
 from contextlib import suppress
+from functools import partial
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -584,8 +585,10 @@ class Ingestor:
     ) -> tuple[bool, ManifestItem]:
         document, document_type, tag_names = self.prepare_document(document_id)
         issued_date = normalize_issued_date(document.get("created"))
-        digest = source_hash(document, self.anonymizer.fingerprint, document_type, tag_names)
-        if expected_revision is not None and digest != expected_revision:
+        input_revision = source_hash(
+            document, self.anonymizer.fingerprint, document_type, tag_names
+        )
+        if expected_revision is not None and input_revision != expected_revision:
             raise ValueError("Paperless document changed after job acceptance")
         target = source_document_path(staging, document_id)
         old = source_document_path(previous, document_id) if previous is not None else None
@@ -610,7 +613,8 @@ class Ingestor:
             safe_tag, tag_counts = self.anonymizer.anonymize(tag_name)
             safe_tags.append(safe_tag)
             metadata_counts.update(tag_counts)
-        output = render_document(
+        render = partial(
+            render_document,
             document_id,
             safe_title,
             safe_content,
@@ -620,8 +624,12 @@ class Ingestor:
             safe_document_type,
             safe_tags,
             removed_person_tags,
-            digest,
         )
+        # Bind the public revision only to sanitized output. A fixed empty
+        # revision field avoids hashing the revision into itself; the separate
+        # source_sha256 below still authenticates every final published byte.
+        digest = hashlib.sha256(render(source_revision="").encode("utf-8")).hexdigest()
+        output = render(source_revision=digest)
         item = self.manifest_item(
             document_id, digest, generation, hashlib.sha256(output.encode("utf-8")).hexdigest()
         )

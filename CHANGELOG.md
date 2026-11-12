@@ -18,6 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Paperless document revisions now depend on sanitized output rather than the
+  global redaction fingerprint. Redaction changes still recheck every selected
+  original locally, but unrelated rules no longer schedule unchanged documents
+  for wiki ingestion. The new revision definition marks existing Paperless wiki
+  pages outdated once; subsequent imports are limited to changed output.
 - Ingest workers now require code-owned session admission and native evidence of
   a successful edit to the selected source page. Refused or failed workers cannot
   stamp a new revision onto an old summary. Private reports preserve bounded

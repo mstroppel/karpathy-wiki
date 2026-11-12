@@ -8,7 +8,7 @@ import json
 from collections import Counter
 from typing import Any
 
-SOURCE_FORMAT_VERSION = 2
+SOURCE_FORMAT_VERSION = 3
 
 
 def normalize_issued_date(value: Any) -> str | None:
@@ -28,6 +28,7 @@ def source_hash(
     document_type: str | None,
     tags: list[str],
 ) -> str:
+    """Private input identity for accepted jobs, not the published source revision."""
     selected = {
         "format_version": SOURCE_FORMAT_VERSION,
         "id": document.get("id"),

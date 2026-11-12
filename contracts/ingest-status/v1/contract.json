@@ -18,7 +18,7 @@
     "wholeNumberOnly": true
   },
   "paperless": {
-    "sourceFormatVersion": 2,
+    "sourceFormatVersion": 3,
     "sourceFilenameTemplate": "document-{id}.md",
     "wikiFilenameTemplate": "paperless-{id}.md",
     "idsPerDirectory": 1000,

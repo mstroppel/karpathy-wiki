@@ -546,6 +546,30 @@ class DurableStateTests(unittest.TestCase):
             published_matches(self.sanitized, updated, upstream_inventory(self.incoming))
         )
 
+    def test_redaction_rotation_preserves_unaffected_document_revisions(self):
+        (self.incoming / "affected.md").write_text("Hallo Lea Beispiel", encoding="utf-8")
+        (self.incoming / "unchanged.md").write_text("Öffentliche Information", encoding="utf-8")
+        store = self.store()
+        self.addCleanup(store.close)
+        self.cycle(anonymizer(), store, 100)
+        first = json.loads((self.sanitized / "manifest.json").read_text())
+        updated = TargetedAnonymizer.from_config(
+            {"people": [{"replacement": "[PERSON]", "values": ["Lea Beispiel"]}]}
+        )
+        self.cycle(updated, store, 101)
+        second = json.loads((self.sanitized / "manifest.json").read_text())
+        before = {item["source_key"]: item for item in first["items"]}
+        after = {item["source_key"]: item for item in second["items"]}
+        self.assertNotEqual(
+            before["affected.md"]["source_revision"], after["affected.md"]["source_revision"]
+        )
+        self.assertEqual(
+            before["unchanged.md"]["source_revision"], after["unchanged.md"]["source_revision"]
+        )
+        self.assertNotEqual(
+            before["unchanged.md"]["source_path"], after["unchanged.md"]["source_path"]
+        )
+
     def test_published_matches_detects_the_published_cycle(self):
         (self.incoming / "notes.md").write_text("Hallo Max Mustermann", encoding="utf-8")
         instance = anonymizer()
