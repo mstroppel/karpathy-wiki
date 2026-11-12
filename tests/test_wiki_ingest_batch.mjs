@@ -574,6 +574,49 @@ test('single-source selection and unchanged findings preserve source revision ch
   assert.equal(rewritten.remaining, 1)
 })
 
+test('Paperless generation replacement only ingests changed sanitized revisions', async (t) => {
+  const f = await fixture(t, 0)
+  const directory = path.join(f.opts.sourceRoot, 'paperless')
+  const manifest = { ...f.manifest, source: 'paperless', wiki_root: 'paperless' }
+  async function publishGeneration(generation, texts) {
+    await mkdir(path.join(directory, 'generations', generation), { recursive: true })
+    manifest.items = await Promise.all(
+      texts.map(async (text, index) => {
+        const id = String(index + 1)
+        const revision = sha(text)
+        const fields = { paperless_id: id, source_revision: revision }
+        const output = `---\npaperless_id: "${id}"\nsource_revision: "${revision}"\n---\n${text}\n`
+        const sourcePath = `generations/${generation}/${id}.md`
+        await writeFile(path.join(directory, sourcePath), output)
+        return {
+          source_key: id,
+          source_path: sourcePath,
+          wiki_path: `paperless/${id}.md`,
+          source_revision: revision,
+          source_sha256: sha(output),
+          frontmatter: fields,
+          claim: { paperless_id: id },
+        }
+      }),
+    )
+    await writeFile(path.join(directory, 'manifest.json'), JSON.stringify(manifest))
+  }
+  await publishGeneration('first', ['Hallo Lea Beispiel', 'Public information'])
+  assert.equal((await runIngestBatch(f.opts, f.worker)).ingested, 2)
+  // All physical paths change, but only one sanitized source changes.
+  await publishGeneration('second', ['Hallo [PERSON]', 'Public information'])
+  const calls = []
+  const worker = async (batch) => {
+    calls.push(batch.sources[0].source_key)
+    return f.worker(batch)
+  }
+  assert.equal((await runIngestBatch(f.opts, worker)).ingested, 1)
+  assert.deepEqual(calls, ['1'])
+  await publishGeneration('third', ['Hallo [PERSON]', 'Public information'])
+  assert.equal((await runIngestBatch(f.opts, worker)).ingested, 0)
+  assert.deepEqual(calls, ['1'])
+})
+
 test('Paperless processing requires matching metadata and the original independent digest at publication', async (t) => {
   for (const kind of [
     'valid',

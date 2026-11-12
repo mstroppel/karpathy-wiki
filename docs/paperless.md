@@ -42,7 +42,11 @@ model provider until the review is complete.
 ## Revision Model
 
 Published files contain `paperless_id`, `paperless_url`, and a deterministic
-`source_revision`. Content or relevant redaction changes produce a new revision.
+`source_revision`. The revision hashes the sanitized rendered document with a
+fixed empty revision field, avoiding a self-referential hash. Only changes to
+the published content or metadata (including redaction counts and the original
+link) produce a new revision; an unrelated redaction rule does not. The separate
+`source_sha256` hashes all final published bytes for integrity verification.
 Documents are split into ID ranges of no more than 1000 items.
 
 Each synchronization builds all sanitized documents and revocations in a new
@@ -60,6 +64,13 @@ so bumping that version for a behavior-changing redaction update reprocesses
 selected documents on the next cycle without editing `redactions.json`. This
 is shared with WebDAV, so a bump invalidates both current redaction-enabled
 sources.
+
+A rule or algorithm-version change still checks every selected original locally,
+including when a rule is removed. Private input hashes include the redaction
+fingerprint for durable jobs and snapshot validation; they are separate from
+published document revisions. A replacement generation can therefore have new
+file paths but unchanged document revisions. `/ingest-new` processes only new or
+changed revisions, not sources whose generation path alone changed.
 
 After an interrupted cycle, the next run removes abandoned `.staging-*`
 directories. If the active pointer or manifest is corrupt, stop the importer,

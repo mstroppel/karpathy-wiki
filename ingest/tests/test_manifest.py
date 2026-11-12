@@ -64,7 +64,7 @@ class ManifestContractTests(unittest.TestCase):
             build_manifest("Not A Source", [], generated_at=1760000000)
 
     def test_paperless_source_format_stays_versioned(self):
-        self.assertEqual(SOURCE_FORMAT_VERSION, 2)
+        self.assertEqual(SOURCE_FORMAT_VERSION, 3)
 
 
 class ManifestFixtureTests(unittest.TestCase):

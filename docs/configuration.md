@@ -219,6 +219,13 @@ regenerates its published files, and Paperless reprocesses selected documents.
 Any future ingest provider that uses the shared anonymizer fingerprint will
 also participate.
 
+Reprocessing sources locally is separate from importing them into the wiki.
+WebDAV and Paperless derive published document revisions from sanitized output,
+not from the global redaction fingerprint. After a rule change, `/ingest-new`
+therefore only imports documents whose published content or relevant metadata
+actually changed, even when all files move to a replacement generation. Removing
+a rule also rechecks originals so newly visible content is detected.
+
 The published layout below `sources/webdav` is:
 
 ```text

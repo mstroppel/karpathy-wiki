@@ -758,6 +758,7 @@ class DurablePaperlessTests(unittest.TestCase):
 
         self.assertEqual(self.ingestor.run_once(), (1, 0))
         first_generation = (self.root / "sanitized" / "current").resolve()
+        first_output = source_document_path(first_generation, 3246).read_bytes()
 
         with mock.patch.object(
             shared_module,
@@ -768,11 +769,140 @@ class DurablePaperlessTests(unittest.TestCase):
             result = self.ingestor.run_once()
             second_generation = (self.root / "sanitized" / "current").resolve()
 
-        self.assertEqual(result, (1, 0))
+        self.assertEqual(result, (0, 0))
         self.assertNotEqual(first_generation, second_generation)
+        self.assertEqual(source_document_path(second_generation, 3246).read_bytes(), first_output)
+        self.assertTrue(self.ingestor.published_matches(self.ingestor.snapshot()[1]))
+        with mock.patch.object(self.ingestor, "process", wraps=self.ingestor.process) as process:
+            self.assertEqual(self.ingestor.run_once(), (0, 0))
+        process.assert_not_called()
         sanitized = source_document_path(self.root / "sanitized" / "current", 3246).read_text()
         self.assertIn("[ICH]", sanitized)
         self.assertNotIn("Max Mustermann", sanitized)
+
+    def published_items(self):
+        manifest = json.loads((self.root / "sanitized" / "manifest.json").read_text())
+        return {item["source_key"]: item for item in manifest["items"]}
+
+    def test_irrelevant_redaction_preserves_revision_and_bytes_with_or_without_state(self):
+        configuration: dict[str, Any] = {
+            "people": [{"replacement": "[PERSON]", "values": ["Max Mustermann"]}]
+        }
+        self.document["content"] = "Hallo Max Mustermann"
+        self.ingestor.anonymizer = TargetedAnonymizer.from_config(configuration)
+        self.assertEqual(self.ingestor.run_once(), (1, 0))
+        first = self.published_items()["3246"]
+        original = source_document_path(self.root / "sanitized" / "current", 3246).read_bytes()
+        configuration["people"][0]["values"].append("Lea Beispiel")
+        self.ingestor.anonymizer = TargetedAnonymizer.from_config(configuration)
+        with mock.patch.object(self.ingestor, "process", wraps=self.ingestor.process) as process:
+            self.assertEqual(self.ingestor.run_once(), (0, 0))
+        process.assert_called_once()
+        second = self.published_items()["3246"]
+        self.assertNotEqual(first["source_path"], second["source_path"])
+        self.assertEqual(first["source_revision"], second["source_revision"])
+        self.assertEqual(first["source_sha256"], second["source_sha256"])
+        self.assertEqual(
+            source_document_path(self.root / "sanitized" / "current", 3246).read_bytes(), original
+        )
+        # A restarted worker recognizes the checked input without re-anonymizing.
+        restarted = Ingestor(self.settings_with_state, self.ingestor.anonymizer)
+        restarted.client = self.ingestor.client
+        with mock.patch.object(restarted, "process", wraps=restarted.process) as process:
+            self.assertEqual(restarted.run_once(), (0, 0))
+        process.assert_not_called()
+        # The no-state path uses the same public identity and byte comparison.
+        restarted.settings = dataclasses.replace(self.settings_with_state, state_path=None)
+        self.assertEqual(restarted.run_once(), (0, 0))
+        for field in ("source_revision", "source_sha256"):
+            self.assertEqual(self.published_items()["3246"][field], second[field])
+        configuration["people"][0]["values"].append("Tim Testname")
+        restarted.anonymizer = TargetedAnonymizer.from_config(configuration)
+        self.assertEqual(restarted.run_once(), (0, 0))
+        for field in ("source_revision", "source_sha256"):
+            self.assertEqual(self.published_items()["3246"][field], second[field])
+
+    def test_added_and_removed_redaction_changes_only_affected_document(self):
+        documents = {
+            3246: {"id": 3246, "title": "A", "content": "Hallo Lea Beispiel"},
+            3247: {"id": 3247, "title": "B", "content": "Öffentliche Information"},
+        }
+        self.ingestor.client = FakeClient(documents[3246], selected=list(documents))
+        configuration: dict[str, Any] = {
+            "people": [{"replacement": "[PERSON]", "values": ["Max Mustermann"]}]
+        }
+        self.ingestor.anonymizer = TargetedAnonymizer.from_config(configuration)
+        with mock.patch.object(
+            self.ingestor.client, "document", side_effect=lambda document_id: documents[document_id]
+        ):
+            self.assertEqual(self.ingestor.run_once(), (2, 0))
+            initial = self.published_items()
+            configuration["people"][0]["values"].append("Lea Beispiel")
+            self.ingestor.anonymizer = TargetedAnonymizer.from_config(configuration)
+            self.assertEqual(self.ingestor.run_once(), (1, 0))
+            redacted = self.published_items()
+            self.assertNotEqual(
+                initial["3246"]["source_revision"], redacted["3246"]["source_revision"]
+            )
+            self.assertEqual(
+                initial["3247"]["source_revision"], redacted["3247"]["source_revision"]
+            )
+            configuration["people"][0]["values"].remove("Lea Beispiel")
+            self.ingestor.anonymizer = TargetedAnonymizer.from_config(configuration)
+            self.assertEqual(self.ingestor.run_once(), (1, 0))
+            restored = self.published_items()
+            for key in documents:
+                self.assertEqual(
+                    initial[str(key)]["source_revision"], restored[str(key)]["source_revision"]
+                )
+
+    def test_original_change_hidden_by_redaction_preserves_published_revision(self):
+        self.ingestor.anonymizer = TargetedAnonymizer.from_config(
+            {"people": [{"replacement": "[PERSON]", "values": ["Max Mustermann", "Lea Beispiel"]}]}
+        )
+        self.document["content"] = "Hallo Max Mustermann"
+        self.assertEqual(self.ingestor.run_once(), (1, 0))
+        first = self.published_items()["3246"]
+        original_input = self.ingestor.snapshot()[1]
+        self.document["content"] = "Hallo Lea Beispiel"
+        self.assertNotEqual(original_input, self.ingestor.snapshot()[1])
+        self.assertEqual(self.ingestor.run_once(), (0, 0))
+        second = self.published_items()["3246"]
+        self.assertEqual(first["source_revision"], second["source_revision"])
+        self.assertEqual(first["source_sha256"], second["source_sha256"])
+        self.assertTrue(self.ingestor.published_matches(self.ingestor.snapshot()[1]))
+
+    def test_published_metadata_changes_update_public_revision(self):
+        client = FakeClient(self.document, document_types={7: "Invoice"}, tags={8: "Finance"})
+        self.ingestor.client = client
+        self.assertEqual(self.ingestor.run_once(), (1, 0))
+        for update in (
+            {"title": "Changed title"},
+            {"created": "2026-01-02"},
+            {"document_type": 7},
+            {"tags": [8]},
+        ):
+            with self.subTest(update=update):
+                before = self.published_items()["3246"]["source_revision"]
+                self.document.update(update)
+                self.assertEqual(self.ingestor.run_once(), (1, 0))
+                self.assertNotEqual(before, self.published_items()["3246"]["source_revision"])
+
+    def test_new_redaction_privacy_failure_revokes_previously_published_source(self):
+        self.assertEqual(self.ingestor.run_once(), (1, 0))
+        self.ingestor.anonymizer = TargetedAnonymizer.from_config(
+            {"people": [{"replacement": "[PERSON]", "values": ["Max Mustermann"]}]}
+        )
+        with mock.patch.object(
+            self.ingestor.anonymizer,
+            "anonymize",
+            side_effect=shared_module.PrivacyValidationError("test"),
+        ):
+            self.assertEqual(self.ingestor.run_once(), (0, 1))
+        manifest = json.loads((self.root / "sanitized" / "manifest.json").read_text())
+        self.assertEqual(manifest["items"], [])
+        self.assertEqual(manifest["revoked"][0]["source_key"], "3246")
+        self.assertEqual(self.ingestor.run_once(), (0, 1))
 
     def test_restart_finishes_published_job_without_new_generation(self):
         with mock.patch.object(StateStore, "complete", side_effect=StateError("interrupted")):
