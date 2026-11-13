@@ -22,6 +22,7 @@ import {
   storageBytes,
 } from './wiki_ingest_files.mjs'
 import { preparePublication, publishPrepared } from './wiki_ingest_publication.mjs'
+import { sourceTextLines } from './wiki_ingest_source_read.mjs'
 import {
   ingestChatSources,
   ingestSourceLabel,
@@ -440,7 +441,7 @@ export async function runIngestBatch(input, worker) {
           const result = await worker({
             batch_id: state.batch_id,
             wiki_root: draft.wiki,
-            source_lines: bytes.toString('utf8').trimEnd().split('\n').length,
+            source_lines: sourceTextLines(bytes).length,
             sources: [
               {
                 ...selected,

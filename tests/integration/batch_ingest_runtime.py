@@ -4,6 +4,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import subprocess
 import threading
 import time
@@ -168,6 +169,13 @@ def worker_calls(batch):
         ("read", {"path": source}),
         ("write", {"path": source, "content": "# Finding\nSource line 1.\n"}),
     ]
+    if MODE == "lossless":
+        original = batch["sources"][0]["source_path"]
+        length = len(Path(original).read_text().splitlines()[0])
+        calls[0:0] = [
+            ("read", {"path": original, "offset": 1, "character_offset": offset})
+            for offset in range(4000, length, 4000)
+        ]
     if MODE == "path-contract":
         calls.insert(0, ("read", {"path": TARGET}))
     if MODE == "normal":
@@ -277,6 +285,8 @@ class Model(BaseHTTPRequestHandler):
             call = ("read", {"path": "/knowledge/wiki/AGENTS.md"})
         elif len(history) == 2:
             call = ("read", {"path": batch["sources"][0]["source_path"]})
+            if MODE == "source-alias":
+                call[1]["path"] = call[1]["path"].replace("/webdav/", "/webdav/./")
             if MODE == "pagination":
                 call[1]["limit"] = 1
         else:
@@ -376,7 +386,11 @@ def run(sid=None):
     request(f"/api/experimental/session/{sid}/wait", {})
     states = list(JOURNAL.glob("batches/*/state.json"))
     state = json.loads(max(states, key=lambda file: file.stat().st_mtime_ns).read_text())
-    assert request(f"/api/session/{sid}")["data"]["outcome"] == "succeeded"
+    assert request(f"/api/session/{sid}")["data"]["outcome"] == "succeeded", (
+        ERRORS,
+        request(f"/api/experimental/session/{sid}/export"),
+        state,
+    )
     return sid, state
 
 
@@ -492,7 +506,13 @@ def main():
                 change_source(name=f"{mode}.md")
                 ACTION = {"source_path": str(SOURCE / f"{mode}.md")}
                 _, recovered = run()
-                assert recovered["status"] == "done", (recovered, ERRORS)
+                assert recovered["status"] == "done", (
+                    recovered,
+                    ERRORS,
+                    request(
+                        f"/api/experimental/session/{recovered['sources'][0]['worker_session']}/export"
+                    ),
+                )
                 item = recovered["sources"][0]
                 assert item["status"] == "ingested" and item["commit"], item
                 subprocess.run(
@@ -501,6 +521,35 @@ def main():
                 )
                 assert item["worker_errors"] == [], item
                 assert item["attempts"][0]["recovered_errors"], item
+            MODE = "source-alias"
+            alias_text = "abc\r\n  \r\n"
+            change_source(alias_text, name="alias.md")
+            ACTION = {"source_path": str(SOURCE / "alias.md")}
+            _, state = run()
+            assert state["status"] == "done", (state, ERRORS)
+            native = request(
+                f"/api/experimental/session/{state['sources'][0]['worker_session']}/export"
+            )["data"]
+            alias_reads = [
+                part
+                for message in native["messages"]
+                for part in message.get("content", [])
+                if part.get("type") == "tool"
+                and part["name"] == "read"
+                and "/webdav/./" in part["state"]["input"].get("path", "")
+            ]
+            assert len(alias_reads) == 1, alias_reads
+            assert alias_reads[0]["state"]["metadata"]["ingest_source_read"]["version"] == 1
+            delivered = alias_reads[0]["state"]["content"][0]["text"]
+            assert (
+                "".join(
+                    json.loads(m[1])
+                    for m in re.finditer(
+                        r"^Line \d+, characters \d+–\d+/\d+: (.*)$", delivered, re.M
+                    )
+                )
+                == alias_text
+            )
             MODE = "normal"
             change_source()
             ACTION = {"source_path": str(SOURCE / "notes.md")}
@@ -635,9 +684,9 @@ def main():
             assert not source["source_written"] and not source["commit"], source
             assert source["worker_errors"] == [], source
             assert overview.read_bytes() == before
-            # The pinned native read tool shortens long lines, even at EOF.
-            # Successful writes/model prose must not turn that into full coverage.
-            change_source("<html>" + "x" * 5000 + "UNREAD_SUFFIX</html>\n")
+            # Lossless source pages stay bounded. Ignoring continuation cannot
+            # certify the unseen tail; reading all segments can publish it.
+            change_source("<html>" + "ä😀x" * 5000 + "UNREAD_SUFFIX</html>\n")
             MODE = "normal"
             ACTION = {"source_path": str(SOURCE / "notes.md")}
             before = (WIKI / "sources/webdav/notes.md").read_bytes()
@@ -658,10 +707,25 @@ def main():
                 and part["state"]["input"].get("path") == str(SOURCE / "notes.md")
             ]
             output = json.dumps(reads)
-            assert "(line truncated to 2000 chars)" in output and "UNREAD_SUFFIX" not in output, (
-                reads
-            )
+            assert "Continue read with" in output and "UNREAD_SUFFIX" not in output, reads
             assert (WIKI / "sources/webdav/notes.md").read_bytes() == before
+            MODE = "lossless"
+            _, state = run()
+            source = state["sources"][0]
+            assert state["status"] == "done" and source["commit"], (state, ERRORS)
+            native = request(f"/api/experimental/session/{source['worker_session']}/export")["data"]
+            reads = [
+                part
+                for msg in native["messages"]
+                for part in msg.get("content", [])
+                if part.get("type") == "tool"
+                and part["name"] == "read"
+                and part["state"]["input"].get("path") == str(SOURCE / "notes.md")
+            ]
+            assert "UNREAD_SUFFIX" in json.dumps(reads), reads
+            assert all(
+                part["state"]["metadata"]["ingest_source_read"]["version"] == 1 for part in reads
+            )
             change_source("Synthetic line 1\nSynthetic line 2\nSynthetic line 3\n")
             MODE = "pagination"
             _, state = run()

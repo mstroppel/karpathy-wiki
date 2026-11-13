@@ -45,10 +45,32 @@ unchanged source identity/digest, permitted diff and a verified commit. Session
 success or prose alone is insufficient. Rewriting unchanged supported findings is
 allowed. Corrected exact missing-target reads, mandatory reads/skills and safe
 patch corrections remain auditable; explicit permission rejections are never
-forgiven. Pagination must cover the complete source. Native long-line truncation
-does not certify unseen text and is reported as an extraction limitation.
+forgiven. Pagination must cover the complete source. For the exact assigned source,
+`read` returns lossless, JSON-quoted segments with original line numbers and
+zero-based Unicode code-point ranges. Each page contains at most 4,000 source
+characters and 64 segments; a segment contains at most 1,000 characters. Follow
+the byte-bounded pages (at most 12,000 rendered UTF-8 bytes, including continuation)
+even when quoting or multibyte text lowers the character count. Use
+the returned `Continue read` arguments (`offset`, `character_offset`, `limit`)
+until `End of source`. Code-owned tool metadata and matching delivered text
+certify a line only when its segments cover every character without gaps. Duplicate or overlapping reads do
+not fill missing ranges. Ignored continuations remain `worker_source_truncated`;
+native long-line truncation also never certifies unseen text.
 
-There is no application context-budget planner, source chunker, rollover, automatic
+Original line terminators belong to their line's quoted text and character range,
+including CRLF and final newlines. The publication line count uses this same
+untrimmed representation, so trailing whitespace-only lines also require delivery.
+Equivalent admitted paths resolve to the same assigned source and use the same
+segment reader. Native numbered-line text without segment receipts never proves
+source completeness.
+
+Native read permission/path checks run before the source is read through the
+existing regular-file, no-link, UTF-8 and 8 MiB boundaries. Source bytes, revisions
+and line references are unchanged. Other files and sessions retain native paging;
+`character_offset` is available only for the admitted source. This is transport
+paging within one worker, not semantic splitting, summarization or another attempt.
+
+There is no application context-budget planner, semantic source chunker, rollover, automatic
 repair or source retry. OpenCode V2 has no worker-scoped compaction setting; the
 worker compaction hook stops the attempt before a summary request, using the native
 boundary rather than another token estimate. This can occur before the provider's
