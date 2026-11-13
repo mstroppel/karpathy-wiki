@@ -18,6 +18,7 @@ import test from 'node:test'
 import { promisify } from 'node:util'
 import { inspectIngestBatch, runIngestBatch } from '../config/tools/wiki_ingest_batch_core.mjs'
 import { createBatchWorker, workerEvidence } from '../config/tools/wiki_ingest_batch_worker.mjs'
+import { sourceReadPage } from '../config/tools/wiki_ingest_source_read.mjs'
 import { withIngestLock } from '../config/tools/wiki_ingest_storage.mjs'
 import {
   ingestChatSources,
@@ -1059,6 +1060,103 @@ const read = (text, file = original) => {
 }
 const skill = () => nativeTool('skill', { id: 'wiki-ingest' })
 
+test('lossless source pages preserve long Unicode lines and certify only contiguous complete coverage', () => {
+  const text = `Header\n${'ä😀x'.repeat(10000)}UNREAD_SUFFIX\n\nEnd\n`
+  const bytes = Buffer.from(text)
+  const messages = [skill()]
+  const reconstructed = new Map()
+  let input = { path: original }
+  let pages = 0
+  do {
+    const result = sourceReadPage(bytes, input)
+    const message = nativeTool('read', input)
+    Object.assign(message.content[0].state, result)
+    messages.push(message)
+    pages++
+    assert.ok(Buffer.byteLength(result.content[0].text) < 50000)
+    for (const line of result.content[0].text.split('\n')) {
+      const match = /^Line (\d+), characters \d+–\d+\/\d+: (.*)$/.exec(line)
+      if (match)
+        reconstructed.set(
+          Number(match[1]),
+          (reconstructed.get(Number(match[1])) ?? '') + JSON.parse(match[2]),
+        )
+    }
+    const continuation = /Continue read with (.*)$/.exec(result.content[0].text)
+    input = continuation ? JSON.parse(continuation[1]) : undefined
+  } while (input)
+  assert.ok(pages > 1)
+  assert.equal([...reconstructed.values()].join('\n') + '\n', text)
+  const options = { sourcePath: original, sourceLines: 4 }
+  assert.equal(workerEvidence(messages, source, 'succeeded', options).source_read, true)
+  assert.equal(
+    workerEvidence(messages.slice(0, -1), source, 'succeeded', options).source_read,
+    false,
+  )
+  assert.equal(
+    workerEvidence(
+      messages.filter((_, i) => i !== 2),
+      source,
+      'succeeded',
+      options,
+    ).source_read,
+    false,
+  )
+  const forged = read('1: Header\n2: Complete\n3: \n4: End')
+  const capped = structuredClone(messages)
+  capped.at(-1).content[0].state.content = [{ type: 'text', text: '[Output truncated]' }]
+  assert.equal(workerEvidence(capped, source, 'succeeded', options).source_read, false)
+  forged.content[0].state.metadata = { ingest_source_read: { version: 1, segments: [] } }
+  assert.equal(workerEvidence([skill(), forged], source, 'succeeded', options).source_read, false)
+  assert.equal(
+    workerEvidence([...messages.slice(0, 2), messages[1]], source, 'succeeded', options)
+      .source_read,
+    false,
+  )
+  assert.throws(
+    () => sourceReadPage(bytes, { path: original, character_offset: -1 }),
+    /ingest_source_offset/,
+  )
+  assert.throws(() => sourceReadPage(Buffer.from([255]), { path: original }))
+  assert.throws(
+    () => sourceReadPage(Buffer.from('a\0b'), { path: original }),
+    /ingest_binary_source/,
+  )
+})
+
+test('source paging bounds escaped text and empty lines and keeps original line offsets', () => {
+  const bom = sourceReadPage(Buffer.from('\ufeffOne'), { path: original })
+  assert.ok(bom.content[0].text.includes('\ufeffOne'))
+  assert.equal(bom.metadata.ingest_source_read.segments[0].length, 4)
+  for (const text of ['\n'.repeat(2000), '\u0001'.repeat(50000), '😀'.repeat(50000)]) {
+    const result = sourceReadPage(Buffer.from(text), { path: original })
+    assert.ok(result.metadata.ingest_source_read.segments.length <= 64)
+    assert.ok(Buffer.byteLength(result.content[0].text) < 12000)
+    assert.ok(result.content[0].text.includes('Continue read'))
+  }
+  const result = sourceReadPage(Buffer.from('One\r\nTwo\r\nThree\r\n'), {
+    path: original,
+    offset: 2,
+    limit: 1,
+  })
+  assert.deepEqual(result.metadata.ingest_source_read.segments, [
+    { line: 2, start: 0, end: 3, length: 3 },
+  ])
+  assert.ok(result.content[0].text.includes('"offset":3'))
+  for (const input of [
+    { offset: 0 },
+    { offset: 4 },
+    { limit: 0 },
+    { limit: 2001 },
+    { character_offset: 3 },
+    { character_offset: 1.5 },
+  ])
+    assert.throws(
+      () => sourceReadPage(Buffer.from('One'), { path: original, ...input }),
+      /ingest_source_offset/,
+    )
+})
+
 test('read coverage requires every untruncated line, including paginated output, and a loaded skill', () => {
   const options = { sourcePath: original, sourceLines: 3 }
   const write = nativeTool('write', { path: source })
@@ -1285,7 +1383,14 @@ test('worker admission allows directory reads but not broader writes; compaction
       transform: async (transform) =>
         transform({
           update: (name, update) => {
-            const tool = { execute: async (input) => nativeCalls.push({ name, input }) }
+            const tool = {
+              input: { '~standard': { version: 1, vendor: 'synthetic' } },
+              execute: async (input) => {
+                nativeCalls.push({ name, input })
+                if (name === 'read' && input.path === original)
+                  throw new Error('synthetic_native_denial')
+              },
+            }
             update(tool)
             tools[name] = tool
           },
@@ -1335,6 +1440,16 @@ test('worker admission allows directory reads but not broader writes; compaction
         assert.equal(task.sources[0].wiki_path, 'sources/webdav/a.md')
         assert.equal(task.sources[0].source_path, original)
         const context = { sessionID: 'ses_child' }
+        await assert.rejects(
+          tools.read.execute({ path: original }, context),
+          /synthetic_native_denial/,
+        )
+        const callsBeforeOffset = nativeCalls.length
+        await assert.rejects(
+          tools.read.execute({ path: '.', character_offset: 1 }, context),
+          /ingest_source_offset/,
+        )
+        assert.equal(nativeCalls.length, callsBeforeOffset)
         const contextOnly = {
           patchText:
             '*** Begin Patch\n*** Update File: overview.md\n@@\n *** Delete File: /knowledge/wiki/overview.md\n-old\n+new\n*** End Patch',
@@ -1345,7 +1460,6 @@ test('worker admission allows directory reads but not broader writes; compaction
         for (const [name, input] of [
           ['read', { path: '.' }],
           ['read', { path: 'overview.md' }],
-          ['read', { path: original }],
           ['read', { path: '/knowledge/wiki' }],
           ['read', { path: '/knowledge/wiki/overview.md' }],
           ['read', { path: '/etc/opencode/skills/wiki-ingest/SKILL.md' }],
@@ -1484,6 +1598,9 @@ test('worker admission allows directory reads but not broader writes; compaction
     },
   }
   const worker = await createBatchWorker(ctx, { admissionRoot })
+  assert.deepEqual(tools.read.input.required, ['path'])
+  assert.equal(tools.read.input.properties.path.type, 'string')
+  assert.equal(tools.read.input.properties.character_offset.minimum, 0)
   const standalone = {
     sessionID: 'ses_standalone',
     agent: 'wiki-ingest',

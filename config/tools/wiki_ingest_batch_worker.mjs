@@ -2,6 +2,7 @@ import { lstat, readFile, rm } from 'node:fs/promises'
 import path from 'node:path'
 import { editablePage, fileBytes, safeDirectory } from './wiki_ingest_files.mjs'
 import { writeIngestFile } from './wiki_ingest_storage.mjs'
+import { sourceReadCoverage, sourceReadPage } from './wiki_ingest_source_read.mjs'
 
 const liveRoot = '/knowledge/wiki'
 const draftRoot = '/knowledge/incoming/ingest-journal/drafts'
@@ -86,11 +87,17 @@ export function workerEvidence(
   const creation = tools.findIndex((part) => created(part, source, wikiRoot))
   const liveSource = path.resolve(liveRoot, path.relative(wikiRoot, source))
   const successful = (part) => part.state?.status === 'completed'
-  const covered = new Set()
+  const covered = sourceReadCoverage(tools, sourcePath)
   const truncated = new Set()
   for (const part of tools) {
     if (part.name !== 'read' || !successful(part) || !targets(part, wikiRoot).includes(sourcePath))
       continue
+    if (part.state.metadata?.ingest_source_read) {
+      const segments = part.state.metadata.ingest_source_read.segments
+      for (const segment of Array.isArray(segments) ? segments : [])
+        if (!covered.has(segment.line)) truncated.add(segment.line)
+      continue
+    }
     for (const content of part.state.content ?? []) {
       if (content.type !== 'text') continue
       for (const match of content.text.matchAll(/^(\d+):([^\n]*)/gm)) {
@@ -281,6 +288,36 @@ export async function createBatchWorker(
     for (const name of ['read', 'write', 'edit', 'patch'])
       editor.update(name, (tool) => {
         const execute = tool.execute
+        if (name === 'read') {
+          tool.description = `${tool.description ?? ''} For the assigned ingest source, read returns lossless line segments. Follow every Continue read instruction until End of source; character_offset is a zero-based Unicode code-point offset within offset's original line. Other files retain native paging.`
+          // Native input is a Standard Schema, not a JSON Schema to spread.
+          // Mirror the pinned read contract and let native execution validate it.
+          tool.input = {
+            type: 'object',
+            required: ['path'],
+            additionalProperties: false,
+            properties: {
+              path: { type: 'string', description: 'File or directory to read.' },
+              offset: {
+                type: 'integer',
+                minimum: 1,
+                description: 'Original 1-based line or directory-entry offset.',
+              },
+              limit: {
+                type: 'integer',
+                minimum: 1,
+                maximum: 2000,
+                description: 'Maximum original lines or directory entries.',
+              },
+              character_offset: {
+                type: 'integer',
+                minimum: 0,
+                description:
+                  'Ingest source only: Unicode character offset within the first requested line; follow the continuation returned by read.',
+              },
+            },
+          }
+        }
         tool.execute = async (input, context) => {
           const assignment = await load(context.sessionID)
           if (assignment) {
@@ -302,7 +339,19 @@ export async function createBatchWorker(
             )
               throw new Error('ingest_catalog_owned')
           }
-          return execute(input, context)
+          const { character_offset, ...nativeInput } = input
+          const selectedSource =
+            assignment && name === 'read' && input.path === assignment.source.source_path
+          if (character_offset !== undefined && !selectedSource)
+            throw new Error('ingest_source_offset')
+          // Always run native path resolution and permission admission first.
+          const result = await execute(nativeInput, context)
+          if (!selectedSource) return result
+          context.signal?.throwIfAborted()
+          return {
+            ...result,
+            ...sourceReadPage(await fileBytes(input.path, '/knowledge/sources'), input),
+          }
         }
       })
   })
