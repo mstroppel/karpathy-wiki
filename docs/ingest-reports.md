@@ -57,6 +57,10 @@ certify a line only when its segments cover every character without gaps. Duplic
 not fill missing ranges. Ignored continuations remain `worker_source_truncated`;
 native long-line truncation also never certifies unseen text.
 
+Original line terminators belong to their line's quoted text and character range,
+including CRLF and final newlines. The publication line count uses this same
+untrimmed representation, so trailing whitespace-only lines also require delivery.
+
 Native read permission/path checks run before the source is read through the
 existing regular-file, no-link, UTF-8 and 8 MiB boundaries. Source bytes, revisions
 and line references are unchanged. Other files and sessions retain native paging;

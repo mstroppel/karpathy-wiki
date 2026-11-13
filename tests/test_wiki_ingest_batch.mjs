@@ -1086,7 +1086,7 @@ test('lossless source pages preserve long Unicode lines and certify only contigu
     input = continuation ? JSON.parse(continuation[1]) : undefined
   } while (input)
   assert.ok(pages > 1)
-  assert.equal([...reconstructed.values()].join('\n') + '\n', text)
+  assert.equal([...reconstructed.values()].join(''), text)
   const options = { sourcePath: original, sourceLines: 4 }
   assert.equal(workerEvidence(messages, source, 'succeeded', options).source_read, true)
   assert.equal(
@@ -1124,6 +1124,50 @@ test('lossless source pages preserve long Unicode lines and certify only contigu
   )
 })
 
+test('source transport retains CRLF, LF and final-newline presence verbatim', () => {
+  for (const text of ['One\r\nTwo\r\n', 'One\nTwo\n', 'One\nTwo', 'One\n  \n', '\n\n']) {
+    const result = sourceReadPage(Buffer.from(text), { path: original })
+    const values = [
+      ...result.content[0].text.matchAll(/^Line \d+, characters \d+–\d+\/\d+: (.*)$/gm),
+    ].map((match) => JSON.parse(match[1]))
+    assert.equal(values.join(''), text)
+  }
+})
+
+test('publication requires trailing whitespace-only source lines to be delivered', async (t) => {
+  const f = await fixture(t, 1)
+  const text = 'abc\n  \n'
+  const original = path.join(f.opts.sourceRoot, 'webdav/note-0.md')
+  await writeFile(original, text)
+  f.manifest.items[0].source_revision = sha(text)
+  f.manifest.items[0].frontmatter.source_revision = sha(text)
+  await f.publish()
+  for (const complete of [false, true]) {
+    let count
+    const result = await runIngestBatch(f.opts, async (batch) => {
+      count = batch.source_lines
+      const output = await f.worker(batch)
+      const readMessage = nativeTool('read', { path: original })
+      Object.assign(
+        readMessage.content[0].state,
+        sourceReadPage(Buffer.from(text), { path: original, limit: complete ? 2 : 1 }),
+      )
+      return {
+        ...output,
+        ...workerEvidence(
+          [skill(), readMessage, nativeTool('write', { path: batch.sources[0].wiki_path })],
+          batch.sources[0].wiki_path,
+          'succeeded',
+          { sourcePath: original, sourceLines: batch.source_lines, wikiRoot: batch.wiki_root },
+        ),
+      }
+    })
+    assert.equal(count, 2)
+    assert.equal(result.status, complete ? 'done' : 'partial')
+    assert.equal(Boolean(result.commit), complete)
+  }
+})
+
 test('source paging bounds escaped text and empty lines and keeps original line offsets', () => {
   const bom = sourceReadPage(Buffer.from('\ufeffOne'), { path: original })
   assert.ok(bom.content[0].text.includes('\ufeffOne'))
@@ -1140,7 +1184,7 @@ test('source paging bounds escaped text and empty lines and keeps original line 
     limit: 1,
   })
   assert.deepEqual(result.metadata.ingest_source_read.segments, [
-    { line: 2, start: 0, end: 3, length: 3 },
+    { line: 2, start: 0, end: 5, length: 5 },
   ])
   assert.ok(result.content[0].text.includes('"offset":3'))
   for (const input of [

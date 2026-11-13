@@ -3,11 +3,15 @@
 const pageCharacters = 4000
 const segmentCharacters = 1000
 
-export function sourceReadPage(bytes, input) {
+export function sourceTextLines(bytes) {
   const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)
   if (text.includes('\0')) throw new Error('ingest_binary_source')
-  const lines = text.split(/\r?\n/)
-  if (lines.at(-1) === '') lines.pop()
+  // Keep terminators in their original line, including CRLF and trailing blanks.
+  return text.match(/[^\n]*\n|[^\n]+$/g) ?? ['']
+}
+
+export function sourceReadPage(bytes, input) {
+  const lines = sourceTextLines(bytes)
   const offset = input.offset ?? 1
   const limit = input.limit ?? 2000
   const character = input.character_offset ?? 0
