@@ -1,3 +1,5 @@
+import path from 'node:path'
+
 // Offsets and lengths use Unicode code points, not UTF-16 halves. Each page is
 // bounded even when a source consists of one enormous OCR line.
 const pageCharacters = 4000
@@ -72,13 +74,14 @@ export function sourceReadPage(bytes, input) {
   }
 }
 
-export function sourceReadCoverage(tools, sourcePath) {
+export function sourceReadCoverage(tools, sourcePath, wikiRoot) {
   const lines = new Map()
   for (const part of tools) {
     if (
       part.name !== 'read' ||
       part.state?.status !== 'completed' ||
-      part.state.input?.path !== sourcePath
+      typeof part.state.input?.path !== 'string' ||
+      path.resolve(wikiRoot, part.state.input.path) !== sourcePath
     )
       continue
     const receipt = part.state.metadata?.ingest_source_read

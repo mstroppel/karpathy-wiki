@@ -87,7 +87,7 @@ export function workerEvidence(
   const creation = tools.findIndex((part) => created(part, source, wikiRoot))
   const liveSource = path.resolve(liveRoot, path.relative(wikiRoot, source))
   const successful = (part) => part.state?.status === 'completed'
-  const covered = sourceReadCoverage(tools, sourcePath)
+  const covered = sourceReadCoverage(tools, sourcePath, wikiRoot)
   const truncated = new Set()
   for (const part of tools) {
     if (part.name !== 'read' || !successful(part) || !targets(part, wikiRoot).includes(sourcePath))
@@ -103,7 +103,6 @@ export function workerEvidence(
       for (const match of content.text.matchAll(/^(\d+):([^\n]*)/gm)) {
         const line = Number(match[1])
         if (/\(line truncated to \d+ chars\)/.test(match[2])) truncated.add(line)
-        else covered.add(line)
       }
     }
   }
@@ -341,7 +340,9 @@ export async function createBatchWorker(
           }
           const { character_offset, ...nativeInput } = input
           const selectedSource =
-            assignment && name === 'read' && input.path === assignment.source.source_path
+            assignment &&
+            name === 'read' &&
+            path.resolve(assignment.root, input.path) === assignment.source.source_path
           if (character_offset !== undefined && !selectedSource)
             throw new Error('ingest_source_offset')
           // Always run native path resolution and permission admission first.
@@ -350,7 +351,10 @@ export async function createBatchWorker(
           context.signal?.throwIfAborted()
           return {
             ...result,
-            ...sourceReadPage(await fileBytes(input.path, '/knowledge/sources'), input),
+            ...sourceReadPage(
+              await fileBytes(assignment.source.source_path, '/knowledge/sources'),
+              input,
+            ),
           }
         }
       })

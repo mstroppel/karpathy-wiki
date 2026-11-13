@@ -60,6 +60,9 @@ native long-line truncation also never certifies unseen text.
 Original line terminators belong to their line's quoted text and character range,
 including CRLF and final newlines. The publication line count uses this same
 untrimmed representation, so trailing whitespace-only lines also require delivery.
+Equivalent admitted paths resolve to the same assigned source and use the same
+segment reader. Native numbered-line text without segment receipts never proves
+source completeness.
 
 Native read permission/path checks run before the source is read through the
 existing regular-file, no-link, UTF-8 and 8 MiB boundaries. Source bytes, revisions

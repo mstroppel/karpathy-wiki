@@ -1059,6 +1059,12 @@ const read = (text, file = original) => {
   return message
 }
 const skill = () => nativeTool('skill', { id: 'wiki-ingest' })
+const sourceRead = (text, input = {}) => {
+  const args = { path: original, ...input }
+  const message = nativeTool('read', args)
+  Object.assign(message.content[0].state, sourceReadPage(Buffer.from(text), args))
+  return message
+}
 
 test('lossless source pages preserve long Unicode lines and certify only contiguous complete coverage', () => {
   const text = `Header\n${'ä😀x'.repeat(10000)}UNREAD_SUFFIX\n\nEnd\n`
@@ -1210,7 +1216,15 @@ test('read coverage requires every untruncated line, including paginated output,
       (e) => e.code === 'worker_source_not_read',
     ),
   )
-  assert.deepEqual(evidence([skill(), read('1: A\n2: B\n'), read('3: C\n'), write]).errors, [])
+  assert.deepEqual(
+    evidence([
+      skill(),
+      sourceRead('A\nB\nC\n', { limit: 2 }),
+      sourceRead('A\nB\nC\n', { offset: 3 }),
+      write,
+    ]).errors,
+    [],
+  )
   assert.ok(
     evidence([
       skill(),
@@ -1227,10 +1241,37 @@ test('read coverage requires every untruncated line, including paginated output,
     evidence([
       skill(),
       read('1: A (line truncated to 2000 chars)\n'),
-      read('1: A\n2: B\n3: C\n'),
+      sourceRead('A\nB\nC\n'),
       write,
     ]).errors,
     [],
+  )
+})
+
+test('equivalent admitted paths require lossless receipts, never native numbered-line evidence', () => {
+  const alias = original.replace('/webdav/', '/webdav/./')
+  const options = { sourcePath: original, sourceLines: 2 }
+  assert.equal(
+    workerEvidence([skill(), read('1: A\n2: B', alias)], source, 'succeeded', options).source_read,
+    false,
+  )
+  assert.equal(
+    workerEvidence([skill(), read('1: A\n2: B')], source, 'succeeded', options).source_read,
+    false,
+  )
+  assert.equal(
+    workerEvidence([skill(), sourceRead('A\r\nB\n', { path: alias })], source, 'succeeded', options)
+      .source_read,
+    true,
+  )
+  assert.equal(
+    workerEvidence(
+      [skill(), sourceRead('A\r\nB\n', { path: original + '.other' })],
+      source,
+      'succeeded',
+      options,
+    ).source_read,
+    false,
   )
 })
 
@@ -1392,7 +1433,7 @@ test('safe in-session read/skill/patch correction is auditable; unrelated or lat
     type: 'tool.execution',
   })
   const options = { sourcePath: original, sourceLines: 1 }
-  const valid = [skill(), read('1: Fully read\n'), nativeTool('write', { path: source })]
+  const valid = [skill(), sourceRead('Fully read\n'), nativeTool('write', { path: source })]
   assert.deepEqual(
     workerEvidence([failedRead, failedSkill, ...valid], source, 'succeeded', options).errors,
     [],

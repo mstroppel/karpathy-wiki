@@ -4,6 +4,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import subprocess
 import threading
 import time
@@ -284,6 +285,8 @@ class Model(BaseHTTPRequestHandler):
             call = ("read", {"path": "/knowledge/wiki/AGENTS.md"})
         elif len(history) == 2:
             call = ("read", {"path": batch["sources"][0]["source_path"]})
+            if MODE == "source-alias":
+                call[1]["path"] = call[1]["path"].replace("/webdav/", "/webdav/./")
             if MODE == "pagination":
                 call[1]["limit"] = 1
         else:
@@ -518,6 +521,35 @@ def main():
                 )
                 assert item["worker_errors"] == [], item
                 assert item["attempts"][0]["recovered_errors"], item
+            MODE = "source-alias"
+            alias_text = "abc\r\n  \r\n"
+            change_source(alias_text, name="alias.md")
+            ACTION = {"source_path": str(SOURCE / "alias.md")}
+            _, state = run()
+            assert state["status"] == "done", (state, ERRORS)
+            native = request(
+                f"/api/experimental/session/{state['sources'][0]['worker_session']}/export"
+            )["data"]
+            alias_reads = [
+                part
+                for message in native["messages"]
+                for part in message.get("content", [])
+                if part.get("type") == "tool"
+                and part["name"] == "read"
+                and "/webdav/./" in part["state"]["input"].get("path", "")
+            ]
+            assert len(alias_reads) == 1, alias_reads
+            assert alias_reads[0]["state"]["metadata"]["ingest_source_read"]["version"] == 1
+            delivered = alias_reads[0]["state"]["content"][0]["text"]
+            assert (
+                "".join(
+                    json.loads(m[1])
+                    for m in re.finditer(
+                        r"^Line \d+, characters \d+–\d+/\d+: (.*)$", delivered, re.M
+                    )
+                )
+                == alias_text
+            )
             MODE = "normal"
             change_source()
             ACTION = {"source_path": str(SOURCE / "notes.md")}
