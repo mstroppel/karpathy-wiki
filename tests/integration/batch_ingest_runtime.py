@@ -200,6 +200,28 @@ def worker_calls(batch):
     return calls
 
 
+def action_history(messages):
+    # Child completion notifications can be rendered as user messages. Only the
+    # explicit fixture prompt starts a new action; notifications must not replay it.
+    last_prompt = max(
+        (
+            i
+            for i, message in enumerate(messages)
+            if message.get("role") == "user"
+            and (
+                message.get("content") == "Run synthetic action"
+                or any(
+                    part.get("text") == "Run synthetic action"
+                    for part in message.get("content", [])
+                    if isinstance(part, dict)
+                )
+            )
+        ),
+        default=-1,
+    )
+    return [message for message in messages[last_prompt + 1 :] if message.get("role") == "tool"]
+
+
 class Model(BaseHTTPRequestHandler):
     def log_message(self, *_args):
         pass
@@ -249,13 +271,7 @@ class Model(BaseHTTPRequestHandler):
             )
             return
         if not batch:
-            last_user = max(
-                (i for i, message in enumerate(messages) if message.get("role") == "user"),
-                default=-1,
-            )
-            history = [
-                message for message in messages[last_user + 1 :] if message.get("role") == "tool"
-            ]
+            history = action_history(messages)
         call = None
         content = (
             "## Objective\n- Synthetic diagnosis\n\n## Important Details\n- No edits\n\n"
