@@ -35,6 +35,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Update OpenChamber from 2.6.1 to 2.7.2, including upstream folder-trust
+  security fixes. No data-layout changes or automatic deployment are included.
 - Manual ingestion now uses one fresh session and private draft per source, with
   one attempt and no application context budgets, automatic splitting, rollover,
   repair or decision-ID loops. Worker compaction stops before summarization;
