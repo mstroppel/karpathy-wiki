@@ -12,8 +12,10 @@ Markdown counterparts use the same relative directory/basename with `.md`
 inside the immutable `sources/email/generations/<generation>/` wrapper.
 Transit-only duplicates keep separate private originals and one canonical source.
 
-All persistent data lives below `DATA_ROOT`. The installation directory only
-contains the launcher, `.env`, optional secrets, and local Compose adoptions.
+Persistent application data lives below `DATA_ROOT`. The installation directory
+holds the launcher and local configuration, such as `.env`, optional secrets,
+the [Home Assistant entity list](timeseries.md#enable-or-change-the-selection),
+and local Compose overrides.
 
 ```text
 ${DATA_ROOT}/
@@ -36,7 +38,6 @@ ${DATA_ROOT}/
 │   ├── ingest.sqlite3      # Durable ingest jobs, leases, generations, publications
 │   └── audio-identity/     # Private WebDAV path → opaque source ID mapping
 ├── timeseries/              # Private Home Assistant data (not published Markdown)
-│   ├── config/entities.json # Explicit entity allowlist, if configured
 │   ├── archive/             # SQLite history and import progress
 │   └── socket/              # Recreated SQL endpoint; no data to restore
 ├── quarantine/

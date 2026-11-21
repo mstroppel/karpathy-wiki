@@ -30,9 +30,9 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-mkdir -p data/timeseries/config data/opencode/config
+mkdir -p data/opencode/config
 printf '%s\n' '["sensor.synthetic_owlet", "sensor.synthetic_room_temperature"]' \
-  > data/timeseries/config/entities.json
+  > entities.json
 printf 'synthetic-recorder\n' > token
 printf '%s\n' '{"people":[{"values":["Example Person"],"replacement":"[PERSON]"}]}' \
   > redactions.json
@@ -57,6 +57,23 @@ AUDIO_MAX_DURATION_SECONDS=
 HUGGINGFACE_TOKEN=
 EOF
 
+check_entity_mount() {
+  compose config --format json | python3 -c '
+import json, sys
+
+services = json.load(sys.stdin)["services"]
+mount, = [m for m in services["timeseries-import"]["volumes"]
+          if m["target"] == "/etc/wiki-timeseries/entities.json"]
+assert mount["type"] == "bind" and mount["source"] == sys.argv[1], mount
+assert mount["read_only"] and not mount["bind"]["create_host_path"], mount
+for name in ("timeseries-query", "opencode"):
+    assert not any(m["target"].startswith("/etc/wiki-timeseries")
+                   for m in services[name]["volumes"]), name
+' "$1"
+}
+check_entity_mount "$scratch/entities.json"
+HOME_ASSISTANT_ENTITIES_FILE=./custom.json check_entity_mount "$scratch/custom.json"
+
 docker network create --internal "$project-proxy" >/dev/null
 compose up --pull never -d fixture
 attempts=0
@@ -68,6 +85,7 @@ until compose exec -T fixture python3 -c \
   sleep 1
 done
 compose run --pull never --rm timeseries-import once
+test ! -e data/timeseries/config
 compose up --pull never -d timeseries-query opencode
 attempts=0
 until compose exec -T timeseries-query test -S /timeseries-socket/query.sock >/dev/null 2>&1; do

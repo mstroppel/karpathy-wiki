@@ -1,6 +1,7 @@
 .env
 .env.*
 !.env.example
+/entities.json
 .cache/
 backups/
 .launcher.lock
