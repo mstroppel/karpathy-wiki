@@ -3,8 +3,10 @@ import importlib.util
 import json
 import os
 import shutil
+import socket
 import stat
 import subprocess
+import tarfile
 import tempfile
 import unittest
 from pathlib import Path
@@ -1504,6 +1506,30 @@ class LauncherTests(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.symlink_to(target)
         return links
+
+    def test_timeseries_backup_retains_archive_and_omits_only_transient_socket(self):
+        self.write_env("KARPATHY_WIKI_VERSION=0.0.1\n")
+        root = self.project / "data" / "timeseries"
+        endpoint = root / "socket" / "query.sock"
+        endpoint.parent.mkdir(parents=True)
+        sample = root / "archive" / "recorder.sqlite3"
+        sample.parent.mkdir()
+        sample.write_bytes(b"synthetic history")
+        other_path = root / "socket" / "other.sock"
+        with socket.socket(socket.AF_UNIX) as service, socket.socket(socket.AF_UNIX) as other:
+            service.bind(str(endpoint))
+            other.bind(str(other_path))
+            rejected = self.run_launcher("update", "1.2.3")
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn("unsupported socket/device/FIFO", rejected.stderr)
+            other_path.unlink()
+            result = self.run_launcher("update", "1.2.3")
+            self.assertEqual(result.returncode, 0, result.stderr)
+        identifier = self.snapshot_metadata()[0]["id"]
+        with tarfile.open(self.project / "backups" / identifier / "snapshot.tar") as archive:
+            names = archive.getnames()
+        self.assertIn(str(sample).lstrip("/"), names)
+        self.assertNotIn(str(endpoint).lstrip("/"), names)
 
     def test_container_links_survive_repeated_updates_and_rollback_rescue(self):
         import tarfile

@@ -89,6 +89,9 @@ jobs:
           - suite: runtime-write-isolation
             images: opencode
             script: tests/integration/runtime-write-isolation.sh
+          - suite: timeseries
+            images: opencode
+            script: tests/integration/timeseries.sh
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
