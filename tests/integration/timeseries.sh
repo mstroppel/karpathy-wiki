@@ -34,7 +34,9 @@ mkdir -p data/timeseries/config data/opencode/config
 printf '%s\n' '["sensor.synthetic_owlet", "sensor.synthetic_room_temperature"]' \
   > data/timeseries/config/entities.json
 printf 'synthetic-recorder\n' > token
-chmod 0600 token
+printf '%s\n' '{"people":[{"values":["Example Person"],"replacement":"[PERSON]"}]}' \
+  > redactions.json
+chmod 0600 token redactions.json
 cat > data/opencode/config/opencode.json <<'EOF'
 {"providers":{"fake":{"env":["FAKE_API_KEY"],"package":"@opencode/ai/providers/openai-compatible","settings":{"baseURL":"http://fixture:4081/v1"},"models":{"synthetic":{"limit":{"context":128000,"output":4096}}}}}}
 EOF
@@ -47,6 +49,7 @@ OPENCHAMBER_UI_PASSWORD=synthetic-frontend
 COMPOSE_PROFILES=timeseries
 HOME_ASSISTANT_URL=http://fixture:4081
 HOME_ASSISTANT_TOKEN_FILE=$scratch/token
+REDACTIONS_FILE=$scratch/redactions.json
 PUID=$(id -u)
 PGID=$(id -g)
 AUDIO_MAX_BYTES=
@@ -76,11 +79,13 @@ done
 compose exec -T timeseries-query sh -ec '
   test "$(ls /sys/class/net)" = lo
   test ! -e /run/secrets/home_assistant_token
+  test ! -e /run/secrets/redactions
   test ! -w /archive/recorder.sqlite3
 '
 compose exec -T opencode sh -ec '
   test ! -e /archive/recorder.sqlite3
   test ! -e /run/secrets/home_assistant_token
+  test ! -e /run/secrets/redactions
   test ! -w /timeseries-socket
 '
 compose exec -T opencode python3 /fixture.py chat

@@ -281,11 +281,13 @@ services:
     restart: unless-stopped
     environment:
       HOME_ASSISTANT_URL: ${HOME_ASSISTANT_URL:-}
+      REDACTIONS_FILE: /run/secrets/redactions
     volumes:
       - ${DATA_ROOT:-./data}/timeseries/archive:/archive:rw
       - ${DATA_ROOT:-./data}/timeseries/config:/etc/wiki-timeseries:ro
     secrets:
       - home_assistant_token
+      - redactions
     depends_on:
       init:
         condition: service_completed_successfully
