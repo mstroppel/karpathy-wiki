@@ -17,9 +17,11 @@ a separate integration.
    `./secrets/home-assistant-token`. Add `timeseries` to `COMPOSE_PROFILES` in
    `.env` (this also enables the chat tool). Run `./karpathy-wiki.sh run --rm init`
    to create the private directories.
-3. Create `${DATA_ROOT}/timeseries/config/entities.json` as a JSON list of actual
-   Home Assistant `entity_id` strings. For example, if your entities have these
-   IDs:
+3. Create `entities.json` next to the installation's `.env` as a JSON list of
+   actual Home Assistant `entity_id` strings. To use another file, set
+   `HOME_ASSISTANT_ENTITIES_FILE` in `.env` (relative paths resolve from the
+   installation directory). The file must exist before starting the importer
+   and be readable by the installation's `PUID`/`PGID`. For example:
 
    ```json
    ["sensor.owlet_sleep_state", "sensor.room_temperature"]
@@ -35,9 +37,17 @@ a separate integration.
    interpolation or downsampling on import. Recorder history purged before it
    was imported cannot be recovered.
 
-The importer re-reads the list each cycle. Removing an ID stops future imports
-for it; the existing archive remains queryable. To delete an archived series and
-its import position, remove its ID (an empty list is `[]`), then run:
+The importer re-reads in-place edits each cycle. After replacing the file (some
+editors save by renaming a new file over the old one) or changing its path,
+recreate the importer to refresh the file mount:
+
+```sh
+./karpathy-wiki.sh up -d --force-recreate timeseries-import
+```
+
+Removing an ID stops future imports for it; the existing archive remains
+queryable. To delete an archived series and its import position, remove its ID
+(an empty list is `[]`), then run:
 
 ```sh
 ./karpathy-wiki.sh exec timeseries-import delete sensor.owlet_sleep_state --confirm

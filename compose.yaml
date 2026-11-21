@@ -284,7 +284,12 @@ services:
       REDACTIONS_FILE: /run/secrets/redactions
     volumes:
       - ${DATA_ROOT:-./data}/timeseries/archive:/archive:rw
-      - ${DATA_ROOT:-./data}/timeseries/config:/etc/wiki-timeseries:ro
+      - type: bind
+        source: ${HOME_ASSISTANT_ENTITIES_FILE:-./entities.json}
+        target: /etc/wiki-timeseries/entities.json
+        read_only: true
+        bind:
+          create_host_path: false
     secrets:
       - home_assistant_token
       - redactions

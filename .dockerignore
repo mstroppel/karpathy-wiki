@@ -1,6 +1,7 @@
 .git
 .github
 .env*
+entities.json
 secrets
 temp
 node_modules
