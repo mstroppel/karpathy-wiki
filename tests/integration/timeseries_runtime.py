@@ -40,7 +40,9 @@ TEMP_ROWS = [
     (1, "03:00", "24"),
 ]
 EXPECTED = [[NIGHTS[0], 18, 60], [NIGHTS[0], 20, 90], [NIGHTS[1], 19, 30], [NIGHTS[1], 23, 30]]
-CATALOG = "SELECT display_name, kind, imported_through_utc FROM series ORDER BY series_id"
+CATALOG = (
+    "SELECT display_name, description, kind, imported_through_utc FROM series ORDER BY series_id"
+)
 
 # Model fixture SQL, not an application feature. Integrate only the intersections
 # of bounded measurement intervals and valid deep-sleep intervals.
@@ -71,6 +73,9 @@ def entries(entity):
     attrs = {"friendly_name": TITLES[measurement]}
     if measurement:
         attrs["unit_of_measurement"] = "°C"
+    else:
+        attrs["friendly_name"] += " – Example Person"
+        attrs["description"] = "Schlafzustand von Example Person"
     return [
         {
             "entity_id": entity,
@@ -107,11 +112,11 @@ def complete(body):
         sql = CATALOG
     else:
         catalog = json.loads(results[0])
-        assert [row[:2] for row in catalog["rows"]] == [
-            [TITLES[0], "state"],
-            [TITLES[1], "measurement"],
+        assert [row[:3] for row in catalog["rows"]] == [
+            [f"{TITLES[0]} – [PERSON]", "Schlafzustand von [PERSON]", "state"],
+            [TITLES[1], "", "measurement"],
         ], catalog
-        assert all(row[2] > "2026-10-02T03:30" for row in catalog["rows"]), catalog
+        assert all(row[3] > "2026-10-02T03:30" for row in catalog["rows"]), catalog
         sql = DISTRIBUTION.format(minimum=120 if follow_up else 0)
     if len(results) == 2:
         result = json.loads(results[-1])
@@ -125,7 +130,7 @@ def complete(body):
             if follow_up
             else "Abdeckung: 150 min und 60 min."
         )
-        data_as_of = min(row[2] for row in catalog["rows"])
+        data_as_of = min(row[3] for row in catalog["rows"])
         report = (
             f"{rows}. {suffix} Zeitraum: 01.–02.10. UTC; Methode: 30 min Haltedauer, Schnittmenge."
             f" Datenstand: {data_as_of}. {RECORDER_CAVEAT}"

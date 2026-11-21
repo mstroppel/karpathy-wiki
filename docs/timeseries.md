@@ -25,7 +25,10 @@ a separate integration.
    ["sensor.owlet_sleep_state", "sensor.room_temperature"]
    ```
 
-4. Run `./karpathy-wiki.sh up -d`. The importer starts immediately and runs the
+4. Configure the shared [`REDACTIONS_FILE`](configuration.md#secrets), readable
+   by the importer's `PUID`/`PGID`. The importer requires a valid deny-list and
+   reloads it each cycle.
+5. Run `./karpathy-wiki.sh up -d`. The importer starts immediately and runs the
    same job every 15 minutes, without overlapping runs. Each entity starts with
    the history still retained by Recorder; later runs read from one hour before
    its last successfully imported cutoff, including after restarts. There is no
@@ -51,8 +54,11 @@ the stable IDs are `ha:<entity_id>` within one Wiki installation.
 - `series` has stable IDs, source and entity IDs, display names, descriptions,
   units, series kind, timestamp meaning and the last successful import cutoff
   (`imported_through_utc`/`imported_through_us`). Names use `friendly_name` or
-  the ID; descriptions use `description` or remain empty. Series with a unit or
-  `state_class` are treated as measurements; other series are categorical.
+  the ID; descriptions use `description` or remain empty. The importer applies
+  the deny-list to both fields before storing them, and reapplies it to archived
+  metadata each cycle, including for deselected series. If a field cannot be
+  safely redacted, it is left empty. Series with a unit or `state_class` are
+  treated as measurements; other series are categorical.
 - `samples` contains Recorder records at their original resolution. UTC
   `timestamp_utc` and integer `timestamp_us` represent HA `last_updated`
   (a Recorder update, not necessarily the device's sample time). Measurement
@@ -88,6 +94,7 @@ and `samples`. The archive is not published via SilverBullet or `raw-files`.
 Launcher backups include the archive and token; they omit the transient socket.
 
 **Only enable this profile if your configured chat models may receive these data.**
-Tool results can include raw individual values, timestamps and names. They can
-be stored in the private chat transcript and sent to a hosted model provider
-without another confirmation. Nothing is added to the wiki by a query alone.
+The deny-list is not general anonymization. Tool results can include entity IDs,
+raw individual values, and timestamps, which are not redacted. Results can be
+stored in the private chat transcript and sent to a hosted model provider without
+another confirmation. Nothing is added to the wiki by a query alone.

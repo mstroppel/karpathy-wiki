@@ -19,9 +19,12 @@ from urllib.error import HTTPError
 from urllib.parse import urlencode, urlsplit
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
+from karpathy_wiki_ingest.shared import PrivacyValidationError, TargetedAnonymizer
+
 ARCHIVE = Path("/archive/recorder.sqlite3")
 CONFIG = Path("/etc/wiki-timeseries/entities.json")
 TOKEN = Path("/run/secrets/home_assistant_token")
+REDACTIONS = Path("/run/secrets/redactions")
 EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 MICROSECOND = timedelta(microseconds=1)
 OVERLAP = timedelta(hours=1)
@@ -179,6 +182,29 @@ def text(attrs: dict[str, Any], key: str) -> str | None:
     return value if isinstance(value, str) and value.strip() else None
 
 
+def redact_text(anonymizer: TargetedAnonymizer, value: str) -> str:
+    try:
+        return anonymizer.anonymize(value)[0]
+    except PrivacyValidationError:
+        # Omit a field that cannot be safely redacted, without losing samples.
+        return ""
+
+
+def redact_archived_metadata(db: sqlite3.Connection, anonymizer: TargetedAnonymizer) -> None:
+    # Apply newly added rules even to deselected series or when Recorder is down.
+    with db:
+        for series_id, name, description in db.execute(
+            "SELECT series_id, display_name, description FROM series"
+        ).fetchall():
+            safe_name = redact_text(anonymizer, name)
+            safe_description = redact_text(anonymizer, description)
+            if (safe_name, safe_description) != (name, description):
+                db.execute(
+                    "UPDATE series SET display_name=?, description=? WHERE series_id=?",
+                    (safe_name, safe_description, series_id),
+                )
+
+
 def typed_value(raw: str | None, measurement: bool) -> tuple[str | int | float | None, str]:
     if raw is None:
         return None, "missing"
@@ -202,19 +228,20 @@ def store_window(
     old: SeriesState | None,
     end: datetime,
     points: list[dict[str, Any]],
+    anonymizer: TargetedAnonymizer,
 ) -> SeriesState:
     series_id = f"ha:{entity}"
     # Use an actual archived row for removed entities, never a guessed unit.
     latest = max(points, key=lambda row: parse_timestamp(row["last_updated"]), default=None)
     meta = current if current is not None else latest.get("attributes", {}) if latest else None
     if meta is None:
-        display = old.display_name if old else entity
+        display = old.display_name if old else redact_text(anonymizer, entity)
         description = old.description if old else ""
         unit = old.unit if old else None
         kind = old.kind if old else "state"
     else:
-        display = text(meta, "friendly_name") or entity
-        description = text(meta, "description") or ""
+        display = redact_text(anonymizer, text(meta, "friendly_name") or entity)
+        description = redact_text(anonymizer, text(meta, "description") or "")
         unit = text(meta, "unit_of_measurement")
         # A later unavailable state without measurement metadata must not
         # turn a previously detected measurement into a categorical series.
@@ -269,10 +296,14 @@ def store_window(
     return SeriesState(cutoff, display, description, unit, kind)
 
 
-def import_once(archive: Path, config: Path, base: str, token: str, *, through: datetime) -> int:
-    ha = Recorder(base, token)
+def import_once(
+    archive: Path, config: Path, base: str, token: str, *, redactions: Path, through: datetime
+) -> int:
+    anonymizer = TargetedAnonymizer.from_file(redactions)
     failures = 0
     with archive_writer(archive) as db:
+        redact_archived_metadata(db, anonymizer)
+        ha = Recorder(base, token)
         for entity in selected_entities(config):
             try:
                 start = EPOCH - MICROSECOND
@@ -290,7 +321,7 @@ def import_once(archive: Path, config: Path, base: str, token: str, *, through: 
                     start = max(start, old.imported_through - OVERLAP)
                 current = ha.metadata(entity)
                 for end, points in ha.windows(entity, start, through):
-                    old = store_window(db, entity, current, old, end, points)
+                    old = store_window(db, entity, current, old, end, points, anonymizer)
             except (OSError, HTTPException, ValueError, KeyError, TypeError, sqlite3.Error) as exc:
                 failures += 1
                 # Never emit history, hostnames, tokens or private entity IDs.
@@ -338,6 +369,7 @@ def main() -> int:
                 CONFIG,
                 os.environ.get("HOME_ASSISTANT_URL", ""),
                 TOKEN.read_text(encoding="utf-8").strip(),
+                redactions=Path(os.environ.get("REDACTIONS_FILE", str(REDACTIONS))),
                 through=datetime.now(UTC),
             )
         except (OSError, ValueError, sqlite3.Error) as exc:

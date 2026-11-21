@@ -102,9 +102,16 @@ class TimeseriesImportTest(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         self.archive = Path(directory.name) / "archive.sqlite3"
         self.config = Path(directory.name) / "entities.json"
+        self.redactions = Path(directory.name) / "redactions.json"
         self.config.write_text(json.dumps([SLEEP, TEMP]))
+        self.write_redactions("Example Person")
         self.recorder = RecorderFixture()
         self.addCleanup(self.recorder.close)
+
+    def write_redactions(self, *values):
+        self.redactions.write_text(
+            json.dumps({"people": [{"values": values, "replacement": "[PERSON]"}]})
+        )
 
     def run_import(self, hour):
         return import_once(
@@ -112,8 +119,56 @@ class TimeseriesImportTest(unittest.TestCase):
             self.config,
             self.recorder.url,
             "synthetic",
+            redactions=self.redactions,
             through=datetime(2026, 1, 1, hour, tzinfo=UTC),
         )
+
+    def test_redacts_current_and_historical_metadata_before_storage(self):
+        self.recorder.states[SLEEP]["attributes"].update(
+            friendly_name="Example Person sleep", description="Sleep for EXAMPLE PERSON"
+        )
+        del self.recorder.states[TEMP]
+        self.recorder.history[TEMP][-1]["attributes"].update(
+            friendly_name="Example Person temperature", description="Example Person's room"
+        )
+        self.assertEqual(self.run_import(1), 0)
+        self.assertEqual(
+            self.read("SELECT display_name, description FROM series ORDER BY series_id"),
+            [("[PERSON] sleep", "Sleep for [PERSON]"), ("[PERSON] temperature", "[PERSON]'s room")],
+        )
+        self.assertNotIn(b"Example Person", self.archive.read_bytes())
+
+    def test_new_rules_redact_archived_metadata_without_a_successful_fetch(self):
+        self.assertEqual(self.run_import(1), 0)
+        self.config.write_text(json.dumps([SLEEP]))
+        self.recorder.fail.add(SLEEP)
+        self.write_redactions("Synthetic", "Fixture")
+        self.assertEqual(self.run_import(2), 1)
+        self.assertEqual(
+            self.read("SELECT display_name, description FROM series ORDER BY series_id"),
+            [("[PERSON] sleep", ""), (TEMP, "[PERSON]")],
+        )
+        self.assertEqual(self.read("SELECT count(*) FROM samples"), [(5,)])
+
+    def test_invalid_redactions_stop_import_and_failed_field_validation_omits_text(self):
+        self.redactions.unlink()
+        with self.assertRaises(ValueError):
+            self.run_import(1)
+        self.redactions.write_text("{}")
+        with self.assertRaises(ValueError):
+            self.run_import(1)
+        self.assertEqual(self.recorder.requests, [])
+        self.assertFalse(self.archive.exists())
+
+        # The replacement itself would still match the configured literal.
+        self.write_redactions("Person")
+        self.recorder.states[SLEEP]["attributes"]["friendly_name"] = "Example Person sleep"
+        self.assertEqual(self.run_import(1), 0)
+        self.assertEqual(
+            self.read("SELECT display_name, entity_id FROM series ORDER BY series_id"),
+            [("", SLEEP), (TEMP, TEMP)],
+        )
+        self.assertEqual(self.read("SELECT count(*) FROM samples"), [(5,)])
 
     def read(self, sql):
         return [tuple(row) for row in query(self.archive, sql)["rows"]]
