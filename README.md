@@ -117,6 +117,11 @@ and a print-optimized HTML view at `WIKI_PUBLIC_URL/.fs/assets/analyses/<slug>.h
 from which the browser's print dialog produces a shareable PDF.
 See [analysis export](docs/analysis-export.md).
 
+With the opt-in `timeseries` profile, the wiki chat can query selected Home
+Assistant Recorder history and answer follow-up questions using read-only
+SQLite. Enabling it permits sending individual values and timestamps to the chat
+model, including hosted providers. See [time-series analysis](docs/timeseries.md).
+
 ## Interactive gap review
 
 Run `/gap-review` in OpenCode to review unsupported claims, contradictions,
@@ -139,6 +144,7 @@ Set `COMPOSE_PROFILES` in `.env`; profiles can be enabled independently:
 | `answers` | Publish confirmed Q&A drafts from the local answer inbox |
 | `paperless` | Export tagged OCR text and redact configured personal data |
 | `email` | Trust an IMAP folder, privately archive eligible mail, delete it on the server, publish redacted body text |
+| `timeseries` | Privately archive selected Home Assistant Recorder history for read-only SQL in chat |
 | `raw-files` | Expose source files to a trusted reverse proxy |
 
 See [configuration](docs/configuration.md),
@@ -227,7 +233,7 @@ and `roadmap:post-1.0` identifies the uncommitted post-1.0 backlog.
 
 ## Development
 
-CI builds AMD64 images with per-image GitHub Actions BuildKit caches. Six
+CI builds AMD64 images with per-image GitHub Actions BuildKit caches. Seven
 integration suites run in isolated parallel jobs; the `Compose integration`
 check aggregates their results for branch protection. Unit tests, lint and image
 builds run alongside them. On `main`, only after all gates pass, the reusable
@@ -257,6 +263,7 @@ sh tests/integration/analysis-images.sh  # installed PNG/SVG renderer, offline, 
 sh tests/integration/chat.sh  # authentication, discovery, native SSE and restart persistence
 sh tests/integration/batch-ingest.sh  # synthetic model, private drafts, context stops, permissions and commits
 sh tests/integration/runtime-write-isolation.sh  # pinned-runtime proof of the reader boundary
+sh tests/integration/timeseries.sh  # synthetic Recorder, offline SQL and two turns in the same session
 tests/integration/run.sh  # requires Docker; disposable Compose stack test
 sh tests/integration/email.sh  # synthetic TLS IMAP, archive-before-delete, restart, replay
 sh tests/integration/launcher-backup.sh  # real Compose update snapshots and delayed rollback

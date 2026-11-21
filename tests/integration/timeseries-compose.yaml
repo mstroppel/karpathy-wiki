@@ -1,0 +1,23 @@
+services:
+  init:
+    image: ${TIMESERIES_TEST_IMAGE}
+  opencode:
+    image: ${TIMESERIES_TEST_IMAGE}
+    environment:
+      FAKE_API_KEY: synthetic-model
+    volumes:
+      - ${TIMESERIES_FIXTURE}:/fixture.py:ro
+  timeseries-import:
+    image: ${TIMESERIES_TEST_IMAGE}
+  timeseries-query:
+    image: ${TIMESERIES_TEST_IMAGE}
+  fixture:
+    image: ${TIMESERIES_TEST_IMAGE}
+    entrypoint: ["python3", "/fixture.py", "fixture"]
+    volumes:
+      - ${TIMESERIES_FIXTURE}:/fixture.py:ro
+    read_only: true
+    cap_drop: [ALL]
+networks:
+  default:
+    internal: true

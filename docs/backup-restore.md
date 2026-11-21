@@ -52,6 +52,8 @@ their software separately.
 An optional dependency (`required: false`) does not enable a disabled service;
 its edge may remain in the resolved model even when that service is absent.
 Configuration/data/file secrets remain fully covered, including disabled profiles.
+The [time-series archive](timeseries.md) is included; its transient SQL socket
+is not saved and is recreated by the query service on startup.
 Rescue snapshots retain all locally available declared images and all existing
 container images, including partially updated software; they do not invent images
 for never-installed services. Restore loads saved image IDs and retags them before
