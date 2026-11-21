@@ -20,8 +20,9 @@ a separate integration.
 3. Create `entities.json` next to the installation's `.env` as a JSON list of
    actual Home Assistant `entity_id` strings. To use another file, set
    `HOME_ASSISTANT_ENTITIES_FILE` in `.env` (relative paths resolve from the
-   installation directory). The file must exist before starting the importer
-   and be readable by the installation's `PUID`/`PGID`. For example:
+   installation directory). Create or copy the file before starting the importer.
+   Keep it private, for example with mode `0600` and the installation's `PUID`
+   as the owner. Example entity list:
 
    ```json
    ["sensor.owlet_sleep_state", "sensor.room_temperature"]

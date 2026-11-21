@@ -38,9 +38,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The Home Assistant `timeseries` entity allowlist now defaults to `entities.json`
   next to `.env`; `HOME_ASSISTANT_ENTITIES_FILE` can override the path. Before
   updating an installation using `timeseries`, copy
-  `${DATA_ROOT}/timeseries/config/entities.json` to the new location and make it
-  readable by `PUID`/`PGID`. Keep the original for rollback: the new release
-  does not read the old path. The archive and import progress stay in place.
+  `${DATA_ROOT}/timeseries/config/entities.json` to the new location and keep it
+  private and readable by `PUID` (for example, mode `0600` owned by `PUID`).
+  Keep the original for rollback: the new release does not read the old path.
+  The archive and import progress stay in place.
 
 - Update OpenChamber from 2.6.1 to 2.7.2, including upstream folder-trust
   security fixes. No data-layout changes or automatic deployment are included.
