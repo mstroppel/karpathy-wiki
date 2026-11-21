@@ -76,7 +76,7 @@ class PipelineTests(unittest.TestCase):
             self.assertNotIn("setup-qemu", workflow)
             self.assertNotIn("linux/arm64", workflow)
 
-    def test_all_six_integration_suites_run_independently_and_gate_release(self):
+    def test_integration_suites_run_independently_and_gate_release(self):
         ci = (ROOT / ".github/workflows/ci.yml").read_text()
         integration = ci.split("  integration:\n", 1)[1].split("  integration-gate:", 1)[0]
         self.assertNotIn("needs:", integration)
@@ -88,6 +88,7 @@ class PipelineTests(unittest.TestCase):
             "chat",
             "batch-ingest",
             "runtime-write-isolation",
+            "timeseries",
         ):
             self.assertIn(f"script: tests/integration/{suite}.sh", integration)
         gate = ci.split("  integration-gate:", 1)[1].split("  images:", 1)[0]

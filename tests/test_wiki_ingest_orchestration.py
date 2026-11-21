@@ -199,7 +199,7 @@ class BatchWorkflowTests(unittest.TestCase):
         self.assertRegex(text, r"requires\s+`source_sha256`")
 
     def test_only_one_ingest_implementation_is_shipped(self):
-        plugins = {path.name for path in (ROOT / "config/plugins").glob("*.js")}
+        plugins = {path.name for path in (ROOT / "config/plugins").glob("wiki-ingest*.js")}
         self.assertEqual(plugins, {"wiki-ingest-batch.js", "wiki-ingest-status.js"})
         compose = (ROOT / "compose.yaml").read_text()
         self.assertNotIn("  publisher:", compose)

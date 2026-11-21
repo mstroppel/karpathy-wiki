@@ -271,6 +271,47 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  timeseries-import:
+    image: ghcr.io/mstroppel/karpathy-wiki-opencode:${KARPATHY_WIKI_VERSION:-latest}
+    profiles: ["timeseries"]
+    user: "${PUID:-1000}:${PGID:-1000}"
+    init: true
+    entrypoint: ["python3", "/usr/local/lib/karpathy-wiki/timeseries_import.py"]
+    command: ["poll"]
+    restart: unless-stopped
+    environment:
+      HOME_ASSISTANT_URL: ${HOME_ASSISTANT_URL:-}
+    volumes:
+      - ${DATA_ROOT:-./data}/timeseries/archive:/archive:rw
+      - ${DATA_ROOT:-./data}/timeseries/config:/etc/wiki-timeseries:ro
+    secrets:
+      - home_assistant_token
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+
+  timeseries-query:
+    image: ghcr.io/mstroppel/karpathy-wiki-opencode:${KARPATHY_WIKI_VERSION:-latest}
+    profiles: ["timeseries"]
+    user: "${PUID:-1000}:${PGID:-1000}"
+    entrypoint: ["python3", "/usr/local/lib/karpathy-wiki/timeseries_query.py"]
+    restart: unless-stopped
+    network_mode: none
+    volumes:
+      - ${DATA_ROOT:-./data}/timeseries/archive:/archive:ro
+      - ${DATA_ROOT:-./data}/timeseries/socket:/timeseries-socket:rw
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+
   opencode:
     image: ghcr.io/mstroppel/karpathy-wiki-opencode:${KARPATHY_WIKI_VERSION:-latest}
     user: "${PUID:-1000}:${PGID:-1000}"
@@ -287,6 +328,7 @@ services:
       OPENCODE_DISABLE_EXTERNAL_SKILLS: "1"
       OPENCODE_DISABLE_CLAUDE_CODE_SKILLS: "1"
       WIKI_RUNTIME_READ_ONLY: ${WIKI_RUNTIME_READ_ONLY:-false}
+      WIKI_TIMESERIES_PROFILES: ${COMPOSE_PROFILES:-}
       GIT_CONFIG_COUNT: "1"
       GIT_CONFIG_KEY_0: core.hooksPath
       GIT_CONFIG_VALUE_0: /dev/null
@@ -307,6 +349,7 @@ services:
       - ${DATA_ROOT:-./data}/opencode/config:/home/opencode/.config/opencode:rw
       - ${DATA_ROOT:-./data}/opencode/data:/home/opencode/.local/share/opencode:rw
       - ${DATA_ROOT:-./data}/opencode/state:/home/opencode/.local/state:rw
+      - ${DATA_ROOT:-./data}/timeseries/socket:/timeseries-socket:ro
     depends_on:
       init:
         condition: service_completed_successfully
@@ -416,6 +459,8 @@ services:
       - no-new-privileges:true
 
 secrets:
+  home_assistant_token:
+    file: ${HOME_ASSISTANT_TOKEN_FILE:-./secrets/home-assistant-token}
   paperless_token:
     file: ${PAPERLESS_TOKEN_FILE:-./secrets/paperless-token}
   redactions:

@@ -66,6 +66,9 @@ mkdir -p "$sources/webdav" \
   "$KNOWLEDGE_ROOT/incoming/webdav" \
   "$KNOWLEDGE_ROOT/incoming/answers" \
   "$KNOWLEDGE_ROOT/state" \
+  "$KNOWLEDGE_ROOT/timeseries/archive" \
+  "$KNOWLEDGE_ROOT/timeseries/config" \
+  "$KNOWLEDGE_ROOT/timeseries/socket" \
   "$KNOWLEDGE_ROOT/incoming/ingest-journal/batches" \
   "$wiki/assets" \
   "$wiki/sources/webdav" \
@@ -96,6 +99,8 @@ chown -R "$PUID:$PGID" "$KNOWLEDGE_ROOT"
 # the configured user, including when init is rerun on an existing data tree.
 chmod 0700 "$KNOWLEDGE_ROOT/incoming/answers"
 chmod 0700 "$KNOWLEDGE_ROOT/openchamber"
+chmod 0700 "$KNOWLEDGE_ROOT/timeseries" "$KNOWLEDGE_ROOT/timeseries/archive" \
+  "$KNOWLEDGE_ROOT/timeseries/config" "$KNOWLEDGE_ROOT/timeseries/socket"
 # Ingest journal and reports hold source-derived summaries of processed
 # sources. They are private to OpenCode and its operator, never published.
 chmod 0700 "$KNOWLEDGE_ROOT/incoming/ingest-journal"

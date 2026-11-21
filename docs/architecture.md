@@ -41,6 +41,11 @@ OpenCode, SilverBullet or `raw-files`. Offline replay uses the private archive
 without contacting IMAP; wiki ingestion still requires explicit `/ingest-new`.
 See [email ingestion](email.md) for trust, deletion and retention boundaries.
 
+The opt-in [time-series profile](timeseries.md) is separate from Markdown
+ingestion: Home Assistant Recorder → importer → private SQLite archive →
+networkless read-only SQL service → Unix socket → OpenCode. Only the importer
+receives the HA token. Query results enter chat/model context, not the wiki.
+
 OpenChamber exposes the private OpenCode backend's sessions and wiki commands;
 sessions are not exported to SilverBullet. The frontend has a separate private
 settings directory, a read-only wiki mount and read-only ingest reports.

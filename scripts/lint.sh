@@ -49,6 +49,7 @@ done
 # Shipped JavaScript and the full Compose configuration.
 node --check config/plugins/wiki-ingest-status.js
 node --check config/plugins/wiki-ingest-batch.js
+node --check config/plugins/wiki-timeseries.js
 node --check config/tools/wiki_ingest_batch_core.mjs
 node --check config/tools/wiki_ingest_batch_worker.mjs
 node --check config/tools/wiki_ingest_status_core.mjs

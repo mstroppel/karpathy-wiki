@@ -30,6 +30,7 @@ CONTAINER_LINKS = {
             "wiki-ingest-journal",
             "wiki-ingest-status",
             "wiki-ingest-transaction",
+            "wiki-timeseries",
         )
     },
 }
@@ -327,6 +328,15 @@ class Instance:
             if any(item["State"]["Running"] for item in states):
                 raise BackupError("not all instance writers stopped")
 
+    def transient_socket(self):
+        # The SQL service recreates its IPC endpoint at startup. Never omit
+        # a regular file (or follow a symlink) at this reserved location.
+        endpoint = self.data / "timeseries/socket/query.sock"
+        try:
+            return endpoint if stat.S_ISSOCK(endpoint.lstat().st_mode) else None
+        except FileNotFoundError:
+            return None
+
     def start(self):
         with phase("startup and health verification (Compose up --wait)"):
             self.call(
@@ -411,6 +421,11 @@ class Instance:
                 for root, directories, files in os.walk(path):
                     for name in directories + files:
                         entry = Path(root) / name
+                        if (
+                            entry == self.data / "timeseries/socket/query.sock"
+                            and self.transient_socket()
+                        ):
+                            continue
                         check_file_metadata(entry)
                         if entry.is_symlink():
                             relative = (
@@ -655,6 +670,7 @@ def snapshot(instance, kind, *, backup_images=True):
 def archive_snapshot(instance, kind, images, now, identifier, temporary, *, backup_images, digests):
     # Writers may have changed entries after the running-state preflight.
     paths = instance.paths()
+    endpoint = instance.transient_socket()
     run(
         [
             "tar",
@@ -664,6 +680,11 @@ def archive_snapshot(instance, kind, images, now, identifier, temporary, *, back
             "--acls",
             "--xattrs",
             "--numeric-owner",
+            *(
+                ["--anchored", "--no-wildcards", f"--exclude={str(endpoint).lstrip('/')}"]
+                if endpoint
+                else []
+            ),
             "--directory",
             "/",
             "--",

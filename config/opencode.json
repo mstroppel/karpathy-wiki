@@ -446,6 +446,11 @@
       "effect": "allow"
     },
     {
+      "action": "wiki_timeseries_sql",
+      "resource": "*",
+      "effect": "allow"
+    },
+    {
       "action": "wiki_ingest_diagnostics",
       "resource": "*",
       "effect": "allow"

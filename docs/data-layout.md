@@ -35,6 +35,10 @@ ${DATA_ROOT}/
 ├── state/
 │   ├── ingest.sqlite3      # Durable ingest jobs, leases, generations, publications
 │   └── audio-identity/     # Private WebDAV path → opaque source ID mapping
+├── timeseries/              # Private Home Assistant data (not published Markdown)
+│   ├── config/entities.json # Explicit entity allowlist, if configured
+│   ├── archive/             # SQLite history and import progress
+│   └── socket/              # Recreated SQL endpoint; no data to restore
 ├── quarantine/
 │   ├── webdav/             # Content-free WebDAV error reports
 │   ├── audio/              # Content-free audio error reports
