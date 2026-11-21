@@ -65,13 +65,15 @@ Einreichungsablauf im primären Agenten fort; diese Regel hat Vorrang vor
   Zeitstempel **vor** dem Filtern nach `quality = 'valid'`. Der nächste Zeitstempel
   beendet das Intervall auch bei einem unbekannten oder widersprüchlichen Wert.
   Zähle Zustände ohne weiteres Intervallende nicht als Abdeckung. Messwerte
-  halte nur bis zum nächsten Eintrag und höchstens für eine ausdrücklich gewählte Dauer; nenne
-  diese Annahme oder frage nach, wenn keine begründete Dauer vorliegt. Schneide
+  halte nur bis zum nächsten Eintrag und höchstens für eine ausdrücklich gewählte
+  Dauer; nenne diese Annahme oder frage nach, wenn keine begründete Dauer vorliegt. Schneide
   Intervalle auf den Auswertungszeitraum zu und schneide bei gemeinsamer
   Abdeckung die gültigen Intervalle aller betroffenen Reihen miteinander.
   Erkläre Zeitraum und Zeitzone, Methode, Abdeckung und Importstand im Text oder
-  als Tabelle. Weise auf Lücken, nicht erkennbare Recorder-Ausfälle und gekürzte
-  Ergebnisse hin. Speichere nur auf ausdrücklichen Wunsch über `/analysis-save`.
+  als Tabelle. Weise in jeder Antwort zur Zeitabdeckung darauf hin: Aus Zeit
+  ohne Recorder-Einträge lässt sich ein stummer Ausfall nicht von einem stabilen
+  Zustand unterscheiden. Kennzeichne erkannte Lücken und gekürzte Ergebnisse.
+  Speichere nur auf ausdrücklichen Wunsch über `/analysis-save`.
 - **Wissenschaftliche Analyse** nur bei einer ausdrücklich wissenschaftlichen
   Analyse oder Recherche, insbesondere zur Studien- oder Evidenzlage. Übergib
   nur die konkrete Frage an `wiki-analysis`.

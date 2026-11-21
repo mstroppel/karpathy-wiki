@@ -51,8 +51,8 @@ class ResponseTooLarge(ValueError):
 
 
 class SeriesState(NamedTuple):
-    through: datetime
-    display: str
+    imported_through: datetime
+    display_name: str
     description: str
     unit: str | None
     kind: str
@@ -208,7 +208,10 @@ def store_window(
     latest = max(points, key=lambda row: parse_timestamp(row["last_updated"]), default=None)
     meta = current if current is not None else latest.get("attributes", {}) if latest else None
     if meta is None:
-        display, description, unit, kind = old[1:] if old else (entity, "", None, "state")
+        display = old.display_name if old else entity
+        description = old.description if old else ""
+        unit = old.unit if old else None
+        kind = old.kind if old else "state"
     else:
         display = text(meta, "friendly_name") or entity
         description = text(meta, "description") or ""
@@ -244,7 +247,7 @@ def store_window(
             yield series_id, epoch_us(stamp), iso(stamp), value, quality, raw, sample_unit, key
 
     # During a split backfill, a chunk can cover only part of the overlap.
-    cutoff = max(old.through, end) if old else end
+    cutoff = max(old.imported_through, end) if old else end
     with db:
         db.execute(
             """
@@ -282,9 +285,9 @@ def import_once(archive: Path, config: Path, base: str, token: str, *, through: 
                 ).fetchone()
                 old = SeriesState(parse_timestamp(previous[0]), *previous[1:]) if previous else None
                 if old:
-                    if through <= old.through:
+                    if through <= old.imported_through:
                         continue
-                    start = max(start, old.through - OVERLAP)
+                    start = max(start, old.imported_through - OVERLAP)
                 current = ha.metadata(entity)
                 for end, points in ha.windows(entity, start, through):
                     old = store_window(db, entity, current, old, end, points)

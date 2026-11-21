@@ -15,6 +15,9 @@ SLEEP = "sensor.synthetic_owlet"
 TEMP = "sensor.synthetic_room_temperature"
 QUESTION = "Wie verteilt sich die Raumtemperatur während der von Owlet erkannten Tiefschlafphasen?"
 FOLLOW_UP = "Zeig nur Nächte mit mindestens zwei Stunden gemeinsamer Datenabdeckung."
+RECORDER_CAVEAT = (
+    "Ein stummer Recorder-Ausfall ist ohne Einträge nicht vom stabilen Zustand unterscheidbar."
+)
 TITLES = ["Synthetischer Schlafzustand", "Synthetische Raumtemperatur"]
 NIGHTS = ["2026-10-01", "2026-10-02"]
 SLEEP_ROWS = [
@@ -85,6 +88,12 @@ def complete(body):
     if not tool_names:  # Session title generation is not a question.
         return {"role": "assistant", "content": "Synthetische Zeitreihen"}, "stop"
     assert "wiki_timeseries_sql" in tool_names, sorted(tool_names)
+    system_text = " ".join(
+        json.dumps([item for item in messages if item["role"] == "system"], ensure_ascii=False)
+        .replace("\\n", " ")
+        .split()
+    )
+    assert "Aus Zeit ohne Recorder-Einträge lässt sich ein stummer Ausfall nicht" in system_text
     index, question = [
         (index, question)
         for index, item in enumerate(messages)
@@ -119,7 +128,7 @@ def complete(body):
         data_as_of = min(row[2] for row in catalog["rows"])
         report = (
             f"{rows}. {suffix} Zeitraum: 01.–02.10. UTC; Methode: 30 min Haltedauer, Schnittmenge."
-            f" Datenstand: {data_as_of}."
+            f" Datenstand: {data_as_of}. {RECORDER_CAVEAT}"
         )
         return {"role": "assistant", "content": report}, "stop"
     return {
@@ -229,7 +238,13 @@ def chat():
         api(f"/api/experimental/session/{sid}/wait", {})
         transcript = api(f"/api/experimental/session/{sid}/export")
         assert api(f"/api/session/{sid}")["data"]["outcome"] == "succeeded", transcript
-        assert expected in json.dumps(transcript, ensure_ascii=False), transcript
+        texts = (
+            part.get("text", "")
+            for message in transcript["data"]["messages"]
+            for part in message.get("content", [])
+            if part.get("type") == "text"
+        )
+        assert any(expected in text and RECORDER_CAVEAT in text for text in texts), transcript
 
 
 if __name__ == "__main__":
