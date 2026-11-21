@@ -52,8 +52,9 @@ their software separately.
 An optional dependency (`required: false`) does not enable a disabled service;
 its edge may remain in the resolved model even when that service is absent.
 Configuration/data/file secrets remain fully covered, including disabled profiles.
-The [time-series archive](timeseries.md) is included; its transient SQL socket
-is not saved and is recreated by the query service on startup.
+The [time-series archive and entity list](timeseries.md) are included when
+present; the transient SQL socket is not saved and is recreated by the query
+service on startup.
 Rescue snapshots retain all locally available declared images and all existing
 container images, including partially updated software; they do not invent images
 for never-installed services. Restore loads saved image IDs and retags them before
@@ -288,9 +289,11 @@ updating container images alone cannot fix the host's backup helper.
 3. Separately save the installation's `.env`, `karpathy-wiki.sh`, any
    `compose.override.yaml`, and every secret file referenced by `.env`
    (including `REDACTIONS_FILE` and `PAPERLESS_TOKEN_FILE` if configured).
-   Secrets may be outside `DATA_ROOT`. Store the archives and configuration
-   together in access-controlled, encrypted storage. Record the pinned release
-   and any reverse-proxy configuration needed to restore the routes.
+   Also save the Home Assistant entity list if present (`entities.json` next to
+   `.env`, or the file set by `HOME_ASSISTANT_ENTITIES_FILE`). Store the archives
+   and configuration together in access-controlled, encrypted storage. Record
+   the pinned release and any reverse-proxy configuration needed to restore
+   the routes.
 
 4. Start the same version again with `./karpathy-wiki.sh up -d`. Check service
    health and the wiki before resuming ingestion.
@@ -301,10 +304,12 @@ Use a separate installation directory, `DATA_ROOT`, project name, stack ID,
 and proxy network so a restore cannot affect the live instance. Do not point
 the restored providers at live upstream sources while testing. Stop the test
 stack before extracting; extract the archived data root into an empty directory
-and restore `.env`, the launcher, overrides, and secret files. Update the
-restored `.env` to refer to the test directories and identity, retain its
-original `KARPATHY_WIKI_VERSION`, and set `COMPOSE_PROFILES=` for the initial
-check. Preserve file ownership or set `PUID`/`PGID` to the intended host owner.
+and restore `.env`, the launcher, overrides, secret files, and the entity list
+if backed up. Place the list next to the test `.env` as `entities.json` or point
+`HOME_ASSISTANT_ENTITIES_FILE` to the restored copy. Update the restored `.env`
+to refer to the test directories and identity, retain its original
+`KARPATHY_WIKI_VERSION`, and set `COMPOSE_PROFILES=` for the initial check.
+Preserve file ownership or set `PUID`/`PGID` to the intended host owner.
 
 From the test installation, check the restored repository and Compose
 configuration before starting services:

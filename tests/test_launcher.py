@@ -1455,6 +1455,16 @@ class LauncherTests(unittest.TestCase):
         self.assertTrue(all(str(path).lstrip("/") in names for path in files))
         self.assertNotIn("synthetic private content", result.stdout + result.stderr)
 
+    def test_timeseries_default_entity_list_is_saved_with_profile_disabled(self):
+        self.write_env("KARPATHY_WIKI_VERSION=0.0.1\nCOMPOSE_PROFILES=\n")
+        entities = self.project / "entities.json"
+        entities.write_text('["sensor.synthetic_temperature"]\n')
+        result = self.run_launcher("update", "1.2.3")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        metadata = self.snapshot_metadata()[0]
+        with tarfile.open(self.project / "backups" / metadata["id"] / "snapshot.tar") as archive:
+            self.assertIn(str(entities).lstrip("/"), archive.getnames())
+
     def test_actual_other_installation_cannot_list_or_rollback_shared_backups(self):
         self.write_env("KARPATHY_WIKI_VERSION=0.0.1\n")
         self.assertEqual(self.run_launcher("update", "1.2.3").returncode, 0)

@@ -397,6 +397,13 @@ class Instance:
         for key, value in self.values.items():
             if key.endswith("_FILE") and value and key != "COMPOSE_FILE":
                 paths.add(self.path(value))
+        # The optional default allowlist is outside DATA_ROOT and has no
+        # resolved bind mount when the timeseries profile is disabled.
+        default_entities = self.project / "entities.json"
+        if not self.values.get("HOME_ASSISTANT_ENTITIES_FILE") and (
+            default_entities.exists() or default_entities.is_symlink()
+        ):
+            paths.add(default_entities)
         for path in paths:
             if not path.exists():
                 raise BackupError("a required snapshot path is missing")
