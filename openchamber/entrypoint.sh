@@ -7,5 +7,5 @@ set -eu
 
 node /etc/openchamber/bootstrap.mjs
 # Direct foreground server: no CLI daemon, in-app restart manager, or SSH setup.
-exec node /opt/chat/node_modules/@openchamber/web/server/index.js \
+exec node /opt/chat/node_modules/@openchamber/web/build/server/index.js \
   --host 0.0.0.0 --port 3000 "$@"
