@@ -70,6 +70,7 @@ COPY --from=opencode /usr/local/bin/opencode /usr/local/bin/opencode
 COPY openchamber/bootstrap.mjs openchamber/healthcheck.mjs /etc/openchamber/
 COPY openchamber/entrypoint.sh /usr/local/bin/karpathy-wiki-chat
 RUN chmod 0755 /usr/local/bin/karpathy-wiki-chat \
+    && test -f /opt/chat/node_modules/@openchamber/web/build/server/index.js \
     && install -d -o 1000 -g 1000 /home/openchamber/.config/openchamber /knowledge/wiki
 ENV HOME=/home/openchamber NODE_ENV=production OPENCHAMBER_DATA_DIR=/home/openchamber/.config/openchamber
 USER 1000:1000
